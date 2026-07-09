@@ -59,7 +59,7 @@ No adjectives.
 
 1. Order the fix queue: high severity first; within a severity, correctness >
    test-coverage > simplification > consistency.
-2. For each confirmed finding, dispatch loop-builder with the finding verbatim
+2. For each finding in the fix queue, dispatch loop-builder with the finding verbatim
    (file:line, defect, failure scenario). Batch only trivially independent
    low-severity items. Builder rules apply (root cause, no drive-by changes,
    commit per fix).
@@ -78,7 +78,7 @@ No adjectives.
 
 ## Stop rules
 
-- Dry round (0 fresh confirmed findings) → converged, normal end.
+- Dry round (no fresh queued findings) → converged, normal end.
 - 3 macro rounds exhausted → stop, report what remains in the queue.
 - Regression that cannot be reverted cleanly → stop immediately, report.
 - Any finding whose fix would change public API/contract, schema, or behavior
