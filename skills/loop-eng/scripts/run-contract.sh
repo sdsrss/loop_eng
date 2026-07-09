@@ -37,7 +37,10 @@ TMP="$RESULTS.tmp.$$"
     [ -z "${cmd:-}" ] && continue # malformed line: fewer than 3 columns
     log="$EVID/$id.log"
     status=0
-    bash -c "$cmd" > "$log" 2>&1 || status=$?
+    # </dev/null: without it, a stdin-reading criterion command would consume
+    # the remaining criteria lines from the while-read loop (dropped criteria,
+    # possibly a false all_green)
+    bash -c "$cmd" > "$log" 2>&1 </dev/null || status=$?
     if [ "$status" -eq 0 ]; then pass=true; else pass=false; overall=1; fi
     [ "$first" -eq 0 ] && printf ',\n'
     first=0

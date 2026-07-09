@@ -26,6 +26,12 @@ printf '# comment line\n\n1\tsays "hi"\ttrue\n' > .loop/criteria.tsv
 bash "$RUNNER"; assert_eq 0 $? "comments ignored, exit 0"
 assert_file_contains .loop/results.json '\"hi\"' "quotes JSON-escaped"
 
+# --- stdin-reading criterion must not swallow later criteria lines ---
+printf '1\treads stdin\tcat\n2\tstill runs\techo second-ran\n' > .loop/criteria.tsv
+bash "$RUNNER"; assert_eq 0 $? "stdin-reading criterion exits 0"
+assert_file_contains .loop/results.json '"id": "2"' "criterion after stdin-reader still executed"
+assert_file_contains .loop/evidence/2.log 'second-ran' "later criterion produced evidence"
+
 # --- missing criteria.tsv ---
 rm .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 78 $? "missing criteria exit 78"
