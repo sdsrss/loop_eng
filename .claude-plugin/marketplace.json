@@ -1,0 +1,19 @@
+{
+  "name": "loop-eng",
+  "owner": {
+    "name": "sds"
+  },
+  "metadata": {
+    "description": "Loop Engineering plugin marketplace",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "loop-eng",
+      "source": "./",
+      "description": "Closed-loop task execution (/autoloop) and quality polishing (/polish) with mechanism-layer stop enforcement",
+      "version": "0.1.0",
+      "category": "development"
+    }
+  ]
+}

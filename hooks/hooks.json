@@ -1,0 +1,17 @@
+{
+  "description": "loop-eng stop-gate: while .loop/active exists, block session stop until the loop contract's verify script passes (hard ceiling: 3 blocks). NOTE: if plugin hooks.json auto-loading does not fire in your Claude Code version, register this hook manually in settings.json — see README.",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-gate.sh\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

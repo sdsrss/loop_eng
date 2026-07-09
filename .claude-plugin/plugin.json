@@ -1,0 +1,10 @@
+{
+  "name": "loop-eng",
+  "version": "0.1.0",
+  "description": "Loop Engineering for Claude Code: /autoloop drives bounded tasks to completion via a builder/checker cycle with six stop rules; /polish iteratively raises code quality via multi-lens review, adversarial verification, and dry-round convergence. A Stop hook mechanically prevents quitting while a loop contract is unsatisfied.",
+  "author": {
+    "name": "sds"
+  },
+  "license": "MIT",
+  "keywords": ["claude-code", "loop-engineering", "automation", "code-quality"]
+}

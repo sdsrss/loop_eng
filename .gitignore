@@ -1,0 +1,17 @@
+# Local Claude Code working config — dev copies of the plugin (repo root is canonical)
+.claude/
+CLAUDE.md
+
+# Research corpus (third-party articles, not distributable)
+docs/
+
+# Internal planning notes
+LOOP_SKILL_PLAN.md
+
+# Loop runtime state and logs
+.loop/
+*.log
+
+# Tooling caches
+.code-graph/
+node_modules/
