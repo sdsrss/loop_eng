@@ -21,12 +21,24 @@ Must NOT change:
 
 ## Verify commands
 
-Fast subset (rounds 1..N-1):
+Fast subset (rounds 1..N-1) — these become `.loop/criteria.tsv`
+(TAB-separated: `id<TAB>description<TAB>command`; machine-run by the
+stop-gate, results land in `.loop/results.json` + `.loop/evidence/`):
+
 ```
-<command>
+1	All tests pass	npm test
+2	Types check	npx tsc --noEmit
 ```
 
 Full suite (final round):
 ```
 <command>
+```
+
+Optional live-app criterion (only when the project already has an e2e
+runner and a way to serve the app — verification that drives the running
+application catches what unit tests and curl miss):
+
+```
+3	Checkout flow works end-to-end	npx playwright test e2e/checkout.spec.ts
 ```

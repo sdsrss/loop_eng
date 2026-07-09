@@ -20,6 +20,9 @@ Do not assume commands. In this order:
    - format: `prettier --check` / `cargo fmt --check`
 3. If the project has an aggregate command (e.g. `pnpm check`), prefer it.
 4. If extra checks exist (dep guards, deadcode scan, security scan), run them too.
+5. If `.loop/results.json` exists, read it (and the logs under
+   `.loop/evidence/`) as the latest machine-run contract state — cite it,
+   never write it. Your own runs remain authoritative for this round.
 
 ## Execute
 

@@ -31,13 +31,28 @@ If the task is large (more than ~3 independent deliverables), also create
 `.loop/backlog.md`: one line per independently verifiable feature, priority
 ordered. Each loop round takes exactly ONE backlog item.
 
-Arm the stop-gate (mechanism-layer enforcement, if `.claude/hooks/stop-gate.sh`
-exists in this project):
-- Write `.loop/verify.sh`: the contract's fast verify commands as a plain bash
-  script that exits non-zero on any failure.
+Backlog lines use checkbox syntax: `- [ ] <item>` pending, `- [x] <item>`
+done. When a backlog item's round ends ALL GREEN, mark its line `- [x]` —
+the unattended cross-session driver consumes this file and stops when no
+`- [ ]` lines remain.
+
+Arm the stop-gate (mechanism-layer enforcement, if the loop-eng hooks are
+loaded in this project):
+- Write `.loop/criteria.tsv`: one line per acceptance criterion,
+  TAB-separated: `<id>	<description>	<verify command>`. Use the contract's
+  fast verify commands. This file is written ONCE — the evidence-gate hook
+  denies any later rewrite, because weakening a check to pass it is a red
+  line. If the contract legitimately changes, a HUMAN clears it with
+  `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
 - `touch .loop/active` and remove any stale `.loop/gate-count`.
-While `.loop/active` exists, the Stop hook re-runs `verify.sh` on every stop
-attempt and blocks premature quitting (up to a hard ceiling of 3 blocks).
+While `.loop/active` exists, the Stop hook executes the criteria via the
+plugin's run-contract.sh on every stop attempt and blocks premature quitting
+(up to a hard ceiling of 3 blocks). Each run machine-writes
+`.loop/results.json` and `.loop/evidence/<id>.log` — those two are the
+evidence ledger: read them freely, never write them (the evidence-gate hook
+denies it anyway).
+(Legacy note: pre-0.2 loops used `.loop/verify.sh`; the stop-gate still
+falls back to it when criteria.tsv is absent.)
 
 ## The loop
 
@@ -46,6 +61,8 @@ attempt and blocks premature quitting (up to a hard ceiling of 3 blocks).
 2. Dispatch loop-checker to run all checks.
 3. If the checker's report starts with `ALL GREEN`: stop. Show me the full diff
    (`git diff` against the pre-loop commit) and each check's proof line.
+   Cite `.loop/results.json` (`all_green: true`) as the machine proof, and the
+   per-criterion evidence files under `.loop/evidence/`.
 4. If it starts with `FAILED`: forward the checker's COMPLETE report to the
    builder verbatim. Do not summarize, interpret, or filter it — paraphrasing
    loses line numbers and stack traces.
@@ -100,7 +117,8 @@ After the loop ends (any outcome):
 - Disarm the stop-gate: remove `.loop/active` and `.loop/gate-count`.
   (On ALL GREEN the gate lifts itself, but remove defensively.) An escalation
   stop is a legitimate end — never leave the gate armed behind you.
-- Append one entry to `.loop/lessons.md`: date, task, rounds used, outcome,
-  and one reusable lesson if any. If a memory system is available (e.g.
+- Append one line to `.loop/lessons.md` in the fixed format:
+  `- <YYYY-MM-DD> | <task one-liner> | rounds <n> | <ALL GREEN|stop-rule-N> | <one reusable lesson, or "-">`
+  If a memory system is available (e.g.
   mem_save or an equivalent CLI), also save the lesson there — lessons that
   only live in one repo don't compound.
