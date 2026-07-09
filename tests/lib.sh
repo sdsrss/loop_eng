@@ -17,8 +17,9 @@ mk_sandbox_repo() {
     git init -q
     git config user.email test@loop-eng.local
     git config user.name loop-eng-test
+    printf '.loop/\n*.log\n' > .gitignore   # mirror the real repo: .loop/ bookkeeping is not tracked
     echo "sandbox" > README.md
-    git add README.md
+    git add .gitignore README.md
     git commit -qm "initial"
   ) >/dev/null
   echo "$sb"
