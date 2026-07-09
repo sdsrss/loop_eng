@@ -1,5 +1,5 @@
 {
-  "description": "loop-eng stop-gate: while .loop/active exists, block session stop until the loop contract's verify script passes (hard ceiling: 3 blocks). NOTE: if plugin hooks.json auto-loading does not fire in your Claude Code version, register this hook manually in settings.json — see README.",
+  "description": "loop-eng hooks. Stop: while .loop/active exists, block session stop until the loop contract passes (hard ceiling: 3 blocks; the platform force-allows after 8). PreToolUse: deny model writes to the machine-written evidence ledger (.loop/results.json, .loop/evidence/, armed criteria.tsv); escape hatch LOOP_ENG_DISABLE_EVIDENCE_GATE=1. NOTE: if plugin hooks.json auto-loading does not fire in your Claude Code version, register these hooks manually in settings.json — see README.",
   "hooks": {
     "Stop": [
       {
@@ -9,6 +9,18 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-gate.sh\"",
             "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/evidence-gate.sh\"",
+            "timeout": 30
           }
         ]
       }
