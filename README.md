@@ -105,6 +105,11 @@ in your project's `.claude/settings.json`:
     "Stop": [
       { "hooks": [ { "type": "command",
         "command": "bash \"<plugin-root>/hooks/stop-gate.sh\"" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [ { "type": "command",
+          "command": "bash \"<plugin-root>/hooks/evidence-gate.sh\"" } ] }
     ]
   }
 }
