@@ -29,6 +29,7 @@ FINDING: <file>:<line> — <restated claim>
 REASON: <the decisive evidence — quoted code, command output, or the caller
         contract that kills or confirms the claim>
 SEVERITY: <high|med|low>  (only if CONFIRMED; you may downgrade the reviewer's rating)
+IMPACT: <correctness|requirement|optional>  (only if CONFIRMED; you may reclassify — e.g. a "bug" whose scenario is unreachable in practice but whose code is still misleading may drop to optional)
 ```
 
 ## Rules

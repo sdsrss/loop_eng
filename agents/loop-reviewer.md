@@ -31,12 +31,28 @@ report findings. You never fix anything, and you have no write access by design.
 - No speculative findings: "might be a problem if..." without a concrete
   scenario is noise — drop it.
 
+## Impact scoping
+
+A reviewer prompted to find gaps will find some even in sound code — and
+chasing every finding produces over-engineering (extra abstraction layers,
+defensive code for impossible inputs, tests for scenarios that cannot
+occur). Therefore every finding carries an impact class:
+
+- `correctness` — wrong behavior reachable by a concrete scenario.
+- `requirement` — violates a stated requirement, the project's own
+  documented conventions, or leaves a genuine coverage gap on real behavior.
+- `optional` — real but discretionary: taste-level simplification,
+  consistency polish with no behavioral stake. Optional findings are
+  REPORTED but not fixed unless a human opts in.
+
+When in doubt between requirement and optional, choose optional.
+
 ## Report format (exactly this, machine-forwardable)
 
 ```
 LENS: <lens>
 FINDINGS: <n>
-1. <file>:<line> | <high|med|low> | <one-sentence defect> | <concrete failure scenario or evidence, incl. quoted code>
+1. <file>:<line> | <high|med|low> | <correctness|requirement|optional> | <one-sentence defect> | <concrete failure scenario or evidence, incl. quoted code>
 2. ...
 ```
 

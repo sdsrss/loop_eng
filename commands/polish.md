@@ -47,9 +47,13 @@ No adjectives.
    seen file. Dedup against SEEN, not against confirmed — otherwise refuted
    findings resurface every round and the loop never converges.
 3. For each fresh finding, dispatch loop-verifier (one finding per dispatch,
-   parallel). Only `VERDICT: CONFIRMED` findings enter the fix queue.
+   parallel). Only `VERDICT: CONFIRMED` findings with impact `correctness` or
+   `requirement` enter the fix queue. Confirmed `optional` findings go to the
+   report's "Optional (not queued)" list — they are the human's call, not the
+   loop's.
 4. **Dry-round check**: if zero fresh findings were confirmed this round →
-   the loop has converged → go to Wrap-up.
+   the loop has converged → go to Wrap-up (fresh `optional`-only rounds count
+   as dry — optional findings never keep the loop alive).
 
 ## Phase 3 — Fix round
 
@@ -99,7 +103,7 @@ traceability.
 Report:
 1. Baseline vs final numbers table (tests, lint, types, coverage if measured).
 2. Findings ledger: reported / refuted-by-verifier / confirmed / fixed /
-   deferred, each with file:line.
+   deferred / optional-not-queued, each with file:line and impact class.
 3. The full diff (`git diff <baseline-ref>..HEAD`) — polish output is a
    proposal for human review, not an accomplished fact.
 4. Append one entry to `.loop/lessons.md`.
