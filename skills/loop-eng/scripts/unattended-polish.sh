@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # loop-eng unattended polish runner — cron/scheduler entry point.
+# Requires bash >= 4.4 (empty-array expansion under set -u; macOS system bash 3.2 is too old).
 #
 # Discipline built in:
 #   - default is report-only (find + adversarially verify, change nothing):

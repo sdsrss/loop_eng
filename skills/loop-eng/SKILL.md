@@ -33,7 +33,8 @@ BAD fits (do NOT loop these — handle interactively):
 ## Core invariants (all loops)
 
 1. Contract before code: `.loop/contract.md` for humans plus
-   `.loop/criteria.tsv` (binary verify commands, written once) for the machine.
+   `.loop/criteria.tsv` (binary verify commands, fixed while the loop is
+   armed) for the machine.
 2. Maker/checker separation is enforced by tool whitelists, not trust:
    loop-builder can write, loop-checker cannot.
 3. State lives on disk (`.loop/state.md`), not in the context window.

@@ -21,20 +21,34 @@ gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "Write results.
 gate "${W/FILE/$SB/.loop/results.json}";          assert_eq 2 $? "Write abs-path results.json denied"
 gate "${E/FILE/.loop/evidence/1.log}";            assert_eq 2 $? "Edit evidence log denied"
 
-# --- criteria.tsv: first Write allowed, existing denied ---
+# --- criteria.tsv: first Write always allowed (file absent) ---
 gate "${W/FILE/.loop/criteria.tsv}";              assert_eq 0 $? "first Write criteria.tsv allowed"
 printf '1\tx\ttrue\n' > .loop/criteria.tsv
-gate "${W/FILE/.loop/criteria.tsv}";              assert_eq 2 $? "overwrite criteria.tsv denied"
-gate "${E/FILE/.loop/criteria.tsv}";              assert_eq 2 $? "Edit criteria.tsv denied"
+
+# --- criteria.tsv exists but loop NOT armed: next contract may rewrite it ---
+gate "${W/FILE/.loop/criteria.tsv}";              assert_eq 0 $? "rewrite criteria.tsv allowed when not armed"
+gate "${E/FILE/.loop/criteria.tsv}";              assert_eq 0 $? "Edit criteria.tsv allowed when not armed"
+gate "${B/CMD/rm .loop/criteria.tsv}";            assert_eq 0 $? "Bash rm criteria.tsv allowed when not armed"
+
+# --- criteria.tsv exists AND loop armed (.loop/active present): locked ---
+touch .loop/active
+gate "${W/FILE/.loop/criteria.tsv}";              assert_eq 2 $? "overwrite criteria.tsv denied when armed"
+gate "${E/FILE/.loop/criteria.tsv}";              assert_eq 2 $? "Edit criteria.tsv denied when armed"
+gate "${W/FILE/$SB/.loop/criteria.tsv}";          assert_eq 2 $? "abs-path criteria.tsv denied when armed"
+gate "${B/CMD/rm .loop/criteria.tsv}";            assert_eq 2 $? "Bash rm criteria.tsv denied when armed"
+
+# --- results.json/evidence: always denied, armed or not ---
+gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied while armed"
+rm -f .loop/active
+gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied with no active (explicit)"
 
 # --- unrelated paths allowed ---
 gate "${W/FILE/src/app.js}";                      assert_eq 0 $? "unrelated Write allowed"
 gate "${W/FILE/.loop/state.md}";                  assert_eq 0 $? ".loop/state.md Write allowed"
 
-# --- Bash: write-ish operators on protected paths denied, benign allowed ---
+# --- Bash: write-ish operators on always-protected paths denied, benign allowed ---
 gate "${B/CMD/echo done > .loop/results.json}";   assert_eq 2 $? "Bash redirect to results.json denied"
 gate "${B/CMD/sed -i s,false,true, .loop/results.json}"; assert_eq 2 $? "Bash sed -i results.json denied"
-gate "${B/CMD/rm .loop/criteria.tsv}";            assert_eq 2 $? "Bash rm criteria.tsv denied"
 gate "${B/CMD/bash .loop/verify.sh}";             assert_eq 0 $? "running verify.sh allowed"
 gate "${B/CMD/cat .loop/results.json}";           assert_eq 0 $? "reading results.json allowed"
 gate "${B/CMD/git add .loop/results.json}";       assert_eq 0 $? "git add allowed"

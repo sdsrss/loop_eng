@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # loop-eng unattended autoloop driver — cross-session fresh-context orchestration.
+# Requires bash >= 4.4 (empty-array expansion under set -u; macOS system bash 3.2 is too old).
 #
 # Pattern (Anthropic, effective-harnesses-for-long-running-agents): one backlog
 # item per FRESH session — context compaction is not a recovery strategy —

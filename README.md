@@ -35,8 +35,9 @@ contract (binary acceptance criteria, verify commands)
   Any non-green stop escalates with what was tried and why more rounds won't help.
 - State lives in `.loop/state.md` and per-round git commits — the loop survives
   context compaction and session restarts.
-- The contract's checks live in `.loop/criteria.tsv` (written once, then the
-  evidence-gate hook denies rewrites). Every stop attempt machine-writes
+- The contract's checks live in `.loop/criteria.tsv` (written at contract
+  time; the evidence-gate hook denies rewrites while the loop is armed).
+  Every stop attempt machine-writes
   `.loop/results.json` + `.loop/evidence/<id>.log` — completion is a
   machine-written fact, not a model claim.
 
@@ -89,7 +90,8 @@ guarantees the gate can never deadlock a session, and the gate lifts itself
 the moment the contract passes.
 
 A companion PreToolUse hook (`hooks/evidence-gate.sh`) denies model writes
-to `.loop/results.json`, `.loop/evidence/`, and an armed `criteria.tsv` —
+to `.loop/results.json`, `.loop/evidence/`, and `criteria.tsv` while its
+loop is armed (`.loop/active` present) —
 "passes: true" can only be produced by running the command, never typed.
 Escape hatch for humans: `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
 

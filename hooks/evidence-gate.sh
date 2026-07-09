@@ -2,12 +2,18 @@
 # loop-eng evidence-gate — PreToolUse hook.
 #
 # .loop/results.json and .loop/evidence/ are machine-written by run-contract.sh;
-# .loop/criteria.tsv is written once at contract time and fixed afterwards.
+# .loop/criteria.tsv is written once at contract time and fixed while the loop
+# is armed (.loop/active); after a loop ends the next contract may rewrite it.
 # This hook denies model writes to them (exit 2, stderr fed back to the model),
 # so a "passes": true can never be typed into existence — only produced by the
 # runner actually executing the contract's commands. Weakening the contract by
-# rewriting criteria.tsv is likewise mechanically blocked, not just forbidden
-# in prompt text.
+# rewriting an armed criteria.tsv is likewise mechanically blocked, not just
+# forbidden in prompt text.
+#
+# The contract lock is armed-scoped, not permanent: a model that removes
+# .loop/active to unlock criteria.tsv has already escaped the stop-gate the
+# same way — the gate guards against drift INSIDE an armed loop, not against
+# adversarial disarming; red lines + human review of the diff cover the rest.
 #
 # Bash coverage is best-effort by design: a conservative pattern (redirect /
 # tee / mv / cp / sed -i / truncate / rm targeting a protected path) catches
@@ -51,10 +57,11 @@ fi
 deny() {
   {
     echo "loop-eng evidence-gate DENIED: $1"
-    echo ".loop/results.json and .loop/evidence/ are machine-written evidence:"
-    echo "run 'bash .loop/verify.sh' or let the stop-gate execute the contract"
-    echo "instead of writing claims. criteria.tsv is fixed once armed — weakening"
-    echo "a check to pass it is a red line."
+    echo ".loop/results.json and .loop/evidence/ are machine-written evidence."
+    echo "let the stop-gate run the contract on your next stop attempt, or run"
+    echo "the plugin's run-contract.sh (skills/loop-eng/scripts/run-contract.sh)"
+    echo "yourself instead of writing claims. Weakening a check to pass it is a"
+    echo "red line."
     echo "(Human escape hatch: LOOP_ENG_DISABLE_EVIDENCE_GATE=1.)"
   } >&2
   exit 2
@@ -68,14 +75,23 @@ case "$TOOL" in
       */.loop/evidence/*|.loop/evidence/*)
         deny "raw evidence under .loop/evidence/" ;;
       */.loop/criteria.tsv|.loop/criteria.tsv)
-        if [ -f "$FILE" ]; then
-          deny "the armed contract .loop/criteria.tsv (already exists)"
+        # Locked only while the loop is armed: the sibling .loop/active next to
+        # this criteria.tsv must exist. Derive the marker from $FILE's dir so
+        # relative and absolute paths both resolve sensibly.
+        if [ -f "$FILE" ] && [ -e "$(dirname "$FILE")/active" ]; then
+          deny "the armed contract .loop/criteria.tsv (loop is active)"
         fi ;;
     esac
     ;;
   Bash)
-    if printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/(results\.json|evidence/|criteria\.tsv)'; then
-      deny "a Bash command writing to a gate-protected .loop path"
+    # results.json + evidence/ are the machine ledger: always protected.
+    if printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/(results\.json|evidence/)'; then
+      deny "a Bash command writing to the .loop evidence ledger"
+    fi
+    # criteria.tsv is locked only while the loop is armed (.loop/active in cwd —
+    # Bash commands run in the project cwd, so the cwd-relative check suffices).
+    if [ -e .loop/active ] && printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/criteria\.tsv'; then
+      deny "a Bash command writing to the armed contract .loop/criteria.tsv"
     fi
     ;;
 esac

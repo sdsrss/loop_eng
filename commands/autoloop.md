@@ -40,10 +40,12 @@ Arm the stop-gate (mechanism-layer enforcement, if the loop-eng hooks are
 loaded in this project):
 - Write `.loop/criteria.tsv`: one line per acceptance criterion,
   TAB-separated: `<id>	<description>	<verify command>`. Use the contract's
-  fast verify commands. This file is written ONCE — the evidence-gate hook
-  denies any later rewrite, because weakening a check to pass it is a red
-  line. If the contract legitimately changes, a HUMAN clears it with
-  `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
+  fast verify commands. This file is fixed WHILE THE LOOP IS ARMED (while
+  `.loop/active` exists) — the evidence-gate hook denies rewrites for the
+  duration of the loop, because weakening a check to pass it is a red line.
+  After the loop ends (`.loop/active` removed) the next contract may rewrite
+  it. A legitimate MID-loop contract change still needs a HUMAN, who clears
+  the lock with `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
 - `touch .loop/active` and remove any stale `.loop/gate-count`.
 While `.loop/active` exists, the Stop hook executes the criteria via the
 plugin's run-contract.sh on every stop attempt and blocks premature quitting

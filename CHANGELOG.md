@@ -7,7 +7,12 @@ now denies model writes to `.loop/results.json`, `.loop/evidence/`, and an
 armed `.loop/criteria.tsv`. Loops behave as before otherwise; if the gate
 gets in your way, set `LOOP_ENG_DISABLE_EVIDENCE_GATE=1` (the deny message
 says exactly this). Pre-0.2 loops using `.loop/verify.sh` keep working —
-the stop-gate falls back to it when `criteria.tsv` is absent.
+the stop-gate falls back to it when `criteria.tsv` is absent. The PreToolUse
+gate is registered for Write/Edit/MultiEdit/NotebookEdit/Bash and thus runs
+(as a fail-open no-op) on those tool calls in any project where the plugin's
+hooks load — it only ever denies writes targeting `.loop/`-protected paths.
+The contract lock is armed-scoped: `.loop/criteria.tsv` is immutable while
+`.loop/active` exists and rewritable between loops.
 
 ### Added
 - `run-contract.sh`: executes `.loop/criteria.tsv`, machine-writes
