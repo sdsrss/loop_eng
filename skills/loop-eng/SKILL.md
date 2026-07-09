@@ -32,13 +32,17 @@ BAD fits (do NOT loop these — handle interactively):
 
 ## Core invariants (all loops)
 
-1. Contract before code: `.loop/contract.md` with binary verify commands.
+1. Contract before code: `.loop/contract.md` for humans plus
+   `.loop/criteria.tsv` (binary verify commands, written once) for the machine.
 2. Maker/checker separation is enforced by tool whitelists, not trust:
    loop-builder can write, loop-checker cannot.
 3. State lives on disk (`.loop/state.md`), not in the context window.
 4. Six stop rules bound every loop at 5 rounds max.
 5. Never weaken a check to make it pass.
 6. Loop output is a proposal: always end with the diff for human review.
+7. Completion evidence is machine-written: `run-contract.sh` produces
+   `.loop/results.json` + `.loop/evidence/`; the evidence-gate hook denies
+   model writes to them.
 
 ## Templates
 

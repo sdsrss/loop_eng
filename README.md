@@ -35,6 +35,10 @@ contract (binary acceptance criteria, verify commands)
   Any non-green stop escalates with what was tried and why more rounds won't help.
 - State lives in `.loop/state.md` and per-round git commits — the loop survives
   context compaction and session restarts.
+- The contract's checks live in `.loop/criteria.tsv` (written once, then the
+  evidence-gate hook denies rewrites). Every stop attempt machine-writes
+  `.loop/results.json` + `.loop/evidence/<id>.log` — completion is a
+  machine-written fact, not a model claim.
 
 ### `/polish [scope] [report-only]` — iteratively raise code quality
 
@@ -54,13 +58,43 @@ numeric baseline (tests / lint / types)
 - `report-only` mode finds and verifies without changing anything — the
   required mode for scheduled runs until finding quality is proven.
 
+## How loop-eng relates to /goal and ralph-wiggum
+
+Claude Code now ships loop primitives natively: `/goal` (v2.1.139+) keeps a
+session working until a Haiku evaluator judges a condition met, and the
+first-party `ralph-wiggum` plugin re-feeds a prompt until the model emits a
+completion promise. loop-eng sits above that baseline:
+
+| | native `/goal` | first-party ralph-wiggum | loop-eng |
+|---|---|---|---|
+| completion decided by | small model reading the transcript (runs no commands) | the working model emits a promise string | the harness re-runs the contract's commands (`run-contract.sh`) |
+| criteria | one condition | one prompt | multi-criterion contract, per-criterion evidence log |
+| builder/verifier separation | none | none | enforced by tool whitelists |
+| iteration bound | until condition or manual clear | unlimited by default | 5 rounds + 6 stop rules, bounded by default |
+| completion evidence | evaluator's yes/no | model's self-report | machine-written `.loop/results.json` + raw logs, model writes denied by a PreToolUse gate |
+| state | session-scoped | session-scoped | `.loop/` on disk + git; survives restarts |
+| unattended | `-p` supported | — | nightly report-only polish + cross-session autoloop driver with circuit breaker and budgets |
+
+Use `/goal` for single-condition supervision of interactive work; use
+loop-eng when done must be a machine-verified, multi-criterion fact.
+
 ## Stop-gate: enforcement, not promises
 
 While `.loop/active` exists, the plugin's Stop hook re-runs the contract's
-`.loop/verify.sh` on every stop attempt and blocks premature exit (exit 2 with
-the failure output fed back to the model). A hard ceiling of 3 blocks
+checks on every stop attempt — `.loop/criteria.tsv` (via `run-contract.sh`),
+falling back to legacy `.loop/verify.sh` when no `criteria.tsv` is present —
+and blocks premature exit (exit 2 with the failure output fed back to the
+model). A hard ceiling of 3 blocks
 guarantees the gate can never deadlock a session, and the gate lifts itself
 the moment the contract passes.
+
+A companion PreToolUse hook (`hooks/evidence-gate.sh`) denies model writes
+to `.loop/results.json`, `.loop/evidence/`, and an armed `criteria.tsv` —
+"passes: true" can only be produced by running the command, never typed.
+Escape hatch for humans: `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
+
+Platform note: Claude Code force-allows a stop after 8 consecutive
+Stop-hook blocks; loop-eng's ceiling (3) stays safely under it.
 
 If your Claude Code version does not auto-load plugin hooks, register manually
 in your project's `.claude/settings.json`:
@@ -88,12 +122,27 @@ skills/loop-eng/scripts/unattended-polish.sh <repo> [scope] [--auto-fix]
 - Refuses dirty trees; logs every run to `.loop/unattended.log`.
 - Cron example: `0 3 * * * /path/unattended-polish.sh /path/to/repo src/`
 
+Cross-session building (fresh context per backlog item — compaction is not
+a recovery strategy):
+
+```
+skills/loop-eng/scripts/unattended-autoloop.sh <repo> [max-sessions]
+```
+
+- Requires `LOOP_ENG_ALLOW_AUTOBUILD=1`; refuses dirty trees.
+- One fresh `claude -p` session per `.loop/backlog.md` item; each session
+  starts from `.loop/state.md` + `git log` handoff.
+- Circuit breaker: 2 consecutive sessions with no new commits → stop.
+  Session cap (default 8), wall-clock budget (`LOOP_ENG_MAX_MINUTES`,
+  default 240), one usage-limit wait then exit 75.
+
 ## Safety model
 
 | Principle | Enforcement |
 |---|---|
 | Verifier ≠ implementer | checker/reviewer/verifier agents have no write tools |
 | Done = machine signal | contracts allow only binary criteria with verify commands |
+| Done = machine-written fact | results.json/evidence written only by run-contract.sh; PreToolUse gate denies model writes |
 | Never weaken a check to pass it | red line in every agent + orchestrator |
 | Loops can't run away | round caps, block ceiling, same-failure and no-progress brakes |
 | Red actions stay human | money / production / schema / public API are never looped |
@@ -114,7 +163,7 @@ production or external side effects.
 .claude-plugin/   plugin.json + marketplace.json
 commands/         /autoloop, /polish orchestrators
 agents/           loop-builder, loop-checker, loop-reviewer, loop-verifier
-hooks/            stop-gate.sh + hooks.json
+hooks/            stop-gate.sh + evidence-gate.sh + hooks.json
 skills/loop-eng/  skill entry, contract/state templates, unattended runner
 ```
 
@@ -122,8 +171,9 @@ skills/loop-eng/  skill entry, contract/state templates, unattended runner
 
 Distilled from the 2026 Loop Engineering literature (Boris Cherny, Addy Osmani,
 Anthropic's planner/generator/evaluator harness work) and hardened against the
-documented failure modes: self-grading leniency, verifier theater, infinite fix
-loops, test-weakening, comprehension debt. Key positions taken: safety valves
+documented failure modes: self-grading leniency, verifier theater, infinite
+fix loops, test-weakening, comprehension debt, reviewer over-reporting on
+sound code, and cross-session amnesia. Key positions taken: safety valves
 live in the mechanism layer (tool whitelists, hooks, counters), not in prompt
 text; and a loop's output is always a proposal, never an accomplished fact.
 
