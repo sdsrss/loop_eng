@@ -7,6 +7,8 @@ docs/
 
 # Internal planning notes
 LOOP_SKILL_PLAN.md
+tasks/
+.superpowers/
 
 # Loop runtime state and logs
 .loop/
