@@ -23,7 +23,11 @@ Must NOT change:
 
 Fast subset (rounds 1..N-1) — these become `.loop/criteria.tsv`
 (TAB-separated: `id<TAB>description<TAB>command`; machine-run by the
-stop-gate, results land in `.loop/results.json` + `.loop/evidence/`):
+stop-gate, results land in `.loop/results.json` + `.loop/evidence/`).
+Keep this subset FAST: the stop-gate runs it on every stop attempt under an
+internal budget (`LOOP_ENG_GATE_TIMEOUT`, default 100s, below the 120s
+Stop-hook timeout). A criteria set that overruns the budget is BLOCKED as a
+fail-closed timeout — put the slow full suite in the final round, not here:
 
 ```
 1	All tests pass	npm test

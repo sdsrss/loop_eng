@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.2 — 2026-07-10
+
+Closes the last open item from the 0.2.0 review: the Stop-hook timeout could
+let an unverified contract stop.
+
+### Fixed
+- `stop-gate.sh`: the contract now runs under an internal budget
+  (`LOOP_ENG_GATE_TIMEOUT`, default 100s) kept below the 120s Stop-hook timeout
+  in `hooks.json`. Previously, a `criteria.tsv` slower than 120s would let
+  Claude Code kill the hook — and a killed Stop hook does not reliably block, so
+  the session could stop with the contract UNVERIFIED. If the run overruns the
+  budget the gate now BLOCKS deliberately (fail closed, exit 2) with a message
+  telling you to make criteria.tsv a faster subset, instead of gambling on the
+  platform's kill behavior. Falls back to an unbounded run (with a warning) only
+  when neither `timeout` nor `gtimeout` is available.
+
+### Docs
+- `contract.md` documents the Stop-hook time budget so authors keep the
+  per-round `criteria.tsv` fast and leave the slow full suite for the final round.
+
 ## 0.2.1 — 2026-07-10
 
 Hardening release, from a code review of 0.2.0. Two things: a silent false-green

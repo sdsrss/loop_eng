@@ -19,6 +19,12 @@
 # Stop-hook blocks (documented in code.claude.com/docs/en/best-practices).
 # MAX_BLOCKS MUST stay < 8 or the last blocks silently never fire.
 #
+# TIMEOUT / FAIL CLOSED: the contract runs under an internal budget
+# (LOOP_ENG_GATE_TIMEOUT, default 100s) kept below the hook timeout in
+# hooks.json (120s). If it overruns we block deliberately rather than let the
+# platform kill an overrunning hook (a killed Stop hook does not reliably
+# block, which would let an UNVERIFIED contract stop). Keep criteria.tsv fast.
+#
 # Stop-hook contract: exit 0 = allow stop; exit 2 = block stop, stderr is
 # fed back to the model as the reason.
 
@@ -63,8 +69,40 @@ if [ "$COUNT" -ge "$MAX_BLOCKS" ]; then
   exit 0
 fi
 
-OUT=$("${CHECK_CMD[@]}" 2>&1)
-STATUS=$?
+# Bound the contract run below the hook's own timeout so WE decide the outcome.
+# Claude Code kills a Stop hook that overruns its configured timeout (120s, see
+# hooks.json), and a killed Stop hook does NOT reliably block — the session
+# could then stop with the contract UNVERIFIED. So run the check under a shorter
+# internal budget and, if it overruns, block deliberately (fail closed) instead
+# of gambling on the platform's kill behavior. Keep LOOP_ENG_GATE_TIMEOUT < the
+# hook timeout in hooks.json.
+GATE_TIMEOUT="${LOOP_ENG_GATE_TIMEOUT:-100}"
+case "$GATE_TIMEOUT" in *[!0-9]* | "") GATE_TIMEOUT=100 ;; esac
+TIMEOUT_BIN=""
+if command -v timeout >/dev/null 2>&1; then TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_BIN="gtimeout"; fi
+
+if [ -n "$TIMEOUT_BIN" ]; then
+  OUT=$("$TIMEOUT_BIN" -k 5 "$GATE_TIMEOUT" "${CHECK_CMD[@]}" 2>&1)
+  STATUS=$?
+else
+  echo "loop-eng stop-gate: no timeout(1)/gtimeout available; running the contract UNBOUNDED (near-timeout fail-closed guard inactive — keep criteria.tsv fast)." >&2
+  OUT=$("${CHECK_CMD[@]}" 2>&1)
+  STATUS=$?
+fi
+
+# timeout(1) exits 124 when it had to signal the command: the contract did not
+# finish within our budget. An unverified contract must not pass -> fail closed.
+if [ -n "$TIMEOUT_BIN" ] && [ "$STATUS" -eq 124 ]; then
+  echo $((COUNT + 1)) > "$COUNT_FILE"
+  {
+    echo "loop-eng stop-gate BLOCKED this stop ($((COUNT + 1))/$MAX_BLOCKS): the contract did not finish within ${GATE_TIMEOUT}s (fail closed)."
+    echo "criteria.tsv is too slow for the Stop-hook budget. Make it a FAST subset"
+    echo "(run the full suite in the final manual round), or raise both"
+    echo "LOOP_ENG_GATE_TIMEOUT and the hook timeout in hooks.json if you must."
+  } >&2
+  exit 2
+fi
 
 if [ "$STATUS" -eq 0 ]; then
   # Contract satisfied: lift the gate so future stops are free.
