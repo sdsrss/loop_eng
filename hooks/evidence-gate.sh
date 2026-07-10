@@ -81,6 +81,12 @@ case "$TOOL" in
         if [ -f "$FILE" ] && [ -e "$(dirname "$FILE")/active" ]; then
           deny "the armed contract .loop/criteria.tsv (loop is active)"
         fi ;;
+      */.loop/criteria.sha256|.loop/criteria.sha256)
+        # The hash-lock: rewriting it to match a weakened criteria.tsv would
+        # defeat run-contract's tamper check, so lock it while armed too.
+        if [ -f "$FILE" ] && [ -e "$(dirname "$FILE")/active" ]; then
+          deny "the armed contract hash-lock .loop/criteria.sha256 (loop is active)"
+        fi ;;
     esac
     ;;
   Bash)
@@ -88,10 +94,13 @@ case "$TOOL" in
     if printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/(results\.json|evidence/)'; then
       deny "a Bash command writing to the .loop evidence ledger"
     fi
-    # criteria.tsv is locked only while the loop is armed (.loop/active in cwd —
-    # Bash commands run in the project cwd, so the cwd-relative check suffices).
-    if [ -e .loop/active ] && printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/criteria\.tsv'; then
-      deny "a Bash command writing to the armed contract .loop/criteria.tsv"
+    # criteria.tsv + its hash-lock are locked only while the loop is armed
+    # (.loop/active in cwd — Bash commands run in the project cwd, so the
+    # cwd-relative check suffices). This regex is best-effort (see header): the
+    # real integrity guarantee is run-contract's hash re-derivation, which no
+    # Bash verb can slip past.
+    if [ -e .loop/active ] && printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/criteria\.(tsv|sha256)'; then
+      deny "a Bash command writing to the armed contract .loop/criteria.tsv or its hash-lock"
     fi
     ;;
 esac

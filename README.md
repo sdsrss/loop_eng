@@ -90,10 +90,19 @@ guarantees the gate can never deadlock a session, and the gate lifts itself
 the moment the contract passes.
 
 A companion PreToolUse hook (`hooks/evidence-gate.sh`) denies model writes
-to `.loop/results.json`, `.loop/evidence/`, and `criteria.tsv` while its
-loop is armed (`.loop/active` present) —
+to `.loop/results.json`, `.loop/evidence/`, and the armed `criteria.tsv` (plus
+its `criteria.sha256` hash-lock) while the loop is armed (`.loop/active`
+present) — via the Write/Edit tools this path is mechanically closed, so
 "passes: true" can only be produced by running the command, never typed.
 Escape hatch for humans: `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
+
+The armed contract is additionally pinned by a **hash-lock**: `arm-contract.sh`
+records `sha256(criteria.tsv)`, and `run-contract.sh` fails CLOSED if the live
+file no longer matches — catching every write path, including Bash verbs the
+gate's regex can't see. What this guarantees is that weakening an armed contract
+can never pass *silently*; a fully adversarial model with arbitrary Bash that
+rewrites both `criteria.tsv` and its hash-lock in lockstep is out of scope, left
+to the red lines in the prompts and human review of the diff.
 
 Platform note: Claude Code force-allows a stop after 8 consecutive
 Stop-hook blocks; loop-eng's ceiling (3) stays safely under it.

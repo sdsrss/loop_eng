@@ -29,6 +29,7 @@ LOOP_DIR=".loop"
 ACTIVE="$LOOP_DIR/active"
 VERIFY="$LOOP_DIR/verify.sh"
 CRIT="$LOOP_DIR/criteria.tsv"
+SHA_LOCK="$LOOP_DIR/criteria.sha256"
 COUNT_FILE="$LOOP_DIR/gate-count"
 MAX_BLOCKS=3 # keep < 8: see PLATFORM CEILING above
 
@@ -56,6 +57,9 @@ case "$COUNT" in *[!0-9]* | "") COUNT=0 ;; esac
 
 if [ "$COUNT" -ge "$MAX_BLOCKS" ]; then
   echo "loop-eng stop-gate: block ceiling ($MAX_BLOCKS) reached; allowing stop. Contract remains UNSATISFIED — see $LOOP_DIR/state.md." >&2
+  # Clear the counter so a stale gate-count can't leave a re-armed loop instantly
+  # inert (COUNT>=MAX). .loop/active stays until the orchestrator disarms.
+  rm -f "$COUNT_FILE"
   exit 0
 fi
 
@@ -64,7 +68,7 @@ STATUS=$?
 
 if [ "$STATUS" -eq 0 ]; then
   # Contract satisfied: lift the gate so future stops are free.
-  rm -f "$ACTIVE" "$COUNT_FILE"
+  rm -f "$ACTIVE" "$COUNT_FILE" "$SHA_LOCK"
   exit 0
 fi
 

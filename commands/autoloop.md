@@ -46,7 +46,15 @@ loaded in this project):
   After the loop ends (`.loop/active` removed) the next contract may rewrite
   it. A legitimate MID-loop contract change still needs a HUMAN, who clears
   the lock with `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
-- `touch .loop/active` and remove any stale `.loop/gate-count`.
+- Arm via the plugin's arm-contract.sh (NOT a bare `touch .loop/active`):
+  `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/arm-contract.sh"`.
+  It pins the SHA-256 of criteria.tsv into `.loop/criteria.sha256`, creates
+  `.loop/active`, and clears any stale `.loop/gate-count`. run-contract then
+  fails CLOSED on every stop attempt if criteria.tsv no longer matches that
+  hash — so weakening an armed contract fails loudly instead of passing
+  silently, whatever write path is used. (If arm-contract.sh is unavailable,
+  fall back to `touch .loop/active` + `rm -f .loop/gate-count`; the Write/Edit
+  lock still holds, but drift via exotic Bash verbs won't fail closed.)
 While `.loop/active` exists, the Stop hook executes the criteria via the
 plugin's run-contract.sh on every stop attempt and blocks premature quitting
 (up to a hard ceiling of 3 blocks). Each run machine-writes
@@ -116,8 +124,9 @@ Whenever you stop on rules 2–6, the report MUST carry:
 ## Wrap-up
 
 After the loop ends (any outcome):
-- Disarm the stop-gate: remove `.loop/active` and `.loop/gate-count`.
-  (On ALL GREEN the gate lifts itself, but remove defensively.) An escalation
+- Disarm the stop-gate: remove `.loop/active`, `.loop/gate-count`, and
+  `.loop/criteria.sha256`. (On ALL GREEN the gate lifts `.loop/active` +
+  `.loop/gate-count` itself, but remove all three defensively.) An escalation
   stop is a legitimate end — never leave the gate armed behind you.
 - Append one line to `.loop/lessons.md` in the fixed format:
   `- <YYYY-MM-DD> | <task one-liner> | rounds <n> | <ALL GREEN|stop-rule-N> | <one reusable lesson, or "-">`

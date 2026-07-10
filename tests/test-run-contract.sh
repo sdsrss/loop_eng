@@ -32,6 +32,30 @@ bash "$RUNNER"; assert_eq 0 $? "stdin-reading criterion exits 0"
 assert_file_contains .loop/results.json '"id": "2"' "criterion after stdin-reader still executed"
 assert_file_contains .loop/evidence/2.log 'second-ran' "later criterion produced evidence"
 
+# --- last criterion with NO trailing newline must NOT be silently dropped (#1) ---
+printf '1\tok\ttrue\n2\tmust-fail\tfalse' > .loop/criteria.tsv   # no final newline
+bash "$RUNNER"; assert_eq 1 $? "no-trailing-newline: failing last criterion caught (exit 1)"
+assert_file_contains .loop/results.json '"id": "2"' "no-trailing-newline: last criterion present"
+assert_file_contains .loop/results.json '"all_green": false' "no-trailing-newline: not a false green"
+
+# --- hash-lock: armed + matching hash runs the contract normally ---
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+: > .loop/active
+sha_of .loop/criteria.tsv > .loop/criteria.sha256
+bash "$RUNNER"; assert_eq 0 $? "hash-lock: matching hash runs, exit 0"
+assert_file_contains .loop/results.json '"all_green": true' "hash-lock: matching hash all_green true"
+
+# --- hash-lock: criteria.tsv altered after arm -> fail CLOSED, never runs ---
+printf '1\tok\ttrue\n9\tsmuggled\ttrue\n' > .loop/criteria.tsv   # both pass, so a RUN would be green
+bash "$RUNNER" 2>/dev/null; assert_eq 77 $? "hash-lock: tampered criteria fails closed, exit 77"
+assert_file_contains .loop/results.json '"all_green": false' "hash-lock: tampered not green"
+assert_file_contains .loop/results.json 'tampered' "hash-lock: tamper reason recorded"
+
+# --- hash-lock inert when the loop is not armed (no .loop/active) ---
+rm -f .loop/active
+bash "$RUNNER"; assert_eq 0 $? "hash-lock: not armed -> hash ignored, runs normally"
+rm -f .loop/criteria.sha256
+
 # --- missing criteria.tsv ---
 rm .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 78 $? "missing criteria exit 78"

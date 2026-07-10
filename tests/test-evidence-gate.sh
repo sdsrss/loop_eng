@@ -37,9 +37,18 @@ gate "${E/FILE/.loop/criteria.tsv}";              assert_eq 2 $? "Edit criteria.
 gate "${W/FILE/$SB/.loop/criteria.tsv}";          assert_eq 2 $? "abs-path criteria.tsv denied when armed"
 gate "${B/CMD/rm .loop/criteria.tsv}";            assert_eq 2 $? "Bash rm criteria.tsv denied when armed"
 
+# --- criteria.sha256 hash-lock: locked while armed (else a model could rewrite
+#     it to match a weakened criteria.tsv and defeat run-contract's tamper check) ---
+printf 'deadbeef\n' > .loop/criteria.sha256
+gate "${W/FILE/.loop/criteria.sha256}";           assert_eq 2 $? "overwrite criteria.sha256 denied when armed"
+gate "${E/FILE/.loop/criteria.sha256}";           assert_eq 2 $? "Edit criteria.sha256 denied when armed"
+gate "${B/CMD/echo x > .loop/criteria.sha256}";   assert_eq 2 $? "Bash redirect criteria.sha256 denied when armed"
+
 # --- results.json/evidence: always denied, armed or not ---
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied while armed"
 rm -f .loop/active
+gate "${W/FILE/.loop/criteria.sha256}";           assert_eq 0 $? "criteria.sha256 rewrite allowed when not armed"
+rm -f .loop/criteria.sha256
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied with no active (explicit)"
 
 # --- unrelated paths allowed ---

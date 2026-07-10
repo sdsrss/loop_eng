@@ -25,6 +25,12 @@ mk_sandbox_repo() {
   echo "$sb"
 }
 
+sha_of() { # portable SHA-256 of a file -> stdout (mirrors the scripts' loop_sha256)
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+  elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$1" | awk '{print $NF}'; fi
+}
+
 assert_eq() { # expected actual label
   if [ "$1" = "$2" ]; then PASS=$((PASS+1)); else
     FAIL=$((FAIL+1)); echo "  FAIL: $3 — expected [$1] got [$2]" >&2; fi
