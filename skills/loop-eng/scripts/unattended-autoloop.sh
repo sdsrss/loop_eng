@@ -30,6 +30,23 @@ CLAUDE_BIN="${LOOP_ENG_CLAUDE_BIN:-claude}"
 MAX_MINUTES="${LOOP_ENG_MAX_MINUTES:-240}"
 LIMIT_WAIT_MIN="${LOOP_ENG_LIMIT_WAIT_MIN:-60}"
 
+# Validate numeric knobs before they reach arithmetic / [ -ge ] tests: a garbage
+# value crashes the driver ("xyz: unbound variable" in $(( )) under set -u) or
+# silently disables a guard ([ 0 -ge abc ] errors -> cap never fires). This is an
+# UNATTENDED entry point, so warn and fall back to the default rather than die.
+_num_or_default() { # $1=name $2=value $3=default -> echoes a base-10 integer
+  case "$2" in
+    ''|*[!0-9]*) echo "warning: $1='$2' is not a non-negative integer; using $3" >&2; echo "$3" ;;
+    # Force base-10: a leading-zero value like 08/09 is a valid digit string but
+    # crashes bash arithmetic ($((08*60)) -> "value too great for base"). 10#
+    # strips the leading zeros so downstream $(( )) never sees a bad octal token.
+    *) echo $((10#$2)) ;;
+  esac
+}
+MAX_SESSIONS=$(_num_or_default max-sessions "$MAX_SESSIONS" 8)
+MAX_MINUTES=$(_num_or_default LOOP_ENG_MAX_MINUTES "$MAX_MINUTES" 240)
+LIMIT_WAIT_MIN=$(_num_or_default LOOP_ENG_LIMIT_WAIT_MIN "$LIMIT_WAIT_MIN" 60)
+
 if [ "${LOOP_ENG_ALLOW_AUTOBUILD:-0}" != "1" ]; then
   echo "refusing: unattended building requires LOOP_ENG_ALLOW_AUTOBUILD=1" >&2
   exit 1

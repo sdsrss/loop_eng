@@ -9,12 +9,12 @@ Two entry points:
 
 - `/autoloop <task>` — drive a bounded task to completion: contract →
   builder/checker rounds → ALL GREEN or escalation. See
-  `.claude/commands/autoloop.md` for the full protocol.
+  `commands/autoloop.md` (in this plugin) for the full protocol.
 - `/polish [scope]` — iterative quality improvement: numeric baseline →
   4 independent review lenses → adversarial verification of every finding →
   fix queue → full regression → repeat until a dry round (no fresh confirmed
   findings). Behavior-preserving by definition; public-contract changes are
-  listed for the human, never applied. See `.claude/commands/polish.md`.
+  listed for the human, never applied. See `commands/polish.md` (in this plugin).
 
 ## Which tasks fit a loop
 

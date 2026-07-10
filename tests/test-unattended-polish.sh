@@ -37,4 +37,10 @@ STUB_MODE=limit LOOP_ENG_CLAUDE_BIN="$STUB" bash "$SCRIPT" "$SB" src/ && rc=0 ||
 assert_eq 75 "$rc" "rate-limited run exits 75"
 assert_file_contains "$SB/.loop/unattended.log" "rate-limited" "logs rate-limited marker"
 
+# --- non-numeric MAX_MINUTES warns + falls back to default (was: opaque timeout fail) ---
+STUB_MODE=ok LOOP_ENG_MAX_MINUTES=nope LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SB" src/ 2>"$SD/warn" && rc=0 || rc=$?
+assert_eq 0 "$rc" "non-numeric MAX_MINUTES still runs (falls back to default)"
+assert_file_contains "$SD/warn" "not a non-negative integer" "warns on non-numeric MAX_MINUTES"
+
 report "test-unattended-polish"

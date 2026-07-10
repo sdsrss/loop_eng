@@ -64,4 +64,37 @@ STUB_MODE=stall LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
   bash "$DRIVER" "$SB2" 5 >/dev/null 2>&1 && rc=0 || rc=$?
 assert_eq 1 "$rc" "dirty tree refused"
 
+# --- non-numeric knobs warn + fall back to default instead of crashing ---
+# MAX_MINUTES=xyz used to crash ("xyz: unbound variable" in $(( )) under set -u);
+# a non-numeric max-sessions used to spam "[: integer expression expected" and
+# silently disable the cap. Both must now warn and use the default.
+SB3=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SD"' EXIT
+mkdir -p "$SB3/.loop"; printf -- '- [ ] one\n' > "$SB3/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_MAX_MINUTES=xyz \
+  LOOP_ENG_CLAUDE_BIN="$STUB" bash "$DRIVER" "$SB3" 5 2>"$SD/w1" && rc=0 || rc=$?
+assert_eq 0 "$rc" "non-numeric MAX_MINUTES does not crash the driver"
+assert_file_contains "$SD/w1" "not a non-negative integer" "warns on non-numeric MAX_MINUTES"
+
+printf -- '- [ ] one\n' > "$SB3/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 \
+  LOOP_ENG_CLAUDE_BIN="$STUB" bash "$DRIVER" "$SB3" abc 2>"$SD/w2" && rc=0 || rc=$?
+assert_eq 0 "$rc" "non-numeric max-sessions does not crash the driver"
+assert_file_contains "$SD/w2" "not a non-negative integer" "warns on non-numeric max-sessions"
+if grep -q 'integer expression expected' "$SD/w2"; then
+  assert_eq 1 0 "max-sessions guard eliminates the '[: integer expression' spam"
+else
+  assert_eq 0 0 "max-sessions guard eliminates the '[: integer expression' spam"
+fi
+
+# --- leading-zero knobs (08/09) must not crash bash arithmetic as bad octal ---
+printf -- '- [ ] one\n' > "$SB3/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_MAX_MINUTES=08 LOOP_ENG_LIMIT_WAIT_MIN=09 \
+  LOOP_ENG_CLAUDE_BIN="$STUB" bash "$DRIVER" "$SB3" 07 2>"$SD/w3" && rc=0 || rc=$?
+assert_eq 0 "$rc" "leading-zero numeric knobs (08/09/07) do not crash the driver"
+if grep -qE 'value too great for base|unbound variable' "$SD/w3"; then
+  assert_eq 1 0 "leading-zero knobs normalized to base-10 (no octal crash)"
+else
+  assert_eq 0 0 "leading-zero knobs normalized to base-10 (no octal crash)"
+fi
+
 report "test-unattended-autoloop"

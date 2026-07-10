@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.2.3 — 2026-07-10
+
+Three false-verdict fixes in the contract runner, found by end-to-end testing of
+the real /autoloop flow. All are bugfixes restoring intended behavior — a
+contract must fail closed when it verifies nothing, must never emit invalid
+evidence, and must not fail a criterion for its name.
+
+### Fixed
+- `run-contract.sh`: a `criteria.tsv` with ZERO runnable criteria (empty,
+  all-comment, or every line malformed) produced `all_green: true` / exit 0 — a
+  false green that let the stop-gate lift on a vacuous contract, defeating the
+  whole "done is a machine-verified, multi-criterion fact" guarantee. It now
+  fails CLOSED (`all_green: false`, exit 1, `error` naming the vacuous contract).
+  `arm-contract.sh` additionally warns at arm time so the mistake surfaces
+  immediately, not at the first stop.
+- `run-contract.sh`: a criterion field containing a TAB (a 4+ column line, or a
+  CRLF-authored `criteria.tsv` leaving a trailing CR) emitted a raw control
+  character into `results.json`, making it invalid JSON — the checker agent,
+  humans, and any tooling that parses the evidence ledger would choke. `json_str`
+  now escapes TAB and CR — and replaces any other residual C0 control byte with a
+  space — so `results.json` is valid JSON for any field byte content, not just the
+  common TAB/CRLF vectors. It is also pure-bash, so it stays portable and drops a
+  per-field `sed` subprocess.
+- `run-contract.sh`: a criterion whose `id` contained `/` (e.g. `lint/eslint`)
+  produced a false RED — the evidence log path pointed at a non-existent nested
+  dir, the redirect failed, the command never ran, and a passing criterion
+  reported `passes: false`, so the loop could never go green. The id is now
+  sanitized for the evidence FILENAME only (the JSON keeps the real id); this
+  also blocks a `..` id from escaping `.loop/evidence/`.
+- `unattended-autoloop.sh`: a non-numeric `LOOP_ENG_MAX_MINUTES` (e.g. a typo'd
+  scheduler env var) crashed the driver immediately (`xyz: unbound variable` in
+  `$(( ))` under `set -u`), and a non-numeric `max-sessions` arg silently
+  disabled the session cap while spamming `[: integer expression expected` every
+  iteration. Both numeric knobs (plus `LOOP_ENG_LIMIT_WAIT_MIN`) are now
+  validated up front — an unattended entry point WARNS and falls back to the
+  default rather than aborting or misbehaving on a bad value. Validated values
+  are also normalized to base-10, so a leading-zero knob like `08`/`09` no longer
+  crashes bash arithmetic (`$((08*60))` → "value too great for base").
+- `unattended-polish.sh`: same guard for `LOOP_ENG_MAX_MINUTES`, which otherwise
+  reached `timeout "${MAX_MINUTES}m"` and failed opaquely on a non-numeric value.
+
+- `commands/autoloop.md`: on `ALL GREEN`, Step 3 told the orchestrator to cite
+  `.loop/results.json (all_green: true)` as machine proof — but nothing in the
+  loop refreshes that file after the fix (builder and checker run the raw verify
+  commands, not `run-contract.sh`; the ledger is refreshed lazily by the Stop
+  hook only at the actual stop attempt). Reading it to cite it therefore showed
+  the stale pre-fix `all_green: false`, contradicting the report. Step 3 now
+  runs `run-contract.sh` to refresh the ledger before citing it. (Found by an
+  end-to-end `/autoloop` run: the checker itself flagged the stale ledger.)
+
+### Docs
+- `SKILL.md`: the `/autoloop` and `/polish` pointers referenced
+  `.claude/commands/*.md` — the gitignored local dogfood copy, which does not
+  exist in an installed plugin. Now point to the shipped `commands/*.md`.
+
 ## 0.2.2 — 2026-07-10
 
 Closes the last open item from the 0.2.0 review: the Stop-hook timeout could

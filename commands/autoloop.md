@@ -69,10 +69,17 @@ falls back to it when criteria.tsv is absent.)
 1. Dispatch loop-builder with: the task brief, the contract, and (from round 2 on)
    the checker's previous failure report.
 2. Dispatch loop-checker to run all checks.
-3. If the checker's report starts with `ALL GREEN`: stop. Show me the full diff
+3. If the checker's report starts with `ALL GREEN`: stop. First REFRESH the
+   machine ledger so it reflects the fixed tree — run
+   `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/run-contract.sh"`
+   (the builder and checker run the raw verify commands, NOT run-contract, so
+   `.loop/results.json` is still the pre-fix run and would show a stale
+   `all_green: false` until it is re-run). Then show me the full diff
    (`git diff` against the pre-loop commit) and each check's proof line.
-   Cite `.loop/results.json` (`all_green: true`) as the machine proof, and the
-   per-criterion evidence files under `.loop/evidence/`.
+   Cite the just-refreshed `.loop/results.json` (`all_green: true`) as the
+   machine proof, and the per-criterion evidence files under `.loop/evidence/`.
+   (The Stop hook also re-runs the contract on your stop attempt; refreshing it
+   here makes the citation truthful at the moment you write it.)
 4. If it starts with `FAILED`: forward the checker's COMPLETE report to the
    builder verbatim. Do not summarize, interpret, or filter it — paraphrasing
    loses line numbers and stack traces.

@@ -28,6 +28,12 @@ SCOPE="${2:-src/}"
 FLAG="${3:-}"
 CLAUDE_BIN="${LOOP_ENG_CLAUDE_BIN:-claude}"
 MAX_MINUTES="${LOOP_ENG_MAX_MINUTES:-120}"
+# A non-numeric budget would reach `timeout "${MAX_MINUTES}m"` and fail opaquely
+# ("invalid time interval"). This is an unattended entry point — warn and fall
+# back to the default rather than abort the scheduled run on a typo'd env var.
+case "$MAX_MINUTES" in
+  ''|*[!0-9]*) echo "warning: LOOP_ENG_MAX_MINUTES='$MAX_MINUTES' is not a non-negative integer; using 120" >&2; MAX_MINUTES=120 ;;
+esac
 
 MODE="report-only"
 if [ "$FLAG" = "--auto-fix" ]; then

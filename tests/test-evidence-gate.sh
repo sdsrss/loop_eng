@@ -71,4 +71,27 @@ printf '%s' "${W/FILE/.loop/results.json}" | bash "$GATE" 2>.loop/err || true
 assert_file_contains .loop/err 'machine-written' "deny explains machine-written"
 assert_file_contains .loop/err 'LOOP_ENG_DISABLE_EVIDENCE_GATE' "deny names escape hatch"
 
+# --- python3 fallback path (jq absent): the gate must still enforce ---
+# jq-less environments (python3 only) are common; without this the whole fallback
+# parser is untested and could regress silently. Force it by hiding jq behind a
+# minimal PATH that has only the tools the gate needs.
+if command -v python3 >/dev/null 2>&1; then
+  FAKE=$(mktemp -d)
+  # Mirror the tools the gate uses (bash for its own subshells, cat for stdin,
+  # python3 for the fallback parser, plus the coreutils the path checks call) —
+  # everything EXCEPT jq, so `command -v jq` fails and the python3 branch runs.
+  for t in bash cat python3 grep dirname sed sha256sum; do
+    src=$(command -v "$t") && ln -sf "$src" "$FAKE/$t"
+  done
+  if ! PATH="$FAKE" bash -c 'command -v jq' >/dev/null 2>&1; then
+    printf '%s' "${W/FILE/.loop/results.json}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
+    assert_eq 2 $? "python3 fallback (no jq): Write results.json still denied"
+    printf '%s' "${W/FILE/src/app.js}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
+    assert_eq 0 $? "python3 fallback (no jq): unrelated Write still allowed"
+  else
+    echo "  SKIP: could not hide jq from PATH — python3 branch not forced" >&2
+  fi
+  rm -rf "$FAKE"
+fi
+
 report "test-evidence-gate"

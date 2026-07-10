@@ -32,6 +32,14 @@ loop_sha256() { # portable SHA-256 of a file -> stdout (empty if no tool)
 }
 
 if [ -f "$CRIT" ]; then
+  # Warn early (fail-fast) if the contract verifies nothing: a criteria.tsv with
+  # zero runnable lines (empty / all-comment / all-malformed) makes run-contract
+  # fail CLOSED on every stop. Catch it at arm time rather than at first block.
+  # Runnable = non-empty id that isn't a #comment, with a non-empty command col.
+  runnable=$(awk -F'\t' '$1 != "" && $1 !~ /^#/ && $3 != "" {n++} END{print n+0}' "$CRIT" 2>/dev/null || echo 0)
+  if [ "${runnable:-0}" -eq 0 ]; then
+    echo "loop-eng arm-contract: WARNING — criteria.tsv has no runnable criteria (need <id>TAB<description>TAB<command> lines). run-contract will FAIL CLOSED on every stop until you add at least one; a contract that verifies nothing can never be 'done'." >&2
+  fi
   hash=$(loop_sha256 "$CRIT")
   if [ -n "$hash" ]; then
     printf '%s\n' "$hash" > "$SHA_LOCK"

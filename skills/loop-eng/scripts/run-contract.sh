@@ -30,8 +30,23 @@ loop_sha256() {
   fi
 }
 
-json_str() { # escape backslash + double quote (TSV lines cannot contain \t or \n)
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+json_str() { # escape for a JSON string: backslash, double quote, and the control
+  # chars that survive TSV parsing — a 4+column line leaves a TAB inside cmd, and
+  # a CRLF-authored criteria.tsv leaves a trailing CR; unescaped they make
+  # results.json invalid JSON (control chars must be \-escaped). Pure-bash so it
+  # stays portable (no GNU-sed \t) and cheap (no subprocess per field).
+  local s="$1"
+  s="${s//\\/\\\\}"    # backslash first
+  s="${s//\"/\\\"}"    # double quote
+  s="${s//$'\t'/\\t}"  # tab
+  s="${s//$'\r'/\\r}"  # carriage return
+  # Any other C0 control byte (ESC / FF / VT / BS / …) is illegal raw in a JSON
+  # string too; escaping only TAB/CR would still leave results.json invalid for
+  # those. LF can't occur (read splits on it) and NUL can't live in a bash var,
+  # so replace the residual C0 set with a space — results.json is then valid
+  # JSON for ANY field byte content, not just the common TAB/CRLF vectors.
+  s="${s//[$'\x01'-$'\x08'$'\x0b'$'\x0c'$'\x0e'-$'\x1f']/ }"
+  printf '%s' "$s"
 }
 
 overall=0
@@ -76,6 +91,7 @@ fi
   printf '  "generated_at": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '  "criteria": [\n'
   first=1
+  ran=0
   # `|| [ -n "$id" ]`: read returns non-zero on a final line with no trailing
   # newline but still assigns it; without this the last criterion is silently
   # dropped, and a dropped FAILING criterion yields a false all_green.
@@ -83,13 +99,19 @@ fi
     [ -z "${id:-}" ] && continue
     case "$id" in \#*) continue ;; esac
     [ -z "${cmd:-}" ] && continue # malformed line: fewer than 3 columns
-    log="$EVID/$id.log"
+    # Sanitize the id for the evidence FILENAME only — the JSON keeps the real id.
+    # A '/' in the id would point the log at a non-existent nested dir, so the
+    # redirect fails, the command never runs, and a PASSING criterion reports a
+    # false RED (loop can never go green). '..' would also escape .loop/evidence/.
+    safe_id="${id//[^A-Za-z0-9._-]/_}"
+    log="$EVID/$safe_id.log"
     status=0
     # </dev/null: without it, a stdin-reading criterion command would consume
     # the remaining criteria lines from the while-read loop (dropped criteria,
     # possibly a false all_green)
     bash -c "$cmd" > "$log" 2>&1 </dev/null || status=$?
     if [ "$status" -eq 0 ]; then pass=true; else pass=false; overall=1; fi
+    ran=$((ran + 1))
     [ "$first" -eq 0 ] && printf ',\n'
     first=0
     printf '    {"id": "%s", "desc": "%s", "cmd": "%s", "exit": %d, "passes": %s, "evidence": "%s"}' \
@@ -97,7 +119,15 @@ fi
       "$status" "$pass" "$(json_str "$log")"
   done < "$CRIT"
   printf '\n  ],\n'
-  if [ "$overall" -eq 0 ]; then printf '  "all_green": true\n'; else printf '  "all_green": false\n'; fi
+  # A contract with ZERO runnable criteria (empty, all-comment, or every line
+  # malformed) is vacuous — treat it as a FAIL, never a silent all_green. This is
+  # the same false-green class the hash-lock guards against: "done" must be a
+  # verified fact, and nothing was verified. Fail closed so the stop-gate blocks.
+  if [ "$ran" -eq 0 ]; then
+    overall=1
+    printf '  "all_green": false,\n'
+    printf '  "error": "no runnable criteria in %s (empty, all-comment, or malformed) — vacuous contract fails closed"\n' "$(json_str "$CRIT")"
+  elif [ "$overall" -eq 0 ]; then printf '  "all_green": true\n'; else printf '  "all_green": false\n'; fi
   printf '}\n'
 } > "$TMP"
 mv "$TMP" "$RESULTS"

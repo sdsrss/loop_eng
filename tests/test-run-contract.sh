@@ -26,6 +26,37 @@ printf '# comment line\n\n1\tsays "hi"\ttrue\n' > .loop/criteria.tsv
 bash "$RUNNER"; assert_eq 0 $? "comments ignored, exit 0"
 assert_file_contains .loop/results.json '\"hi\"' "quotes JSON-escaped"
 
+# --- an id containing '/' must not produce a false RED (evidence path sanitized) ---
+printf 'lint/eslint\tlint clean\ttrue\n' > .loop/criteria.tsv
+bash "$RUNNER"; assert_eq 0 $? "slashed id: passing criterion is GREEN, not a false red"
+assert_file_contains .loop/results.json '"id": "lint/eslint"' "slashed id preserved verbatim in JSON"
+assert_file_contains .loop/results.json '"passes": true' "slashed id criterion actually ran and passed"
+
+# --- vacuous contract (zero runnable criteria) fails CLOSED, never a false green ---
+printf '# only comments\n\n' > .loop/criteria.tsv
+bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "all-comment criteria fails closed, exit 1"
+assert_file_contains .loop/results.json '"all_green": false' "vacuous contract not green"
+assert_file_contains .loop/results.json 'no runnable criteria' "vacuous contract reason recorded"
+: > .loop/criteria.tsv   # truly empty file
+bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "empty criteria fails closed, exit 1"
+assert_file_contains .loop/results.json '"all_green": false' "empty contract not green"
+
+# --- a TAB inside a field (4+ column line / CRLF) must not break JSON validity ---
+printf '1\tgrep tab\tprintf "a\\tb"\ttrue\n' > .loop/criteria.tsv  # 4 columns -> cmd absorbs a raw TAB
+bash "$RUNNER" >/dev/null 2>&1
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "import json;json.load(open('.loop/results.json'))" 2>/dev/null
+  assert_eq 0 $? "results.json stays valid JSON when a field contains a TAB"
+fi
+assert_file_contains .loop/results.json '\\t' "TAB in field escaped as \\t"
+# a raw C0 control byte (ESC) in a field must also keep results.json valid JSON
+printf '1\tesc %b here\ttrue\n' 'x\x1by' > .loop/criteria.tsv
+bash "$RUNNER" >/dev/null 2>&1
+if command -v python3 >/dev/null 2>&1; then
+  python3 -c "import json;json.load(open('.loop/results.json'))" 2>/dev/null
+  assert_eq 0 $? "results.json stays valid JSON when a field contains a raw C0 control byte"
+fi
+
 # --- stdin-reading criterion must not swallow later criteria lines ---
 printf '1\treads stdin\tcat\n2\tstill runs\techo second-ran\n' > .loop/criteria.tsv
 bash "$RUNNER"; assert_eq 0 $? "stdin-reading criterion exits 0"

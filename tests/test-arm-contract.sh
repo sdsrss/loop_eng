@@ -25,6 +25,13 @@ bash "$RUNNER"; assert_eq 0 $? "armed matching contract runs green"
 printf '1\tok\ttrue\n2\tsmuggled\ttrue\n' > .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 77 $? "post-arm tamper fails closed via the pinned hash"
 
+# --- vacuous criteria.tsv: arm warns but still exits 0 (run-contract fails closed) ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
+printf '# just a comment, no runnable criteria\n\n' > .loop/criteria.tsv
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on vacuous contract still exits 0"
+assert_file_contains .loop/armwarn 'no runnable criteria' "arm warns about vacuous contract"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
 # --- no criteria.tsv: arms without a hash-lock, does not error ---
 rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
 bash "$ARM" 2>/dev/null; assert_eq 0 $? "arm with no criteria.tsv still exits 0"
