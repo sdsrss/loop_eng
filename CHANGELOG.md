@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 — 2026-07-10
+
+Descriptions-only release: changes when Claude Code auto-invokes the plugin,
+not what the loops do. No user action required; to restore the old routing
+behavior, reinstall v0.2.3.
+
+### Changed
+- Rewrote the LLM-visible descriptions of `/autoloop`, `/polish`, and the
+  `loop-eng` skill from feature-driven (mechanism jargon) to scenario-driven:
+  each now front-loads "Use when" trigger conditions with natural user phrases
+  (bilingual EN/中文, e.g. "keep going until tests pass", 挂机/无人值守/打磨),
+  and names its differentiator (/polish vs one-shot code review; the skill vs
+  prompt-only goal trackers). Raises Claude Code's auto-invocation recall on
+  genuine loop intent; no behavior change — hooks, scripts, and agents untouched.
+
 ## 0.2.3 — 2026-07-10
 
 Three false-verdict fixes in the contract runner, found by end-to-end testing of

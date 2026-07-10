@@ -1,6 +1,6 @@
 ---
 name: loop-eng
-description: Closed-loop task execution and quality polishing for Claude Code. Use when the user wants a task driven to completion autonomously (/autoloop builder-checker cycle), wants the codebase quality-polished iteratively (/polish review-verify-fix cycle), or asks about the loop-eng workflow.
+description: Closed-loop task execution and quality polishing for Claude Code. Use when the user wants a bounded task driven to completion hands-off — "keep iterating until tests pass", "don't stop until done", 自动循环/挂机/无人值守/跑到全绿 — via /autoloop (builder/checker rounds); wants code quality raised iteratively with every finding adversarially verified before fixing — 打磨/清理代码 — via /polish (review-verify-fix rounds); or asks how the loop-eng workflow works. Unlike prompt-only goal trackers, the Stop hook executes the contract's real verify commands and completion evidence is machine-written.
 ---
 
 # loop-eng — closed-loop task execution & quality polishing

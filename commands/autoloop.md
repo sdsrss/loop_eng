@@ -1,5 +1,5 @@
 ---
-description: Run a builder/checker loop until all checks pass or a stop rule fires
+description: Drive a bounded task to completion via an autonomous builder/checker loop. Use when the user wants hands-off execution to a machine-verifiable finish line — "keep going until tests pass", "don't stop until it's done", unattended/挂机/无人值守/自动跑完/修到全绿 — or hands over a bugfix/refactor with binary pass-fail checks. Rounds repeat until ALL GREEN or a stop rule fires (max 5); a Stop hook blocks premature quitting. Not an interval timer.
 argument-hint: <task>
 allowed-tools: Read, Write, Grep, Glob, Bash, Task
 ---

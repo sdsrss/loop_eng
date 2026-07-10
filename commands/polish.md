@@ -1,5 +1,5 @@
 ---
-description: Quality-polish loop — baseline, multi-lens review, adversarial verify, fix, converge on a dry round
+description: Iteratively raise code quality until a review round comes back clean. Use when the user asks to polish/clean up a module or codebase — 打磨/清理/提升代码质量 — or wants review findings actually fixed, not just listed. Unlike a one-shot code review, every finding is adversarially verified, then fixed and regression-tested, looping until a dry round (no fresh confirmed findings). Behavior-preserving — public-contract changes are reported, never applied.
 argument-hint: [scope, e.g. src/ — defaults to the whole project source]
 allowed-tools: Read, Write, Grep, Glob, Bash, Task
 ---
