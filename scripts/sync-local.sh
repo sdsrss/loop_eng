@@ -8,8 +8,8 @@ cd "$(dirname "$0")/.."
 mkdir -p .claude/commands .claude/agents .claude/hooks .claude/skills
 cp commands/*.md .claude/commands/
 cp agents/*.md .claude/agents/
-cp hooks/stop-gate.sh .claude/hooks/
+cp hooks/stop-gate.sh hooks/evidence-gate.sh .claude/hooks/
 rm -rf .claude/skills/loop-eng
 cp -r skills/loop-eng .claude/skills/loop-eng
-chmod +x .claude/hooks/stop-gate.sh .claude/skills/loop-eng/scripts/unattended-polish.sh
+chmod +x .claude/hooks/*.sh .claude/skills/loop-eng/scripts/*.sh
 echo "synced root -> .claude/ (settings.json left untouched)"
