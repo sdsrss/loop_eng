@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-07-11
 
 ### Added
 - `install-timer.sh` / `uninstall-timer.sh`: a symmetric pair to schedule the
@@ -18,6 +18,19 @@
   mid-day execution just from installing); missed nightly runs are skipped, not
   back-filled. 21 new assertions (`tests/test-install-timer.sh`), suite
   110 → 131.
+
+### Fixed
+- `run-contract.sh`: a CRLF-authored `criteria.tsv` left the line-ending CR on
+  the last (command) column, so `bash -c "true\r"` ran a command whose name
+  ended in CR — "command not found" (exit 127). Every passing check reported a
+  false RED and the loop could never reach ALL GREEN. Strip the trailing CR
+  before execution (the JSON-escaping path already handled CR; the exec path
+  did not). Direction was fail-safe (false-RED, never false-green).
+- `install-timer.sh`: the "repo-dir does not exist" error printed a blank path
+  because the `cd`-based canonicalization overwrote the variable before the
+  error fired; it now reports the original argument the user passed.
+- Regression coverage for both: suite 131 → 135 (`test-run-contract` +2 CRLF,
+  `test-install-timer` +2 nonexistent-repo path).
 
 ## 0.3.0 — 2026-07-10
 
