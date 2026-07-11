@@ -164,6 +164,11 @@ skills/loop-eng/scripts/install-timer.sh   <polish|autoloop> <repo> [arg] [--tim
 skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 ```
 
+- `<repo>` is the project to schedule against — any git repo, not just this
+  plugin's own checkout; the installer locates the runner from its own location,
+  so an installed-from-marketplace plugin schedules external projects fine. The
+  repo path must be whitespace-free (systemd `ExecStart` is unquoted; a spaced
+  path is refused at install time rather than silently failing at first run).
 - `arg` = scope (polish, default `src/`) or max-sessions (autoloop, default 8);
   `--time` sets the daily `OnCalendar` (default `03:00`).
 - **Safe by default**: without `--allow-write` the timer runs polish report-only

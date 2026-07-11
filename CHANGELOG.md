@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.4.1 — 2026-07-11
+
+Audit-driven fix batch (source: `docs/audit-report-v0.4.0-2026-07-11.md`). All
+are bugfixes / hardening restoring intended behavior; no breaking changes.
+
+### Fixed
+- `install-timer.sh`: resolved the unattended runner from the target repo
+  (`$REPO/skills/loop-eng/scripts/unattended-<mode>.sh`), so scheduling only
+  worked when the target repo WAS the plugin repo — a marketplace-installed
+  plugin has its runners in the plugin cache, not in the user's project, so
+  `install-timer` failed with "runner not found" against any real target. It now
+  resolves the runner from its OWN directory (`dirname "$0"`); the `<repo>` arg
+  is purely the project to schedule against. (audit H1)
+- `install-timer.sh`: a repo (or plugin) path containing whitespace produced a
+  systemd unit that passed `systemctl enable` but failed at first trigger
+  (`ExecStart` is whitespace-delimited and injected unquoted; the error only
+  reached the journal). It now refuses such a path at install time with a named
+  reason, instead of writing a unit that silently never runs. (audit M1)
+- `install-timer.sh`: the unit's `StandardOutput/Error` append to
+  `$REPO/.loop/cron.log`, which systemd opens before `ExecStart` — but the
+  runner's own `mkdir -p .loop` runs inside `ExecStart`, too late for the first
+  run's log. Install now pre-creates `$REPO/.loop`. (audit M2)
+- `evidence-gate.sh`: the Write/Edit lock on `.loop/criteria.tsv` (and its
+  `.sha256`) required the file to already exist (`[ -f "$FILE" ]`), so while a
+  legacy `verify.sh` loop was armed a model could CREATE a fresh trivial
+  `criteria.tsv` and hijack the stop-gate (which prefers `criteria.tsv` over
+  `verify.sh`). The lock now denies the create as well as the overwrite while
+  armed. The Bash path already covered this; only the tool path had the gap.
+  (audit M4)
+- `evidence-gate.sh`: `NotebookEdit` carries its target in `notebook_path`, not
+  `file_path`, so the gate read an empty path and let NotebookEdit writes to the
+  ledger through unchecked. The parser (jq and python3 branches) now falls back
+  to `notebook_path`. (audit L2)
+
+### Tests
+- Suite 135 → 143 assertions: `test-install-timer` +3 (plugin-resolved runner,
+  `.loop` pre-creation, whitespace refusal), `test-evidence-gate` +5 (armed
+  create-deny for `criteria.tsv` abs+rel, not-armed create-allow, NotebookEdit
+  deny + allow).
+
 ## 0.4.0 — 2026-07-11
 
 ### Added

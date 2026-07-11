@@ -34,7 +34,10 @@ INPUT=$(cat)
 TOOL=""; FILE=""; CMD=""
 if command -v jq >/dev/null 2>&1; then
   TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || TOOL=""
-  FILE=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || FILE=""
+  # NotebookEdit carries its target in .tool_input.notebook_path, every other
+  # write tool in .tool_input.file_path — fall through so NotebookEdit is not a
+  # blind spot into the ledger.
+  FILE=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null) || FILE=""
   CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || CMD=""
 elif command -v python3 >/dev/null 2>&1; then
   PARSED=$(printf '%s' "$INPUT" | python3 -c '
@@ -44,8 +47,10 @@ try:
 except Exception:
     sys.exit(0)
 ti = d.get("tool_input") or {}
+# file_path for Write/Edit/MultiEdit; notebook_path for NotebookEdit.
+fp = ti.get("file_path") or ti.get("notebook_path") or ""
 print("TOOL=%s" % shlex.quote(str(d.get("tool_name", ""))))
-print("FILE=%s" % shlex.quote(str(ti.get("file_path", ""))))
+print("FILE=%s" % shlex.quote(str(fp)))
 print("CMD=%s" % shlex.quote(str(ti.get("command", ""))))
 ' 2>/dev/null) || PARSED=""
   eval "$PARSED"
@@ -75,16 +80,20 @@ case "$TOOL" in
       */.loop/evidence/*|.loop/evidence/*)
         deny "raw evidence under .loop/evidence/" ;;
       */.loop/criteria.tsv|.loop/criteria.tsv)
-        # Locked only while the loop is armed: the sibling .loop/active next to
-        # this criteria.tsv must exist. Derive the marker from $FILE's dir so
-        # relative and absolute paths both resolve sensibly.
-        if [ -f "$FILE" ] && [ -e "$(dirname "$FILE")/active" ]; then
+        # Locked while the loop is armed: the sibling .loop/active next to this
+        # criteria.tsv must exist. Derive the marker from $FILE's dir so relative
+        # and absolute paths both resolve sensibly. Do NOT require the file to
+        # pre-exist — a legacy (verify.sh) loop has no criteria.tsv, and CREATING
+        # one while armed hijacks the stop-gate (which prefers criteria.tsv over
+        # verify.sh), so the create must be denied as well as the overwrite.
+        if [ -e "$(dirname "$FILE")/active" ]; then
           deny "the armed contract .loop/criteria.tsv (loop is active)"
         fi ;;
       */.loop/criteria.sha256|.loop/criteria.sha256)
-        # The hash-lock: rewriting it to match a weakened criteria.tsv would
-        # defeat run-contract's tamper check, so lock it while armed too.
-        if [ -f "$FILE" ] && [ -e "$(dirname "$FILE")/active" ]; then
+        # The hash-lock: writing it to match a weakened criteria.tsv would defeat
+        # run-contract's tamper check, so lock it while armed too — create as well
+        # as overwrite (same reasoning as criteria.tsv above).
+        if [ -e "$(dirname "$FILE")/active" ]; then
           deny "the armed contract hash-lock .loop/criteria.sha256 (loop is active)"
         fi ;;
     esac

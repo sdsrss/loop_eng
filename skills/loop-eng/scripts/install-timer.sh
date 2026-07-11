@@ -65,8 +65,21 @@ REPO_IN="$REPO"
 REPO="$(cd "$REPO" 2>/dev/null && pwd)" || die "repo-dir does not exist: $REPO_IN"
 [ -d "$REPO/.git" ] || die "not a git repo (no .git): $REPO"
 
-RUNNER="$REPO/skills/loop-eng/scripts/unattended-$MODE.sh"
+# Resolve the unattended runner from THIS script's own directory (the plugin),
+# not from the target repo. When loop-eng is installed as a marketplace plugin
+# the runners live in the plugin cache next to this script, and the target
+# project has no skills/loop-eng/ tree of its own — the pre-v0.4.1 lookup under
+# "$REPO/skills/..." only worked when the target repo WAS the plugin repo.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RUNNER="$SCRIPT_DIR/unattended-$MODE.sh"
 [ -x "$RUNNER" ] || die "runner not found or not executable: $RUNNER"
+
+# systemd ExecStart is whitespace-delimited and both paths below are injected
+# unquoted; a space in the repo OR the plugin path yields a unit that passes
+# `systemctl enable` but fails at first trigger (error only in the journal).
+# Refuse up front so the failure is loud and at install time.
+case "$REPO"   in *[[:space:]]*) die "repo-dir path contains whitespace, which the systemd unit cannot represent unquoted: $REPO" ;; esac
+case "$RUNNER" in *[[:space:]]*) die "plugin path contains whitespace, which the systemd unit cannot represent unquoted: $RUNNER" ;; esac
 
 # Build the mode-specific ExecStart tail + write-enable Environment lines.
 ENV_LINES=""
@@ -93,6 +106,12 @@ fi
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT="loop-eng-$MODE"
 mkdir -p "$UNIT_DIR"
+
+# The unit's StandardOutput/Error append to $REPO/.loop/cron.log; systemd opens
+# that file BEFORE ExecStart runs, so the directory must already exist at first
+# trigger. The runner's own `mkdir -p .loop` happens inside ExecStart — too late
+# for that first run's log redirect. Create it now so the first run isn't lost.
+mkdir -p "$REPO/.loop"
 
 SVC="$UNIT_DIR/$UNIT.service"
 TMR="$UNIT_DIR/$UNIT.timer"

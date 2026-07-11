@@ -12,12 +12,10 @@ SB=$(mk_sandbox_repo)
 XDG=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-xdg.XXXXXX")
 trap 'rm -rf "$SB" "$XDG"' EXIT
 
-# The installer requires the mode's runner to exist + be executable in the repo.
-mkdir -p "$SB/skills/loop-eng/scripts"
-for m in polish autoloop; do
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$SB/skills/loop-eng/scripts/unattended-$m.sh"
-  chmod +x "$SB/skills/loop-eng/scripts/unattended-$m.sh"
-done
+# As of v0.4.1 the installer resolves the unattended runner from ITS OWN
+# directory (the plugin), not from the target repo — so no runner is staged in
+# $SB; the real plugin runners under $PLUGIN_ROOT are what ExecStart points at.
+RUNNER_DIR="$PLUGIN_ROOT/skills/loop-eng/scripts"
 
 UNIT_DIR="$XDG/systemd/user"
 run_install()   { XDG_CONFIG_HOME="$XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 bash "$INSTALL" "$@"; }
@@ -29,7 +27,8 @@ run_install polish "$SB" >/dev/null; rc=$?
 assert_eq 0 "$rc" "polish install exits 0"
 assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.service")" "polish .service written"
 assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.timer")" "polish .timer written"
-assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "ExecStart=$SB/skills/loop-eng/scripts/unattended-polish.sh $SB src/" "ExecStart has abs runner + repo + default scope"
+assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "ExecStart=$RUNNER_DIR/unattended-polish.sh $SB src/" "ExecStart has plugin runner + repo + default scope"
+assert_eq yes "$(exists "$SB/.loop")" "install pre-creates repo .loop for unit logging"
 assert_file_contains "$UNIT_DIR/loop-eng-polish.timer" "OnCalendar=*-*-* 03:00:00" "default OnCalendar 03:00"
 if grep -q "Persistent=true" "$UNIT_DIR/loop-eng-polish.timer"; then
   assert_eq no-persistent has-persistent "timer must NOT be Persistent (avoids catch-up run on mid-day install)"
@@ -57,6 +56,16 @@ run_install bogus "$SB" 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ?
 run_install polish "$SB" --time 25:00 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "bad --time refused"
 run_install polish "$XDG" 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-git repo refused"
 run_install autoloop "$SB" abc 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-numeric max-sessions refused"
+
+# --- repo path containing whitespace: refused (systemd ExecStart is unquoted) ---
+SPACE_REPO="$XDG/has space repo"
+mkdir -p "$SPACE_REPO" && ( cd "$SPACE_REPO" && git init -q )
+err=$(run_install polish "$SPACE_REPO" 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "repo path with whitespace refused"
+case "$err" in
+  *whitespace*) assert_eq 1 1 "whitespace refusal names the reason" ;;
+  *) assert_eq "whitespace-named" "other-error" "refusal must cite whitespace" ;;
+esac
 
 # --- nonexistent repo-dir: refused AND the error names the offending path (not blank) ---
 err=$(run_install polish /no/such/repo-dir-xyz 2>&1 >/dev/null); rc=$?

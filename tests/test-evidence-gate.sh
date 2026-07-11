@@ -51,6 +51,23 @@ gate "${W/FILE/.loop/criteria.sha256}";           assert_eq 0 $? "criteria.sha25
 rm -f .loop/criteria.sha256
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied with no active (explicit)"
 
+# --- M4: a legacy (verify.sh) loop has NO criteria.tsv; while it is armed,
+#     CREATING a fresh trivial criteria.tsv would hijack the stop-gate (which
+#     prefers criteria.tsv over verify.sh). Deny the create too, not only the
+#     overwrite — the Write/Edit branch must not require the file to pre-exist. ---
+rm -f .loop/criteria.tsv
+touch .loop/active
+gate "${W/FILE/.loop/criteria.tsv}";              assert_eq 2 $? "create criteria.tsv denied when armed (no prior file)"
+gate "${W/FILE/$SB/.loop/criteria.tsv}";          assert_eq 2 $? "create abs-path criteria.tsv denied when armed"
+rm -f .loop/active
+gate "${W/FILE/.loop/criteria.tsv}";              assert_eq 0 $? "create criteria.tsv allowed when not armed"
+
+# --- L2: NotebookEdit carries the target in notebook_path, not file_path; the
+#     gate must read it or NotebookEdit is a blind spot into the ledger. ---
+N='{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"FILE"}}'
+gate "${N/FILE/.loop/results.json}";              assert_eq 2 $? "NotebookEdit notebook_path results.json denied"
+gate "${N/FILE/src/notebook.ipynb}";              assert_eq 0 $? "NotebookEdit unrelated notebook allowed"
+
 # --- unrelated paths allowed ---
 gate "${W/FILE/src/app.js}";                      assert_eq 0 $? "unrelated Write allowed"
 gate "${W/FILE/.loop/state.md}";                  assert_eq 0 $? ".loop/state.md Write allowed"
