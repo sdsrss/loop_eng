@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `install-timer.sh` / `uninstall-timer.sh`: a symmetric pair to schedule the
+  unattended polish/autoloop runners as a `systemd --user` timer, instead of
+  hand-dropping unit files (which get forgotten, or left "installed but never
+  enabled" so they silently never run). `install-timer.sh` writes the
+  `.service` + `.timer`, resolves absolute paths, validates `--time`/repo/args,
+  and `enable --now`s the timer — a failed enable exits non-zero rather than
+  leaving an un-scheduled orphan. `uninstall-timer.sh` disables and removes in
+  reverse order and is a benign no-op when nothing is installed. Report-only /
+  no-build by default; `--allow-write` opts into the mode's write env. Honors
+  `XDG_CONFIG_HOME`; `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` for headless/CI. The timer
+  is intentionally not `Persistent` — enabling a persistent timer after the
+  day's `OnCalendar` had passed would fire an immediate catch-up run (a surprise
+  mid-day execution just from installing); missed nightly runs are skipped, not
+  back-filled. 21 new assertions (`tests/test-install-timer.sh`), suite
+  110 → 131.
+
 ## 0.3.0 — 2026-07-10
 
 Descriptions-only release: changes when Claude Code auto-invokes the plugin,

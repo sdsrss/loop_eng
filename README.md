@@ -152,6 +152,33 @@ skills/loop-eng/scripts/unattended-autoloop.sh <repo> [max-sessions]
   Session cap (default 8), wall-clock budget (`LOOP_ENG_MAX_MINUTES`,
   default 240), one usage-limit wait then exit 75.
 
+### Scheduling with systemd (tracked, one-command removable)
+
+Instead of hand-dropping unit files into `~/.config/systemd/user/` (easy to
+forget, easy to leave "installed but never enabled"), use the install/uninstall
+pair — it writes the `.service` + `.timer`, enables the timer, and reverses
+exactly:
+
+```
+skills/loop-eng/scripts/install-timer.sh   <polish|autoloop> <repo> [arg] [--time HH:MM] [--allow-write]
+skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
+```
+
+- `arg` = scope (polish, default `src/`) or max-sessions (autoloop, default 8);
+  `--time` sets the daily `OnCalendar` (default `03:00`).
+- **Safe by default**: without `--allow-write` the timer runs polish report-only
+  and autoloop refuses to build — a scheduled run cannot modify the repo.
+  `--allow-write` injects the mode's write-enable env (`LOOP_ENG_ALLOW_AUTOFIX`
+  / `LOOP_ENG_ALLOW_AUTOBUILD`).
+- A failed `systemctl enable` exits non-zero (no silent "installed but not
+  scheduled"); `uninstall-timer.sh` is a benign no-op when nothing is installed.
+- Units log to `<repo>/.loop/cron.log`. `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` writes
+  files without calling systemctl (headless / CI).
+- The timer is **not** `Persistent`: a run missed because the machine was off at
+  the scheduled time is skipped, not caught up. (This is deliberate — a
+  persistent timer enabled after the day's time has passed would fire an
+  immediate catch-up run, a surprise mid-day execution just from installing.)
+
 ## Safety model
 
 | Principle | Enforcement |
