@@ -58,6 +58,14 @@ run_install polish "$SB" --time 25:00 2>/dev/null && rc=0 || rc=$?; assert_eq 0 
 run_install polish "$XDG" 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-git repo refused"
 run_install autoloop "$SB" abc 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-numeric max-sessions refused"
 
+# --- nonexistent repo-dir: refused AND the error names the offending path (not blank) ---
+err=$(run_install polish /no/such/repo-dir-xyz 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "nonexistent repo-dir refused"
+case "$err" in
+  *"/no/such/repo-dir-xyz"*) assert_eq 1 1 "error names the offending repo-dir path" ;;
+  *) assert_eq "path-named" "path-blank" "error must include the offending repo-dir path" ;;
+esac
+
 # --- uninstall symmetry: install then uninstall leaves NO residue ---
 run_install polish "$SB" >/dev/null
 run_uninstall polish >/dev/null; rc=$?

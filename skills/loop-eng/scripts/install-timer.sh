@@ -58,7 +58,11 @@ esac
 
 # Resolve repo to an absolute path — systemd ExecStart/WorkingDirectory reject
 # relative paths, and a scheduled run has no inherited cwd.
-REPO="$(cd "$REPO" 2>/dev/null && pwd)" || die "repo-dir does not exist: $REPO"
+# Keep the user's original argument: the command substitution below overwrites
+# REPO with an empty string when `cd` fails, so `die` would otherwise print a
+# blank path. Report the value the user actually passed.
+REPO_IN="$REPO"
+REPO="$(cd "$REPO" 2>/dev/null && pwd)" || die "repo-dir does not exist: $REPO_IN"
 [ -d "$REPO/.git" ] || die "not a git repo (no .git): $REPO"
 
 RUNNER="$REPO/skills/loop-eng/scripts/unattended-$MODE.sh"
