@@ -98,6 +98,13 @@ fi
   while IFS=$'\t' read -r id desc cmd || [ -n "$id" ]; do
     [ -z "${id:-}" ] && continue
     case "$id" in \#*) continue ;; esac
+    # CRLF-authored criteria.tsv: read() leaves the line-ending CR on the LAST
+    # field (cmd). Left in, `bash -c "true\r"` runs a command whose name ends in
+    # CR -> "command not found" (exit 127), so a PASSING check reports a false RED
+    # and the loop can never reach ALL GREEN. Strip it BEFORE the empty-check so a
+    # CRLF blank-command line collapses to malformed, exactly like its LF form.
+    # (json_str already escapes CR for JSON validity; this fixes the exec path.)
+    cmd="${cmd%$'\r'}"
     [ -z "${cmd:-}" ] && continue # malformed line: fewer than 3 columns
     # Sanitize the id for the evidence FILENAME only — the JSON keeps the real id.
     # A '/' in the id would point the log at a non-existent nested dir, so the

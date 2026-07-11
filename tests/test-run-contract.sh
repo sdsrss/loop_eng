@@ -69,6 +69,14 @@ bash "$RUNNER"; assert_eq 1 $? "no-trailing-newline: failing last criterion caug
 assert_file_contains .loop/results.json '"id": "2"' "no-trailing-newline: last criterion present"
 assert_file_contains .loop/results.json '"all_green": false' "no-trailing-newline: not a false green"
 
+# --- CRLF-authored criteria.tsv: the trailing CR belongs to the line ending, not
+#     the command. It must be stripped before `bash -c`, or every criterion runs a
+#     command with a trailing CR ("true\r" -> command not found, exit 127) and a
+#     PASSING check reports a false RED, so the loop can never reach ALL GREEN. ---
+printf '1\tok\ttrue\r\n2\talso ok\ttrue\r\n' > .loop/criteria.tsv   # CRLF line endings
+bash "$RUNNER"; assert_eq 0 $? "CRLF line endings: passing criteria go GREEN, not false-red"
+assert_file_contains .loop/results.json '"all_green": true' "CRLF: passing contract is green"
+
 # --- hash-lock: armed + matching hash runs the contract normally ---
 printf '1\tok\ttrue\n' > .loop/criteria.tsv
 : > .loop/active
