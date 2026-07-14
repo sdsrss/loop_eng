@@ -98,6 +98,7 @@ fi
   printf '  "criteria": [\n'
   first=1
   ran=0
+  used_ids="|"
   # `|| [ -n "$id" ]`: read returns non-zero on a final line with no trailing
   # newline but still assigns it; without this the last criterion is silently
   # dropped, and a dropped FAILING criterion yields a false all_green.
@@ -117,6 +118,20 @@ fi
     # redirect fails, the command never runs, and a PASSING criterion reports a
     # false RED (loop can never go green). '..' would also escape .loop/evidence/.
     safe_id="${id//[^A-Za-z0-9._-]/_}"
+    # Two distinct ids can sanitize to the same filename ('a/b' and 'a:b' both
+    # become a_b): without disambiguation the later criterion's log silently
+    # overwrites the earlier one's and results.json cites one path twice —
+    # pass/fail stays correct but the evidence is misattributed. Suffix repeats
+    # (a_b, a_b.2, a_b.3, …); plain-string probe, bash 3.2-safe.
+    case "$used_ids" in
+      *"|$safe_id|"*)
+        n=2
+        while case "$used_ids" in *"|$safe_id.$n|"*) true ;; *) false ;; esac; do
+          n=$((n + 1))
+        done
+        safe_id="$safe_id.$n" ;;
+    esac
+    used_ids="$used_ids$safe_id|"
     log="$EVID/$safe_id.log"
     status=0
     # </dev/null: without it, a stdin-reading criterion command would consume

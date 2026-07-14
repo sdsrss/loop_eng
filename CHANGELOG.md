@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+Audit-driven batch from `docs/audit-report-v0.7.0-2026-07-14.md` (batches 1-2:
+same-day items + small-fix batch).
+
+### Changed
+- **`unattended-autoloop.sh` exit code now reflects the remaining backlog**
+  (user-visible behavior change — the next release MUST be a MINOR bump):
+  the driver exits **1** when it stops with unchecked backlog items left
+  (session cap / wall-clock budget / circuit breaker), so a systemd unit or
+  any exit-code monitor can tell "converged" from "gave up". Exit 0 now means
+  the backlog was drained; the provider-limit stop keeps exit 75. Revert
+  path: pin v0.7.0. (audit A2)
+
+### Fixed
+- `run-contract.sh`: two criterion ids that sanitize to the same evidence
+  filename (`a/b` and `a:b` → `a_b.log`) no longer overwrite each other's
+  evidence — repeats get a numeric suffix (`a_b.2.log`) and results.json
+  cites the real per-criterion path. Pass/fail was never affected; the
+  evidence attribution was. (audit A6)
+- `arm-contract.sh` pre-arm red-check: criterion commands now run with stdin
+  from `/dev/null`, matching run-contract.sh — a stdin-reading criterion no
+  longer swallows the remaining criteria lines (which silently skipped their
+  already-green warnings). (audit A12a)
+- `install-timer.sh`: the polish scope argument is whitespace-validated like
+  every other value injected into the unit's unquoted `ExecStart` — a scope
+  like `"legacy code/"` previously enabled cleanly and split into a wrong
+  scope plus a stray flag argument at first trigger. (audit A7)
+
+### Docs
+- `commands/autoloop.md` roadmap mode: stop rules 3 (same failure) and 5 (no
+  progress) explicitly reset at each item boundary — item N+1's first
+  expected-red round is not "no progress" after item N's ALL GREEN. (audit A3)
+- `agents/loop-builder.md`: new "when the fix request is a /polish finding"
+  section carrying the red→green and zero-test-modification disciplines in
+  the builder's OWN prompt (previously only polish.md — a file the builder
+  subagent never sees — stated them); polish.md's dispatch step now passes
+  the finding's category. (audit A4)
+- `arm-contract.sh` red-check comment no longer claims "read-only": criterion
+  commands are silenced, not sandboxed, and run again on every stop attempt.
+  SKILL.md's contract-quality rules gain rule 4: criteria must be idempotent
+  verify-only commands. (audit A12b)
+- `CLAUDE.md` is now tracked in git (was gitignored — invisible to a fresh
+  clone) and refreshed: stale "No CI" claim replaced with the real CI +
+  RELEASING.md pointer; blanket `bash >= 4.4` floor split into the accurate
+  two floors (hooks 3.2, unattended drivers 4.4); dual-source section now
+  names the plugin-cache third copy that actually enforces in live sessions
+  and its `/plugin update` lag. (audit A5, A1)
+
 ## 0.7.0 — 2026-07-14
 
 ### Added

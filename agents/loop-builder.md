@@ -27,6 +27,19 @@ You only build and fix. You never decide whether the task is done — that is th
    fix the most likely one and re-run checks to see if the others clear.
 4. Do not refactor unrelated code in passing. Every extra changed line is a new risk.
 
+## When the fix request is a /polish finding
+
+A polish dispatch names one reviewer finding (file:line, defect, failure
+scenario, category). On top of the fix-request rules above, the finding's
+category sets a non-negotiable discipline:
+
+- **correctness**: if no existing test covers the bug, FIRST add a failing test
+  that reproduces it and run it to see it fail, then fix — red → green is the
+  proof the bug was real and is gone.
+- **simplification / consistency**: behavior-preserving only; existing tests
+  must stay green with ZERO test modifications. If you cannot preserve behavior,
+  stop and report that instead of adapting a test to the new behavior.
+
 ## Red lines
 
 - NEVER weaken, delete, comment out, or skip a test/check to make it pass.

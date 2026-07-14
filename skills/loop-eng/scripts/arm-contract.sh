@@ -65,8 +65,11 @@ fi
 # already pinned above and .loop/active is still created below regardless. A
 # criterion that is legitimately green at arm (e.g. a baseline "suite passes")
 # also warns; that is acceptable, the human decides. Same TSV parse shape as
-# run-contract.sh (skip blanks + #comments, strip a trailing CR). Each command
-# runs read-only with stdout+stderr silenced so arm's own output stays clean.
+# run-contract.sh (skip blanks + #comments, strip a trailing CR). Each command's
+# stdout+stderr are silenced so arm's own output stays clean — silenced, NOT
+# sandboxed: a side-effecting criterion command runs for real here, and again on
+# every stop attempt via run-contract. Criteria must be idempotent verify-only
+# commands (see SKILL.md, "Contract quality caps loop quality").
 #
 # Knobs (arming must stay instant even when a criterion is the full test suite):
 #   LOOP_ENG_ARM_REDCHECK=0          skip the red-check entirely — ZERO criterion
@@ -92,10 +95,13 @@ if [ -f "$CRIT" ] && [ "${LOOP_ENG_ARM_REDCHECK:-1}" != "0" ]; then
     case "$id" in \#*) continue ;; esac
     cmd="${cmd%$'\r'}"
     [ -z "${cmd:-}" ] && continue
+    # </dev/null: same guard as run-contract.sh — a stdin-reading criterion
+    # command would otherwise consume the remaining criteria lines from this
+    # while-read loop (silently skipping their red-check).
     if [ -n "$REDCHECK_TIMEOUT_BIN" ]; then
-      "$REDCHECK_TIMEOUT_BIN" "$REDCHECK_TIMEOUT" bash -c "$cmd" >/dev/null 2>&1
+      "$REDCHECK_TIMEOUT_BIN" "$REDCHECK_TIMEOUT" bash -c "$cmd" >/dev/null 2>&1 </dev/null
     else
-      bash -c "$cmd" >/dev/null 2>&1
+      bash -c "$cmd" >/dev/null 2>&1 </dev/null
     fi
     redcheck_status=$?
     if [ "$redcheck_status" -eq 0 ]; then

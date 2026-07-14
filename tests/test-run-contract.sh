@@ -32,6 +32,15 @@ bash "$RUNNER"; assert_eq 0 $? "slashed id: passing criterion is GREEN, not a fa
 assert_file_contains .loop/results.json '"id": "lint/eslint"' "slashed id preserved verbatim in JSON"
 assert_file_contains .loop/results.json '"passes": true' "slashed id criterion actually ran and passed"
 
+# --- two ids that sanitize to the same filename must not share one evidence log ---
+# (pre-fix, 'a/b' and 'a:b' both wrote .loop/evidence/a_b.log: results.json cited
+# the same path twice and the first criterion's evidence was silently overwritten)
+printf 'a/b\tfirst collider\techo first-evidence\na:b\tsecond collider\techo second-evidence\n' > .loop/criteria.tsv
+bash "$RUNNER"; assert_eq 0 $? "colliding ids: contract still exits 0"
+assert_file_contains .loop/evidence/a_b.log 'first-evidence' "first collider keeps its own evidence log"
+assert_file_contains .loop/evidence/a_b.2.log 'second-evidence' "second collider gets a suffixed evidence log"
+assert_file_contains .loop/results.json 'a_b.2.log' "results.json cites the suffixed evidence path"
+
 # --- vacuous contract (zero runnable criteria) fails CLOSED, never a false green ---
 printf '# only comments\n\n' > .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "all-comment criteria fails closed, exit 1"

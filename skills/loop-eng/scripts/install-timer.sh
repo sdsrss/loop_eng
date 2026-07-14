@@ -96,6 +96,11 @@ case "$CLAUDE_ABS" in *[[:space:]]*) die "claude path contains whitespace, which
 ENV_LINES=""
 if [ "$MODE" = polish ]; then
   SCOPE="${ARG:-src/}"
+  # Same reasoning as the REPO/RUNNER/CLAUDE_ABS guards above: SCOPE lands
+  # unquoted in ExecStart, so an embedded space splits it into a wrong scope
+  # plus a stray argument the runner mistakes for its flag — silently
+  # report-only with the wrong scope, surfacing only at first trigger.
+  case "$SCOPE" in *[[:space:]]*) die "polish scope contains whitespace, which the systemd unit cannot represent unquoted: $SCOPE" ;; esac
   EXEC_ARGS="$REPO $SCOPE"
   if [ "$ALLOW_WRITE" = 1 ]; then
     EXEC_ARGS="$EXEC_ARGS --auto-fix"

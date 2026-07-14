@@ -73,6 +73,18 @@ case "$err" in
   *) assert_eq "whitespace-named" "other-error" "refusal must cite whitespace" ;;
 esac
 
+# --- polish scope containing whitespace: refused like every other ExecStart value ---
+# (pre-fix, SCOPE was the one unquoted ExecStart value without the guard: a scope
+# like "legacy code/" wrote a unit that split into scope="legacy" plus a stray
+# third argument the runner mistakes for its flag — silently report-only with the
+# wrong scope, surfacing only at first trigger)
+err=$(run_install polish "$SB" "legacy code/" 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "scope with whitespace refused"
+case "$err" in
+  *whitespace*) assert_eq 1 1 "scope refusal names the reason" ;;
+  *) assert_eq "whitespace-named" "other-error" "scope refusal must cite whitespace" ;;
+esac
+
 # --- nonexistent repo-dir: refused AND the error names the offending path (not blank) ---
 err=$(run_install polish /no/such/repo-dir-xyz 2>&1 >/dev/null); rc=$?
 assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "nonexistent repo-dir refused"

@@ -41,6 +41,16 @@ assert_file_contains .loop/armwarn 'already green' "arm red-check warns on a cri
 assert_file_contains .loop/armwarn 'baseline' "arm red-check names the offending criterion id"
 rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
 
+# --- red-check: a stdin-reading criterion must not swallow later criteria lines ---
+# (pre-fix, `cat` consumed the rest of criteria.tsv from the while-read loop's
+# stdin — run-contract.sh guards this with </dev/null, the red-check did not —
+# so criteria after a stdin-reader were silently skipped, losing their warnings)
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+printf 'reader\treads stdin\tcat\nc2\talso green\ttrue\n' > .loop/criteria.tsv
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm with a stdin-reading criterion exits 0"
+assert_file_contains .loop/armwarn "criterion 'c2' is already green" "criterion after a stdin-reader is still red-checked"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
 # --- red-check kill switch: LOOP_ENG_ARM_REDCHECK=0 executes ZERO criterion commands ---
 # The criterion is green (touch exits 0) AND has an observable side effect: with
 # the red-check disabled it must neither warn nor leave the marker behind.

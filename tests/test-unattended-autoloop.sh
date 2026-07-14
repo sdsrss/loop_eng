@@ -66,8 +66,8 @@ SB2=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SD"' EXIT
 mkdir -p "$SB2/.loop"
 printf -- '- [ ] never done\n' > "$SB2/.loop/backlog.md"
 STUB_MODE=stall LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
-  bash "$DRIVER" "$SB2" 5 >/dev/null 2>&1
-assert_eq 0 $? "breaker stop is a clean exit"
+  bash "$DRIVER" "$SB2" 5 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "breaker stop exits 1 (backlog not drained)"
 assert_file_contains "$SB2/.loop/unattended.log" "circuit breaker OPEN" "breaker logged"
 assert_eq 2 "$(grep -c 'session .* starting' "$SB2/.loop/unattended.log")" "exactly 2 sessions before breaker"
 
@@ -143,7 +143,7 @@ rm -f "$SB4/.loop/unattended.log"
 STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
   TIMEOUT_RECORD="$TD/record" FAKE_TIMEOUT_MODE=expire PATH="$TD:$PATH" \
   bash "$DRIVER" "$SB4" 5 >/dev/null 2>&1 && rc=0 || rc=$?
-assert_eq 0 "$rc" "timed-out sessions end in a clean breaker stop"
+assert_eq 1 "$rc" "timed-out sessions end in a breaker stop with exit 1 (item still pending)"
 assert_file_contains "$SB4/.loop/unattended.log" "TIMED OUT" "timeout is named in the driver log"
 assert_file_contains "$SB4/.loop/unattended.log" "circuit breaker OPEN" "timed-out sessions count as no progress"
 
@@ -189,5 +189,17 @@ else
   assert_eq "<=1048576" "$ROLL_SIZE" "oversized unattended.log truncated to <=1MB"
 fi
 assert_file_contains "$SB6/.loop/unattended.log" "TAIL-MARKER-SURVIVES" "truncation keeps the tail (marker survives)"
+
+# --- gave-up exit code: stopping at the session cap with items left exits 1 ---
+# (pre-fix, every break path fell through to the same exit-0 "driver done" line,
+# so a systemd timer / exit-code monitor could not tell "converged" from "gave
+# up with N items pending" — the stuck backlog stayed green indefinitely)
+SB7=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SD" "$TD"' EXIT
+mkdir -p "$SB7/.loop"; printf -- '- [ ] one\n- [ ] two\n' > "$SB7/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SB7" 1 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "session cap with pending items exits 1 (gave up, not done)"
+assert_file_contains "$SB7/.loop/unattended.log" "session cap" "cap stop is named in the log"
+assert_file_contains "$SB7/.loop/unattended.log" "not drained" "non-zero exit reason is logged"
 
 report "test-unattended-autoloop"

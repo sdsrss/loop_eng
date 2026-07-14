@@ -168,4 +168,14 @@ while :; do
   fi
 done
 
-note "driver done: sessions=$session remaining=$(count_pending)"
+# Exit code must reflect the REMAINING backlog, not merely "the loop ended":
+# of the four break paths only "backlog empty" is completion — session cap,
+# wall-clock budget, and circuit breaker all give up with items pending. A
+# uniform exit 0 keeps `systemctl status` green forever and exit-code alerting
+# blind while a stuck backlog rots for weeks. 0 = drained; 1 = gave up.
+remaining_final=$(count_pending)
+note "driver done: sessions=$session remaining=$remaining_final"
+if [ "$remaining_final" -gt 0 ]; then
+  note "exit 1: backlog not drained ($remaining_final item(s) pending) — stop reason above"
+  exit 1
+fi

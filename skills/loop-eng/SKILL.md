@@ -68,6 +68,9 @@ rules, learned from live pilots:
    omitted from the contract is a regression faithfully implemented.
 3. Encode "must not happen" as a checkable negative assertion — the checker
    only verifies what the acceptance commands list.
+4. Criterion commands must be idempotent, verify-only commands — they execute
+   for real (not sandboxed) at the arm-time red-check AND on every stop
+   attempt, so a side-effecting criterion fires repeatedly.
 
 ## Templates
 

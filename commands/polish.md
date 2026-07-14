@@ -66,7 +66,8 @@ No adjectives.
 1. Order the fix queue: high severity first; within a severity, correctness >
    test-coverage > simplification > consistency.
 2. For each finding in the fix queue, dispatch loop-builder with the finding verbatim
-   (file:line, defect, failure scenario). Batch only trivially independent
+   (file:line, defect, failure scenario, category — the builder's polish-finding
+   discipline keys off the category). Batch only trivially independent
    low-severity items. Builder rules apply (root cause, no drive-by changes,
    commit per fix).
    Cost: a low-severity single-file fix MAY dispatch the builder at a cheaper

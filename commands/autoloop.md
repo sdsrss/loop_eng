@@ -89,6 +89,10 @@ progress) on items 2..N that have not been built yet. Each item goes green in
 its own round, in document order, and stays green thereafter — so a later round
 still watches for regressions in items already ticked, but never counts the
 still-pending ones against the current round's item.
+The same-failure and no-progress counters (stop rules 3 and 5) reset at each
+item boundary: they compare rounds only WITHIN the current item. Item N+1's
+first round reporting its own expected-red target is a fresh start, not "no
+progress" relative to item N's ALL-GREEN round.
 
 The wrap-up report for a roadmap run MUST end with a three-part ledger:
 **Done** (checked items, each with its proof line) / **Deferred** (with
