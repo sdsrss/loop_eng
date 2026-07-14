@@ -150,4 +150,31 @@ case "$err" in
 esac
 assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.service")" "bad-mode uninstall removed nothing"
 
+# --- orphan cleanup: uninstall removes the install-created .loop/cron.log ---
+# install-timer pre-creates $SB/.loop so systemd can open cron.log before
+# ExecStart; under NO_SYSTEMCTL systemd never runs, so we plant the cron.log the
+# way a real trigger would. A repo that only ever had a timer (never ran a loop)
+# has nothing else in .loop — uninstall must reap both the log and the now-empty
+# dir. The cron.log path is parsed out of the .service unit file being removed.
+run_install autoloop "$SB" >/dev/null
+assert_eq yes "$(exists "$SB/.loop")" "install pre-created repo .loop"
+: > "$SB/.loop/cron.log"
+run_uninstall autoloop >/dev/null; rc=$?
+assert_eq 0 "$rc" "orphan-cleanup uninstall exits 0"
+assert_eq no "$(exists "$SB/.loop/cron.log")" "uninstall removed install-created cron.log orphan"
+assert_eq no "$(exists "$SB/.loop")" "uninstall removed the now-empty .loop dir"
+
+# --- preservation: cron.log-only cleanup must NOT fire when live loop state exists ---
+# Plant real loop state (results.json) alongside cron.log. A live loop's state
+# must survive a timer uninstall, so cleanup removes NOTHING here — not the dir,
+# not the extra file, and (err on preservation) not even cron.log.
+run_install autoloop "$SB" >/dev/null
+: > "$SB/.loop/cron.log"
+echo '{"passes":true}' > "$SB/.loop/results.json"
+run_uninstall autoloop >/dev/null; rc=$?
+assert_eq 0 "$rc" "preservation uninstall exits 0"
+assert_eq yes "$(exists "$SB/.loop")" "uninstall preserved .loop dir holding live state"
+assert_eq yes "$(exists "$SB/.loop/results.json")" "uninstall preserved live loop state (results.json)"
+assert_eq yes "$(exists "$SB/.loop/cron.log")" "cron.log-only cleanup does not fire beside other loop state"
+
 report "test-install-timer"
