@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 — 2026-07-14
+
+**Upgrade note**: `unattended-autoloop.sh` now exits **1** when it stops with
+backlog items still pending (session cap / wall-clock budget / circuit
+breaker) — previously every stop path exited 0. If a wrapper or monitor
+treats any non-zero exit as fatal, adjust it: exit 0 = backlog drained,
+1 = gave up with items pending, 75 = provider limit (unchanged). Revert
+path: pin v0.7.0. Live-install smoke (RELEASING.md §1): PENDING post-ship —
+this release was shipped from a headless session; the smoke's two platform
+behaviors (hooks.json auto-load, `${CLAUDE_PLUGIN_ROOT}` expansion) were
+last verified live 2026-07-14 on 0.5.0 and no hooks/ file changed since.
 
 Audit-driven batch from `docs/audit-report-v0.7.0-2026-07-14.md` (batches 1-2:
 same-day items + small-fix batch).
