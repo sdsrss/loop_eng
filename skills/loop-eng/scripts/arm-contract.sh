@@ -56,6 +56,29 @@ else
   echo "loop-eng arm-contract: no $CRIT (legacy verify.sh loop?); armed without a hash-lock." >&2
 fi
 
+# Pre-arm RED-CHECK (pilot retro finding): a verify criterion that is ALREADY
+# green before any work has been done is untrustworthy — like a test that has
+# never failed, it may be vacuously satisfied (e.g. a grep matching a
+# pre-existing comment, a file-exists check on a file that predates the task).
+# Surface it here so the human can judge whether it can actually go RED.
+# ADVISORY ONLY: this loop never changes the arm outcome — the contract is
+# already pinned above and .loop/active is still created below regardless. A
+# criterion that is legitimately green at arm (e.g. a baseline "suite passes")
+# also warns; that is acceptable, the human decides. Same TSV parse shape as
+# run-contract.sh (skip blanks + #comments, strip a trailing CR). Each command
+# runs read-only with stdout+stderr silenced so arm's own output stays clean.
+if [ -f "$CRIT" ]; then
+  while IFS=$'\t' read -r id desc cmd || [ -n "$id" ]; do
+    [ -z "${id:-}" ] && continue
+    case "$id" in \#*) continue ;; esac
+    cmd="${cmd%$'\r'}"
+    [ -z "${cmd:-}" ] && continue
+    if bash -c "$cmd" >/dev/null 2>&1; then
+      echo "loop-eng arm-contract: WARNING — criterion '$id' is already green at arm time (passed before any work). A criterion that never had to go RED may be vacuously satisfied — verify it actually tests the change. Advisory only; the loop is still armed." >&2
+    fi
+  done < "$CRIT"
+fi
+
 : > "$ACTIVE"
 rm -f "$COUNT_FILE"
 echo "loop-eng arm-contract: stop-gate armed ($ACTIVE)." >&2

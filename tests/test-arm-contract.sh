@@ -32,6 +32,15 @@ bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on vacuous contract still exits
 assert_file_contains .loop/armwarn 'no runnable criteria' "arm warns about vacuous contract"
 rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
 
+# --- pre-arm red-check: an ALREADY-green criterion warns but arm still succeeds ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+printf 'baseline\talready passes\ttrue\n' > .loop/criteria.tsv
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm with an already-green criterion still exits 0"
+assert_eq "1" "$([ -f .loop/active ] && echo 1)" "arm still creates .loop/active despite red-check warning"
+assert_file_contains .loop/armwarn 'already green' "arm red-check warns on a criterion green at arm time"
+assert_file_contains .loop/armwarn 'baseline' "arm red-check names the offending criterion id"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
 # --- no criteria.tsv: arms without a hash-lock, does not error ---
 rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
 bash "$ARM" 2>/dev/null; assert_eq 0 $? "arm with no criteria.tsv still exits 0"
