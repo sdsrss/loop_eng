@@ -165,4 +165,29 @@ STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_MAX_MINUTES=0 \
 assert_eq 0 "$rc" "MAX_MINUTES=0 still runs (falls back to default)"
 assert_file_contains "$SD/w4" "would disable the wall-clock budget" "warns that 0 would disable the budget"
 
+# --- log rotation: >30-day session logs pruned, oversized rolling log capped ---
+# touch -t (not GNU-only `touch -d '40 days ago'`) so the fake-old mtime also
+# works on BSD/macOS CI; any fixed past date is always >30 days old.
+SB6=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SD" "$TD"' EXIT
+mkdir -p "$SB6/.loop"; printf -- '- [ ] one\n' > "$SB6/.loop/backlog.md"
+OLD_SLOG="$SB6/.loop/unattended-session-20200101-000000.log"
+echo "ancient session" > "$OLD_SLOG"
+touch -t 202001010000 "$OLD_SLOG"
+{ head -c 1200000 /dev/zero | tr '\0' 'x'; echo; echo "TAIL-MARKER-SURVIVES"; } > "$SB6/.loop/unattended.log"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SB6" 5 >/dev/null 2>&1
+assert_eq 0 $? "rotation run exits 0"
+if [ -e "$OLD_SLOG" ]; then
+  assert_eq "pruned" "still-present" ">30-day session log is pruned"
+else
+  assert_eq 0 0 ">30-day session log is pruned"
+fi
+ROLL_SIZE=$(wc -c < "$SB6/.loop/unattended.log")
+if [ "$ROLL_SIZE" -le 1048576 ]; then
+  assert_eq 0 0 "oversized unattended.log truncated to <=1MB (now $ROLL_SIZE bytes)"
+else
+  assert_eq "<=1048576" "$ROLL_SIZE" "oversized unattended.log truncated to <=1MB"
+fi
+assert_file_contains "$SB6/.loop/unattended.log" "TAIL-MARKER-SURVIVES" "truncation keeps the tail (marker survives)"
+
 report "test-unattended-autoloop"

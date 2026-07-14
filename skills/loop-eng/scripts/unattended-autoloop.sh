@@ -70,6 +70,21 @@ if [ ! -f "$BACKLOG" ]; then
 fi
 mkdir -p .loop
 LOG_MAIN=".loop/unattended.log"
+
+# Log rotation, before anything else appends: under a years-long systemd timer
+# every run adds a timestamped per-session log and the rolling log only ever
+# grows, so an unattended host fills .loop/ (eventually the disk) without
+# bound. Per-session logs (unattended-session-<stamp>.log — the dash in the
+# glob excludes the rolling unattended.log) are dropped after 30 days; the
+# rolling log is capped at 1MB by keeping its tail. cat-back into the same
+# inode (not mv) so a concurrent appender keeps writing to the live file —
+# best effort: lines appended between the tail snapshot and the cat-back are
+# lost.
+find .loop -maxdepth 1 -name 'unattended-*.log' -mtime +30 -exec rm -f {} + || true
+if [ -f "$LOG_MAIN" ] && [ "$(wc -c < "$LOG_MAIN")" -gt 1048576 ]; then
+  tail -c 524288 "$LOG_MAIN" > "$LOG_MAIN.tmp" && cat "$LOG_MAIN.tmp" > "$LOG_MAIN"
+  rm -f "$LOG_MAIN.tmp"
+fi
 DEADLINE=$(( $(date +%s) + MAX_MINUTES * 60 ))
 no_progress=0
 limit_hits=0

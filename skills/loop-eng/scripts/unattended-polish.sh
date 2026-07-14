@@ -56,6 +56,22 @@ fi
 cd "$REPO"
 LOG_DIR=".loop"
 mkdir -p "$LOG_DIR"
+
+# Log rotation, before anything else appends: under a years-long systemd timer
+# every run adds a timestamped per-run log and the rolling log only ever grows,
+# so an unattended host fills .loop/ (eventually the disk) without bound.
+# Per-run logs (unattended-<stamp>.log — NOT the rolling unattended.log, which
+# the dash in the glob excludes) are dropped after 30 days; the rolling log is
+# capped at 1MB by keeping its tail. cat-back into the same inode (not mv) so a
+# concurrent appender keeps writing to the live file — best effort: lines
+# appended between the tail snapshot and the cat-back are lost.
+find "$LOG_DIR" -maxdepth 1 -name 'unattended-*.log' -mtime +30 -exec rm -f {} + || true
+ROLLING="$LOG_DIR/unattended.log"
+if [ -f "$ROLLING" ] && [ "$(wc -c < "$ROLLING")" -gt 1048576 ]; then
+  tail -c 524288 "$ROLLING" > "$ROLLING.tmp" && cat "$ROLLING.tmp" > "$ROLLING"
+  rm -f "$ROLLING.tmp"
+fi
+
 STAMP=$(date +%Y%m%d-%H%M%S)
 LOG="$LOG_DIR/unattended-$STAMP.log"
 
