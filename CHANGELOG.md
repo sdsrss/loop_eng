@@ -1,10 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-07-14
 
-Roadmap Batch 0 + Batch 1 (source: `docs/optimization-roadmap-2026-07-14.md`,
-derived from `docs/audit-report-v0.4.1-2026-07-14.md`). All bugfixes/hardening;
-no breaking changes.
+The full audit-driven roadmap batch (21/21 items from
+`docs/optimization-roadmap-2026-07-14.md`, derived from
+`docs/audit-report-v0.4.1-2026-07-14.md`): mechanism fixes, /autoloop prompt
+revisions, CI on ubuntu+macOS, a live marketplace-install verification, and a
+release checklist (`RELEASING.md`). No breaking changes.
+
+**Upgrade note**: no action required — no default behavior changes for
+existing loops. After updating the plugin, run `/reload-plugins` (or start a
+fresh session): an in-place install/update is INERT in the running session
+(commands unresolved AND hooks not firing — verified live 2026-07-14). Revert
+path: reinstall v0.4.1.
 
 ### Verified (closes audit H2/N1 — the enforcement layer now has live mileage)
 - Live-install smoke (`RELEASING.md` §1) PASSED 2026-07-14 against
