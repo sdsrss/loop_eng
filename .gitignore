@@ -1,6 +1,5 @@
-# Local Claude Code working config — dev copies of the plugin (repo root is canonical)
+# Local Claude Code working config — dev copy of the plugin (repo root is canonical)
 .claude/
-CLAUDE.md
 
 # Research corpus (third-party articles, not distributable)
 docs/
