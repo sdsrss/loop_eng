@@ -267,6 +267,24 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 | Output is a proposal | every run ends by showing the diff for human review |
 | Test/build output is untrusted text | checker reports are forwarded verbatim by design (fidelity over filtering); prompt-injection riding in tool output is a residual covered by the red lines and the human review of the diff |
 
+- **Unattended write mode is real code execution without approval.**
+  `unattended-autoloop.sh` and `unattended-polish.sh` both invoke
+  `claude -p ... --permission-mode bypassPermissions` — once you opt in, a
+  scheduled run can modify and **commit** to your repo with no human in the
+  loop. It is **off by default** (report-only / no-build) and requires an
+  explicit opt-in: `LOOP_ENG_ALLOW_AUTOFIX=1` (with `--auto-fix`) for
+  `unattended-polish.sh`, `LOOP_ENG_ALLOW_AUTOBUILD=1` for
+  `unattended-autoloop.sh`, or `--allow-write` on `install-timer.sh` (which
+  injects the matching env var into the scheduled unit). Guards on top of
+  that opt-in — dirty-tree refusal, a commit-keyed circuit breaker, wall-clock
+  and session caps — bound the blast radius; they don't ask permission.
+- **`.loop/` is local state, not auto-removed.** The loop's bookkeeping
+  directory (`.loop/` — contract, criteria, `results.json`, `evidence/`,
+  `state.md`) is gitignored but lives in your working tree. Neither the
+  plugin uninstall nor `uninstall-timer.sh` deletes it — by design, since it
+  may hold an in-progress loop's state. If you want it gone, remove it by
+  hand: `rm -rf .loop/`.
+
 ## What to loop (and what not to)
 
 **Good fits**: reproducible bugfixes, refactors under test coverage, adding
