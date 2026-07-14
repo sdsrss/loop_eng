@@ -64,6 +64,14 @@ reorder. For each item, in order:
   `.loop/state.md` under `## Deferred (not loopable)` with a one-line reason:
   needs-human / interactive / no-machine-verify / out-of-repo-scope.
 
+Trivial micro-items MAY share a round. When several items are each a single
+file, under ~5 lines, and carry a purely static verify (grep / file-exists),
+group them into ONE backlog round instead of burning a full
+builder+checker+suite cycle per one-liner. Grouping shares only the round
+boundary: still make ONE commit per item inside that round, so per-item
+traceability in the wrap-up diff is preserved — only the checker+suite pass is
+amortized across the batch.
+
 State the triage result (backlog + deferred, with reasons) in one message,
 then proceed — do not wait for confirmation; the contract layer is the
 safety net (an unverifiable criterion warns at arm time and can never go
@@ -72,6 +80,15 @@ binds: finish what fits, leave the rest unchecked in the backlog and say so
 — the user re-invokes /autoloop to continue (checkboxes persist), or
 schedules unattended-autoloop.sh to consume the remainder across fresh
 sessions.
+
+When looping a multi-item backlog, the checker for each round judges ONLY the
+current round's item — its target criterion plus the suite. The other global
+criteria that belong to not-yet-built items are expected-red and are NOT that
+round's failure; otherwise round 1 would trip a stop rule (regression / no
+progress) on items 2..N that have not been built yet. Each item goes green in
+its own round, in document order, and stays green thereafter — so a later round
+still watches for regressions in items already ticked, but never counts the
+still-pending ones against the current round's item.
 
 The wrap-up report for a roadmap run MUST end with a three-part ledger:
 **Done** (checked items, each with its proof line) / **Deferred** (with
@@ -175,16 +192,22 @@ Whenever you stop on rules 2–6, the report MUST carry:
 
 ## Wrap-up
 
-After the loop ends (any outcome):
-- Disarm the stop-gate IN TWO SEPARATE Bash commands, in this order:
+After the loop ends, how you disarm depends on the outcome:
+- **ALL GREEN** — do NOT manually disarm at all. End the turn and
+  let the stop-gate self-clear: when the contract passes on the real stop
+  attempt the stop-gate removes `.loop/active`, `.loop/gate-count`, and
+  `.loop/criteria.sha256` itself. Manually deleting them here short-circuits
+  that final machine verification — you would tear the gate down before it has
+  confirmed, on the genuine stop, that the tree still passes.
+- **ESCALATION stop** (a legitimate end where the contract will never go green)
+  — the stop-gate will never self-clear on a red contract, so disarm it
+  yourself IN TWO SEPARATE Bash commands, in this order:
   1. `rm -f .loop/active .loop/gate-count`
   2. `rm -f .loop/criteria.sha256`
   The order matters: while `.loop/active` exists, the evidence-gate denies ANY
   Bash command touching `criteria.sha256` — including this legitimate wrap-up —
   so a single `rm` of all three files is denied. Removing `active` first
-  disarms that lock and the second command passes. (On ALL GREEN the stop-gate
-  lifts `active` + `gate-count` itself; removing them again is a harmless
-  no-op.) An escalation stop is a legitimate end — never leave the gate armed
+  disarms that lock and the second command passes. Never leave the gate armed
   behind you.
 - Append one line to `.loop/lessons.md` in the fixed format:
   `- <YYYY-MM-DD> | <task one-liner> | rounds <n> | <ALL GREEN|stop-rule-N> | <one reusable lesson, or "-">`
