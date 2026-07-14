@@ -21,7 +21,13 @@
   passes before any work is done — like a test that never failed — may be
   vacuously satisfied and prove nothing. The loop still pins, still arms, still
   exits 0; the warning only surfaces the untrustworthy criterion so the author
-  can tighten it. Portable bash 3.2. (pilot retro)
+  can tighten it. The red-check is BOUNDED: each criterion runs under a
+  per-criterion `timeout` (default 10s, overridable via
+  `LOOP_ENG_ARM_REDCHECK_TIMEOUT`) so a slow suite criterion no longer turns
+  arming into a minutes-long run; a timeout counts as unknown (NOT a false
+  already-green warning — a timeout is not green); and `LOOP_ENG_ARM_REDCHECK=0`
+  disables the check entirely with ZERO criterion execution. Portable bash 3.2.
+  (pilot retro)
 
 ### Changed
 - `hooks/evidence-gate.sh`: the armed deny for a single Bash command that
@@ -45,8 +51,20 @@
   reads an orchestrator-writable file, so "tick a box only after the checker
   reports ALL GREEN" is a red line, not a mechanism; on interrupt-resume,
   reconcile `git log` against the backlog ticks before continuing. (pilot retro)
+- README gate-scope note: the evidence-gate matches Bash commands by string, so
+  a command that merely NAMES a guarded path (a commit-message body, a test
+  command pointing at a sandbox) is denied too — a conservative, declared
+  false positive of the best-effort locator; the way around is to reword the
+  command or use the documented escape hatch. (round-3 pilot retro)
+- `skills/loop-eng/SKILL.md` "Contract quality caps loop quality" section:
+  three spec-authoring rules distilled from the live pilots — every target
+  criterion must be RED before arming (a pre-green criterion is vacuous), specs
+  must carry non-functional requirements (an omitted perf/timeout constraint is
+  a regression faithfully implemented), and "must not happen" belongs in a
+  checkable negative assertion. The loop's output quality is capped by the
+  contract's spec quality. (round-3 pilot retro)
 
-## 0.5.0 — 2026-07-14
+## 0.6.0 — 2026-07-14
 
 The full audit-driven roadmap batch (21/21 items from
 `docs/optimization-roadmap-2026-07-14.md`, derived from
