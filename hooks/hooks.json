@@ -1,6 +1,18 @@
 {
-  "description": "loop-eng hooks. Stop: while .loop/active exists, block session stop until the loop contract passes (hard ceiling: 3 blocks; the platform force-allows after 8). PreToolUse: deny model writes to the machine-written evidence ledger (.loop/results.json, .loop/evidence/, armed criteria.tsv); escape hatch LOOP_ENG_DISABLE_EVIDENCE_GATE=1. NOTE: if plugin hooks.json auto-loading does not fire in your Claude Code version, register these hooks manually in settings.json — see README.",
+  "description": "loop-eng hooks. Stop: while .loop/active exists, block session stop until the loop contract passes (hard ceiling: 3 blocks; the platform force-allows after 8). PreToolUse: deny model writes to the machine-written evidence ledger (.loop/results.json, .loop/evidence/, armed criteria.tsv); escape hatch LOOP_ENG_DISABLE_EVIDENCE_GATE=1. SessionStart: a fail-open update-available NOTIFIER (no auto-download) that at most once per 24h checks the GitHub releases API and injects a one-line notice when a newer version exists. NOTE: if plugin hooks.json auto-loading does not fire in your Claude Code version, register these hooks manually in settings.json — see README.",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/update-notify.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "*",

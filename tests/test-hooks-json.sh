@@ -122,6 +122,49 @@ while [ "$i" -lt "$stop_n" ]; do
   i=$((i+1))
 done
 
+# --- SessionStart: EVERY block runs update-notify.sh via CLAUDE_PLUGIN_ROOT
+# with a sane timeout. This is the fail-open update NOTIFIER; an unregistered or
+# mis-pathed block simply means the user is never told about a new version, so
+# assert the wiring the same way the enforcement gates are asserted. ---
+ss_n=$(json_len '.hooks.SessionStart')
+case "$ss_n" in *[!0-9]*|"") ss_n=0 ;; esac
+if [ "$ss_n" -ge 1 ]; then
+  assert_eq 1 1 "hooks.SessionStart has at least one block (found $ss_n)"
+else
+  assert_eq "1+ SessionStart blocks" "$ss_n" "hooks.SessionStart has at least one block"
+fi
+i=0
+while [ "$i" -lt "$ss_n" ]; do
+  entry_n=$(json_len ".hooks.SessionStart[$i].hooks")
+  case "$entry_n" in *[!0-9]*|"") entry_n=0 ;; esac
+  if [ "$entry_n" -ge 1 ]; then
+    assert_eq 1 1 "SessionStart[$i] has at least one hook entry (found $entry_n)"
+  else
+    assert_eq "1+ hook entries" "$entry_n" "SessionStart[$i] has at least one hook entry"
+  fi
+  j=0
+  while [ "$j" -lt "$entry_n" ]; do
+    assert_eq command "$(json_get ".hooks.SessionStart[$i].hooks[$j].type")" "SessionStart[$i].hooks[$j] is type=command"
+    ss_cmd=$(json_get ".hooks.SessionStart[$i].hooks[$j].command")
+    case "$ss_cmd" in
+      *update-notify.sh*) assert_eq 1 1 "SessionStart[$i].hooks[$j] command points at update-notify.sh" ;;
+      *) assert_eq "update-notify.sh" "$ss_cmd" "SessionStart[$i].hooks[$j] command points at update-notify.sh" ;;
+    esac
+    case "$ss_cmd" in
+      *'${CLAUDE_PLUGIN_ROOT}'*) assert_eq 1 1 "SessionStart[$i].hooks[$j] command resolves via CLAUDE_PLUGIN_ROOT" ;;
+      *) assert_eq "plugin-root-path" "$ss_cmd" "SessionStart[$i].hooks[$j] command resolves via CLAUDE_PLUGIN_ROOT" ;;
+    esac
+    ss_to=$(json_get ".hooks.SessionStart[$i].hooks[$j].timeout")
+    if [ -n "$ss_to" ] && [ "$ss_to" -ge 1 ] 2>/dev/null && [ "$ss_to" -le 60 ] 2>/dev/null; then
+      assert_eq 1 1 "SessionStart[$i].hooks[$j] has a sane timeout ($ss_to s)"
+    else
+      assert_eq "sane-timeout" "timeout=$ss_to" "SessionStart[$i].hooks[$j] must have a sane timeout"
+    fi
+    j=$((j+1))
+  done
+  i=$((i+1))
+done
+
 # --- PreToolUse: EVERY block covers all write-capable tools + Bash and runs
 # evidence-gate.sh via CLAUDE_PLUGIN_ROOT ---
 ptu_n=$(json_len '.hooks.PreToolUse')
