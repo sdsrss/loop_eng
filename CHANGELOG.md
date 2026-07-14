@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.9.0 — 2026-07-14
+
+The audit-closure batch: every remaining finding from
+`docs/audit-report-v0.7.0-2026-07-14.md` (test batch, docs batch, low-severity
+tail) plus three optimizations distilled from the same day's live dogfood
+loops. Driven end-to-end by three /autoloop roadmap runs on the released 0.8.0
+enforcement — 10 rounds, 10/10 ALL GREEN, zero rework rounds.
+
+**Upgrade note**: no action required — behavior changes are additive
+(broader provider-limit detection; install-time refusals for values systemd
+would corrupt; a truthful sync-local warning). After updating run
+`/reload-plugins` or start a fresh session. Revert path: pin v0.8.0.
+Live-install smoke: hooks/ untouched this release; the evidence-gate leg
+passed live on 0.8.0 the same day (see 0.8.0 note).
+
+### Added
+- Test coverage +45 assertions (218 → 263), closing every audit test gap:
+  provider-limit retry/exit-75 path of the autoloop driver (was ZERO-covered),
+  stop-gate armed-without-contract allow-stop, the no-SHA-256-tool fail-closed
+  branches of arm/run-contract (PATH-stripping fixture), a real
+  LOOP_ENG_LOOP_DIR test (the scripts' "suite sandboxes with it" comment is
+  now true), uninstall-timer autoloop-mode symmetry + bad-mode refusal,
+  hooks-json content checks iterating EVERY hook block (12 → 19, no more
+  latent-blind `[0]` indexing), percent-refusal and quota-phrasing cases.
+- `install-timer.sh`: a literal `%` in any of the four systemd-injected
+  values (repo dir, runner path, claude path, polish scope) is refused at
+  install time — systemd expands `%` as a unit specifier, the same
+  "enables cleanly, breaks at first trigger" class as the whitespace guards.
+
+### Changed
+- Both unattended drivers detect more provider-limit phrasings:
+  `quota` / `overloaded` / `too many requests` join `usage limit` /
+  `rate limit(ed)` (identical pattern in both scripts; still only consulted
+  when a session exits non-zero). A "quota exceeded" session now takes the
+  wait-and-retry / exit-75 path instead of the generic breaker path.
+- `scripts/sync-local.sh`: the dogfood parity check no longer greps
+  `.claude/settings.json` for hook filenames (a permanent false positive —
+  hooks load via the installed plugin's hooks.json, never project settings).
+  It now compares the highest installed plugin-cache version against the
+  repo's plugin.json and warns when live enforcement lags the repo
+  (`LOOP_ENG_PLUGIN_CACHE_DIR` override for tests; silent on fresh clones).
+- `commands/autoloop.md` protocol, from live-dogfood findings: dispatch
+  builder/checker SYNCHRONOUSLY (an async dispatch burns armed stop-gate
+  blocks while the orchestrator waits, and builder reports arrive duplicated
+  after the loop closes); intermediate-round checkers run the contract's
+  fast subset with the full sweep reserved for the final round (five
+  full-sweep rounds caught nothing the subset would have missed); Step-1
+  backlog lines carry the `| verify:` suffix like roadmap triage; the
+  dogfood-fallback note is stated once in Step 0 (file net smaller).
+
+### Docs
+- README: "Environment variables" reference table covering all 11
+  `LOOP_ENG_*` knobs (LOOP_DIR clearly marked TEST-ONLY) and a note that
+  marketplace installs may resolve commands namespace-prefixed
+  (`/loop-eng:autoloop`).
+- RELEASING.md: the live-smoke cache locator picks the highest cached
+  version via `sort -V` and echoes the resolved path (a `head -1` pick could
+  silently smoke a stale version when multiple versions are cached).
+
 ## 0.8.0 — 2026-07-14
 
 **Upgrade note**: `unattended-autoloop.sh` now exits **1** when it stops with
