@@ -41,6 +41,29 @@ assert_file_contains .loop/armwarn 'already green' "arm red-check warns on a cri
 assert_file_contains .loop/armwarn 'baseline' "arm red-check names the offending criterion id"
 rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
 
+# --- red-check kill switch: LOOP_ENG_ARM_REDCHECK=0 executes ZERO criterion commands ---
+# The criterion is green (touch exits 0) AND has an observable side effect: with
+# the red-check disabled it must neither warn nor leave the marker behind.
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+printf 'green\tside-effect probe\ttouch redcheck-ran.marker\n' > .loop/criteria.tsv
+LOOP_ENG_ARM_REDCHECK=0 bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm with red-check disabled still exits 0"
+assert_eq "1" "$([ -f .loop/active ] && echo 1)" "disabled red-check still creates .loop/active"
+assert_eq "" "$(grep -F 'already green' .loop/armwarn)" "disabled red-check emits no already-green warning"
+assert_eq "" "$([ -f redcheck-ran.marker ] && echo 1)" "disabled red-check runs ZERO criterion commands (no marker)"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn redcheck-ran.marker
+
+# --- red-check timeout: a slow criterion is UNKNOWN (timeout exit 124), not green ---
+if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+  rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+  printf 'slow\toverruns the budget\tsleep 2\n' > .loop/criteria.tsv
+  LOOP_ENG_ARM_REDCHECK_TIMEOUT=1 bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm with a timed-out criterion still exits 0"
+  assert_eq "1" "$([ -f .loop/active ] && echo 1)" "timed-out red-check still creates .loop/active"
+  assert_eq "" "$(grep -F 'already green' .loop/armwarn)" "timed-out criterion does not warn already-green"
+  rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+else
+  echo "  SKIP: no timeout(1)/gtimeout — cannot exercise the red-check timeout" >&2
+fi
+
 # --- no criteria.tsv: arms without a hash-lock, does not error ---
 rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
 bash "$ARM" 2>/dev/null; assert_eq 0 $? "arm with no criteria.tsv still exits 0"

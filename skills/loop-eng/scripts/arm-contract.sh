@@ -67,13 +67,38 @@ fi
 # also warns; that is acceptable, the human decides. Same TSV parse shape as
 # run-contract.sh (skip blanks + #comments, strip a trailing CR). Each command
 # runs read-only with stdout+stderr silenced so arm's own output stays clean.
-if [ -f "$CRIT" ]; then
+#
+# Knobs (arming must stay instant even when a criterion is the full test suite):
+#   LOOP_ENG_ARM_REDCHECK=0          skip the red-check entirely — ZERO criterion
+#                                    commands executed (guarded before the loop).
+#   LOOP_ENG_ARM_REDCHECK_TIMEOUT=N  per-criterion budget in seconds (default 10;
+#                                    non-numeric or 0 falls back to 10). A command
+#                                    that times out exits 124 via timeout(1): it is
+#                                    UNKNOWN, not green, so it never warns.
+if [ -f "$CRIT" ] && [ "${LOOP_ENG_ARM_REDCHECK:-1}" != "0" ]; then
+  REDCHECK_TIMEOUT="${LOOP_ENG_ARM_REDCHECK_TIMEOUT:-10}"
+  case "$REDCHECK_TIMEOUT" in ''|*[!0-9]*) REDCHECK_TIMEOUT=10 ;; esac
+  # 10#: "00"/"08" are digit strings too; force base-10 so the arithmetic never
+  # sees a bad octal token. 0 would DISABLE timeout(1) (GNU semantics) — the
+  # opposite of a budget at its lowest value — so it also falls back to 10.
+  if [ "$((10#$REDCHECK_TIMEOUT))" -eq 0 ]; then REDCHECK_TIMEOUT=10; fi
+  # Same detection as stop-gate.sh (bash 3.2-safe): prefer timeout(1), else
+  # gtimeout (macOS coreutils), else run unbounded rather than fail — advisory.
+  REDCHECK_TIMEOUT_BIN=""
+  if command -v timeout >/dev/null 2>&1; then REDCHECK_TIMEOUT_BIN="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then REDCHECK_TIMEOUT_BIN="gtimeout"; fi
   while IFS=$'\t' read -r id desc cmd || [ -n "$id" ]; do
     [ -z "${id:-}" ] && continue
     case "$id" in \#*) continue ;; esac
     cmd="${cmd%$'\r'}"
     [ -z "${cmd:-}" ] && continue
-    if bash -c "$cmd" >/dev/null 2>&1; then
+    if [ -n "$REDCHECK_TIMEOUT_BIN" ]; then
+      "$REDCHECK_TIMEOUT_BIN" "$REDCHECK_TIMEOUT" bash -c "$cmd" >/dev/null 2>&1
+    else
+      bash -c "$cmd" >/dev/null 2>&1
+    fi
+    redcheck_status=$?
+    if [ "$redcheck_status" -eq 0 ]; then
       echo "loop-eng arm-contract: WARNING — criterion '$id' is already green at arm time (passed before any work). A criterion that never had to go RED may be vacuously satisfied — verify it actually tests the change. Advisory only; the loop is still armed." >&2
     fi
   done < "$CRIT"
