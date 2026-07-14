@@ -55,6 +55,20 @@ mechanism-layer completion gate — its dry-round convergence rests on the
 orchestration prompt and the behavior-preserving red lines. One loop per
 repo at a time: `.loop/` is shared state.
 
+## Contract quality caps loop quality
+
+The loop's output quality is capped by the contract's spec quality: builder
+and checker faithfully execute the spec, including its holes. Three authoring
+rules, learned from live pilots:
+
+1. Every target criterion must be RED before arming — a criterion already
+   green before any work may be vacuously satisfied (the arm-time red-check
+   warns on these).
+2. Specs must carry non-functional requirements — a perf/timeout constraint
+   omitted from the contract is a regression faithfully implemented.
+3. Encode "must not happen" as a checkable negative assertion — the checker
+   only verifies what the acceptance commands list.
+
 ## Templates
 
 - `templates/contract.md` — acceptance contract skeleton
