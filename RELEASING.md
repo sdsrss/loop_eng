@@ -32,8 +32,11 @@ them against a THROWAWAY project, never a real one.
 2. **Install** — start `claude` in that directory:
    - `/plugin marketplace add sdsrss/loop_eng`
    - `/plugin install loop-eng@loop-eng`
-   - Restart the session if prompted (plugins register at session start).
-   - PASS = `/autoloop` and `/polish` appear in the slash-command list.
+   - **Run `/reload-plugins` (or start a fresh session).** Verified live
+     2026-07-14: in the pre-reload session the install is INERT — commands
+     unknown AND hooks not running, so a smoke there false-fails.
+   - PASS = the commands appear, namespace-prefixed: `/loop-eng:autoloop`,
+     `/loop-eng:polish` (bare `/autoloop` may not resolve).
 3. **Arm a RED contract** (from a normal terminal, not the Claude session):
    ```
    cd ~/tmp/loop-smoke && mkdir -p .loop

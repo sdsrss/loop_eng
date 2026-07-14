@@ -6,6 +6,22 @@ Roadmap Batch 0 + Batch 1 (source: `docs/optimization-roadmap-2026-07-14.md`,
 derived from `docs/audit-report-v0.4.1-2026-07-14.md`). All bugfixes/hardening;
 no breaking changes.
 
+### Verified (closes audit H2/N1 — the enforcement layer now has live mileage)
+- Live-install smoke (`RELEASING.md` §1) PASSED 2026-07-14 against
+  main @ c1c6aed (plugin cache labeled 0.4.1). Findings, all expected-or-fixed:
+  - Hooks/commands require `/reload-plugins` (or a fresh session): in the
+    pre-reload session the install is inert — a hand-written
+    `.loop/results.json` went through and no command resolved.
+  - Post-reload, evidence-gate DENIED the same write, naming the real
+    plugin-cache runner path (P5 fix observed live).
+  - stop-gate blocked stops 1/3 and 2/3 on a red contract and machine-rewrote
+    the hand-written ledger to `all_green: false` on the first stop attempt.
+  - `/loop-eng:autoloop` (commands are namespace-prefixed) ran a full loop:
+    legitimate close-out of the stale red contract via stop rule 6 + ordered
+    two-command disarm (P1 observed live), dirty-tree precondition + baseline
+    ref (P2 observed live), arm via expanded `${CLAUDE_PLUGIN_ROOT}`,
+    builder/checker round, ALL GREEN with machine ledger, free stop after.
+
 ### Fixed
 - `unattended-autoloop.sh`: each `claude -p` session now runs under
   `timeout -k 30 <remaining-wall-clock-budget>` (with the stop-gate's
