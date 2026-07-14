@@ -159,4 +159,29 @@ fi
   printf '}\n'
 } > "$TMP"
 mv "$TMP" "$RESULTS"
+
+# Prune stale evidence logs so .loop/evidence/ reflects only the CURRENT contract.
+# `used_ids` holds "|id1|id2|...|" for exactly the criteria that ran this pass, and
+# each ran criterion wrote "$EVID/<safe_id>.log", so any *.log whose stem is not in
+# used_ids belongs to a prior, now-removed criterion. Without this, a repo that
+# cycles through many contracts accumulates stale evidence logs forever.
+#   - Only files directly under "$EVID" matching *.log are touched — no recursion.
+#   - Respects LOOP_ENG_LOOP_DIR via "$EVID" (never a hardcoded .loop/).
+#   - Guarded to ran>0: a vacuous/empty contract (ran==0) has no trustworthy
+#     current id set, so it never prunes. The hash-lock mismatch (exit 77), the
+#     no-sha-tool (exit 77), and the missing-criteria (exit 78) fail-closed paths
+#     all `exit` BEFORE the criteria loop, so they never reach here — their armed
+#     evidence is left untouched, and none of the fail-closed exits are weakened.
+#   - Fail-open on its own errors: a prune miss must never affect the ledger or the
+#     exit code, which are the only things the harness trusts.
+if [ "$ran" -gt 0 ]; then
+  for f in "$EVID"/*.log; do
+    [ -e "$f" ] || continue           # no-match glob expands to the literal "*.log"
+    stem="${f##*/}"; stem="${stem%.log}"
+    case "$used_ids" in
+      *"|$stem|"*) : ;;               # stem is a current criterion — keep it
+      *) rm -f "$f" 2>/dev/null || : ;;  # stale: from a criterion no longer present
+    esac
+  done
+fi
 exit "$overall"

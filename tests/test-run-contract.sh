@@ -142,6 +142,34 @@ assert_eq "" "$([ -f .loop/results.json ] && echo 1)" "LOOP_ENG_LOOP_DIR: defaul
 assert_eq "" "$([ -d .loop/evidence ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loop/evidence NOT created"
 rm -rf customdir
 
+# --- stale evidence pruning: a log from a PRIOR criteria set is removed, while the
+#     CURRENT criteria's evidence logs survive. A repo cycling through many
+#     contracts (different criterion ids) otherwise accumulates stale evidence
+#     logs forever. ---
+rm -rf .loop/evidence; rm -f .loop/results.json .loop/active .loop/criteria.sha256
+printf '1\tok\ttrue\n2\talso ok\ttrue\n' > .loop/criteria.tsv
+bash "$RUNNER"; assert_eq 0 $? "stale evidence: initial run with ids {1,2} exits 0"
+printf 'from a criterion that no longer exists\n' > .loop/evidence/oldcriterion.log
+bash "$RUNNER"; assert_eq 0 $? "stale evidence: re-run with ids {1,2} exits 0"
+assert_eq "" "$([ -f .loop/evidence/oldcriterion.log ] && echo 1)" "stale evidence log from a prior criteria set is pruned"
+assert_eq 1 "$([ -f .loop/evidence/1.log ] && echo 1)" "stale evidence prune keeps current criterion 1.log"
+assert_eq 1 "$([ -f .loop/evidence/2.log ] && echo 1)" "stale evidence prune keeps current criterion 2.log"
+
+# --- prune guard: a fail-closed run does NOT prune. On a hash-lock mismatch
+#     (exit 77) the fail-closed exit happens BEFORE the criteria loop, so pruning
+#     never runs and the armed set's evidence — including any stale log — survives. ---
+rm -rf .loop/evidence; rm -f .loop/results.json .loop/active .loop/criteria.sha256
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+bash "$RUNNER"; assert_eq 0 $? "prune guard: baseline run exits 0 (writes 1.log)"
+printf 'stale under the armed set\n' > .loop/evidence/oldcriterion.log
+: > .loop/active
+printf 'deadbeef-not-the-live-hash\n' > .loop/criteria.sha256
+bash "$RUNNER" 2>/dev/null; assert_eq 77 $? "prune guard: hash-lock mismatch fails closed, exit 77"
+assert_eq 1 "$([ -f .loop/evidence/oldcriterion.log ] && echo 1)" "fail-closed run does NOT prune: stale evidence preserved on exit 77"
+assert_eq 1 "$([ -f .loop/evidence/1.log ] && echo 1)" "fail-closed run does NOT prune: armed criterion evidence preserved"
+rm -f .loop/active .loop/criteria.sha256 .loop/results.json
+rm -rf .loop/evidence
+
 # --- missing criteria.tsv ---
 rm .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 78 $? "missing criteria exit 78"
