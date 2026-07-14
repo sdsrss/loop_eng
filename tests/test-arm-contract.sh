@@ -112,4 +112,19 @@ fi
 rm -rf "$FAKEBIN"
 rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count .loop/armwarn
 
+# --- LOOP_ENG_LOOP_DIR: arming a custom dir arms THAT dir, never ./.loop ---
+# (the scripts' comments call this the suite's sandboxing knob — this is the
+# test that makes that claim true. Assert both the custom-dir writes AND that
+# the default .loop/ stays untouched.)
+rm -rf customdir
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+mkdir -p customdir
+printf 'c1\tok\ttrue\n' > customdir/criteria.tsv
+LOOP_ENG_LOOP_DIR=customdir bash "$ARM" 2>/dev/null; assert_eq 0 $? "LOOP_ENG_LOOP_DIR: arm exits 0"
+assert_eq "1" "$([ -f customdir/active ] && echo 1)" "LOOP_ENG_LOOP_DIR: arm creates customdir/active"
+assert_eq "$(sha_of customdir/criteria.tsv)" "$(cut -d' ' -f1 < customdir/criteria.sha256)" "LOOP_ENG_LOOP_DIR: hash-lock pinned inside the custom dir"
+assert_eq "" "$([ -f .loop/active ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loop/active NOT created"
+assert_eq "" "$([ -f .loop/criteria.sha256 ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loop/criteria.sha256 NOT created"
+rm -rf customdir
+
 report "test-arm-contract"

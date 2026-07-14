@@ -127,6 +127,21 @@ fi
 rm -rf "$FAKEBIN"
 rm -f .loop/active .loop/criteria.sha256 .loop/results.json
 
+# --- LOOP_ENG_LOOP_DIR: the sandbox knob redirects EVERY loop path ---
+# (the scripts' comments call this the suite's sandboxing knob — this is the
+# test that makes that claim true. Assert both the custom-dir writes AND that
+# the default .loop/ artifacts stay untouched.)
+rm -rf customdir .loop/evidence
+rm -f .loop/results.json .loop/active .loop/criteria.sha256
+mkdir -p customdir
+printf 'c1\tcustom-dir criterion\techo custom-evidence\n' > customdir/criteria.tsv
+LOOP_ENG_LOOP_DIR=customdir bash "$RUNNER"; assert_eq 0 $? "LOOP_ENG_LOOP_DIR: contract runs green"
+assert_file_contains customdir/results.json '"all_green": true' "LOOP_ENG_LOOP_DIR: results.json written in the custom dir"
+assert_file_contains customdir/evidence/c1.log 'custom-evidence' "LOOP_ENG_LOOP_DIR: evidence written in the custom dir"
+assert_eq "" "$([ -f .loop/results.json ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loop/results.json NOT written"
+assert_eq "" "$([ -d .loop/evidence ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loop/evidence NOT created"
+rm -rf customdir
+
 # --- missing criteria.tsv ---
 rm .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 78 $? "missing criteria exit 78"
