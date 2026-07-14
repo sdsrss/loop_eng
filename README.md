@@ -1,5 +1,7 @@
 # loop-eng — Loop Engineering for Claude Code
 
+[![tests](https://github.com/sdsrss/loop_eng/actions/workflows/test.yml/badge.svg)](https://github.com/sdsrss/loop_eng/actions/workflows/test.yml)
+
 > The best model is worth less than the best loop. You stop prompting the agent;
 > you design the system that prompts it.
 
