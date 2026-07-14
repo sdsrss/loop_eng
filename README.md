@@ -132,6 +132,13 @@ Scope notes:
 - **Backing up the ledger:** use `cat .loop/results.json > backup.json` — the
   evidence-gate's Bash pattern cannot tell read-from from write-to direction,
   so `cp`/`mv` touching a protected path is denied even outward.
+- **The gate matches the command string, not the write target.** A command
+  that merely names a protected path — a git commit message quoting the
+  pattern, a test command aimed at an unrelated mktemp sandbox — is denied
+  even though it writes nothing protected. This is a conservative false
+  positive inherent to the best-effort design; reword the command so the
+  literal protected filename doesn't appear, or have a human use the
+  escape hatch.
 - **Register the hooks in one place only.** If a project lists the loop-eng
   hooks in its own `.claude/settings.json` AND the plugin is installed globally,
   every event fires both — a **double-fire**: the stop-gate's block counter then
