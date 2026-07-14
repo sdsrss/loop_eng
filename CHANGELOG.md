@@ -7,10 +7,13 @@ backlog items still pending (session cap / wall-clock budget / circuit
 breaker) — previously every stop path exited 0. If a wrapper or monitor
 treats any non-zero exit as fatal, adjust it: exit 0 = backlog drained,
 1 = gave up with items pending, 75 = provider limit (unchanged). Revert
-path: pin v0.7.0. Live-install smoke (RELEASING.md §1): PENDING post-ship —
-this release was shipped from a headless session; the smoke's two platform
-behaviors (hooks.json auto-load, `${CLAUDE_PLUGIN_ROOT}` expansion) were
-last verified live 2026-07-14 on 0.5.0 and no hooks/ file changed since.
+path: pin v0.7.0. Live-install smoke (RELEASING.md §1): evidence-gate leg
+PASSED live post-ship 2026-07-14 — after `/plugin update` the user-scope
+cache is 0.8.0 and a probe Write to `.loop/results.json` was DENIED with the
+deny text naming the runner under the real 0.8.0 cache path (hooks.json
+auto-load + `${CLAUDE_PLUGIN_ROOT}` both confirmed in a live session). The
+stop-gate-block and command-expansion legs remain covered by the 0.5.0 live
+run of 2026-07-14 (no hooks/ change since).
 
 Audit-driven batch from `docs/audit-report-v0.7.0-2026-07-14.md` (batches 1-2:
 same-day items + small-fix batch).
