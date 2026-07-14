@@ -135,7 +135,14 @@ falls back to it when criteria.tsv is absent.)
 
 1. Dispatch loop-builder with: the task brief, the contract, and (from round 2 on)
    the checker's previous failure report.
-2. Dispatch loop-checker to run all checks.
+2. Dispatch loop-checker to run the checks — scoped to the round. On a
+   multi-item backlog, an intermediate round's checker runs the current item's
+   checks plus the already-ticked items' criteria (the contract's fast
+   subset); the full sweep (the run-everything command, e.g. the whole test
+   runner) runs ONCE, in the final round. Full-sweeping every intermediate
+   round re-buys assurance the fast subset already gives and multiplies
+   checker wall-clock by the round count (2026-07-14 dogfood: 5 rounds of
+   full sweeps caught nothing the fast subset would have missed).
 3. If the checker's report starts with `ALL GREEN`: stop. First REFRESH the
    machine ledger so it reflects the fixed tree — run
    `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/run-contract.sh"`
