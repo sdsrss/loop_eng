@@ -37,6 +37,14 @@ case "${STUB_MODE:-progress}" in
     rm -f .loop/backlog.md
     echo "backlog removed"
     ;;
+  limit)
+    # simulates a provider usage/rate limit: the session log must mention a
+    # usage limit and the process must exit non-zero, so the driver's limit
+    # branch (grep 'usage limit|rate.?limit' on a STATUS!=0 session) fires.
+    # Mirrors tests/test-unattended-polish.sh's `limit` stub mode.
+    echo "usage limit reached"
+    exit 1
+    ;;
 esac
 exit 0
 EOF
@@ -201,5 +209,20 @@ STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
 assert_eq 1 "$rc" "session cap with pending items exits 1 (gave up, not done)"
 assert_file_contains "$SB7/.loop/unattended.log" "session cap" "cap stop is named in the log"
 assert_file_contains "$SB7/.loop/unattended.log" "not drained" "non-zero exit reason is logged"
+
+# --- provider limit twice: retries once (zero wait) then stops with exit 75 ---
+# (driver lines ~162-168: a failed session whose log mentions a usage/rate limit
+# increments limit_hits; the first hit waits LOOP_ENG_LIMIT_WAIT_MIN then retries,
+# the second hit stops with exit 75 (EX_TEMPFAIL). LIMIT_WAIT_MIN=0 keeps the
+# retry wait at `sleep 0` so this test never actually sleeps — 0 is accepted by
+# _num_or_default for LIMIT_WAIT_MIN; only MAX_MINUTES=0 is rejected. Exactly two
+# sessions run: one per hit, and the second hit exits before a third launches.)
+SB8=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SD" "$TD"' EXIT
+mkdir -p "$SB8/.loop"; printf -- '- [ ] one\n' > "$SB8/.loop/backlog.md"
+STUB_MODE=limit LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_LIMIT_WAIT_MIN=0 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SB8" 5 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 75 "$rc" "provider limit hit twice exits 75 (EX_TEMPFAIL)"
+assert_file_contains "$SB8/.loop/unattended.log" "provider limit hit twice" "second limit hit is logged and stops the driver"
+assert_eq 2 "$(grep -c 'session .* starting' "$SB8/.loop/unattended.log")" "driver ran exactly 2 sessions before the limit stop"
 
 report "test-unattended-autoloop"
