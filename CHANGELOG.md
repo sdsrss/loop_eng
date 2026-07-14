@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-07-14
 
 ### Added
 - `arm-contract.sh` provenance line: after arming, it prints the path the script
