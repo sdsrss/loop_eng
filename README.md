@@ -132,6 +132,21 @@ Scope notes:
 - **Backing up the ledger:** use `cat .loop/results.json > backup.json` — the
   evidence-gate's Bash pattern cannot tell read-from from write-to direction,
   so `cp`/`mv` touching a protected path is denied even outward.
+- **Register the hooks in one place only.** If a project lists the loop-eng
+  hooks in its own `.claude/settings.json` AND the plugin is installed globally,
+  every event fires both — a **double-fire**: the stop-gate's block counter then
+  climbs by 2 per stop, hitting the ceiling in ~1–2 blocks instead of 3. Pick
+  one registration site, not both.
+- **The `backlog` criterion is a trust boundary, not a mechanism.** The
+  all-boxes-ticked completion check reads `.loop/backlog.md`, which the
+  orchestrator can write; so "tick a box only after a checker reports ALL GREEN"
+  is a red line the orchestrator honors, not something the hooks enforce — the
+  same residual class as the documented "adversarial disarm is out of scope."
+- **Resuming an interrupted loop: reconcile before continuing.** After a context
+  switch or crash, reconcile `git log` against the backlog ticks FIRST — a box
+  may be ticked while its commit is missing, or a commit may have landed with its
+  box still unticked. Disk state is the source of truth, but the two must agree
+  before the loop moves on.
 
 If your Claude Code version does not auto-load plugin hooks, register manually
 in your project's `.claude/settings.json`:
