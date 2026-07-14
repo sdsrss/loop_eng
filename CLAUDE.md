@@ -96,6 +96,21 @@ authoritative checklist (pre-flight, marketplace-install smoke, tag,
 two files**: `.claude-plugin/plugin.json` (`version`) and
 `.claude-plugin/marketplace.json` (`metadata.version` + `plugins[0].version`).
 
+### Packaging scope
+
+A git-based marketplace install ships the **full git tree** — the `/plugin
+install` clone is a wholesale `git clone`/`git pull` of the repo, so every
+tracked path lands in the user's plugin cache, `tests/` (the ~40KB of
+`test-*.sh` suites) included. There is **no way to exclude tracked paths**: the
+plugin manifest format (`.claude-plugin/plugin.json` / `marketplace.json`) has
+no `files`/`include`/`exclude` field and Claude Code honours no `.claudeignore`
+— the `claude-code-plugin-dev` skill documents no such mechanism and states the
+install "copies the full tree", confirmed empirically (installed cache under
+`~/.claude/plugins/cache/loop-eng/` contains all `tests/`). This is acceptable
+and left as-is: the suites are tiny text files, carry no runtime cost (never
+sourced by any command/hook), and hold no secrets. Untracking `tests/` is NOT
+an option — CI runs them. Do not add a build/packaging step for ~40KB.
+
 ---
 
 The two blocks below are **auto-managed** by the claude-mem-lite and code-graph
