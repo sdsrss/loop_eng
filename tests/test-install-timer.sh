@@ -18,7 +18,12 @@ trap 'rm -rf "$SB" "$XDG"' EXIT
 RUNNER_DIR="$PLUGIN_ROOT/skills/loop-eng/scripts"
 
 UNIT_DIR="$XDG/systemd/user"
-run_install()   { XDG_CONFIG_HOME="$XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 bash "$INSTALL" "$@"; }
+# Hermetic claude: the installer resolves the claude CLI at install time (and
+# dies if it can't) — point it at a stub so the tests don't depend on a real
+# claude being on PATH (CI runners don't have one).
+FAKE_CLAUDE="$XDG/fake-claude"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$FAKE_CLAUDE" && chmod +x "$FAKE_CLAUDE"
+run_install()   { XDG_CONFIG_HOME="$XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" bash "$INSTALL" "$@"; }
 run_uninstall() { XDG_CONFIG_HOME="$XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 bash "$UNINSTALL" "$@"; }
 exists() { [ -e "$1" ] && echo yes || echo no; }
 
@@ -30,6 +35,7 @@ assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.timer")" "polish .timer writt
 assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "ExecStart=$RUNNER_DIR/unattended-polish.sh $SB src/" "ExecStart has plugin runner + repo + default scope"
 assert_eq yes "$(exists "$SB/.loop")" "install pre-creates repo .loop for unit logging"
 assert_file_contains "$UNIT_DIR/loop-eng-polish.timer" "OnCalendar=*-*-* 03:00:00" "default OnCalendar 03:00"
+assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "Environment=LOOP_ENG_CLAUDE_BIN=$FAKE_CLAUDE" "unit pins the install-time-resolved claude path"
 if grep -q "Persistent=true" "$UNIT_DIR/loop-eng-polish.timer"; then
   assert_eq no-persistent has-persistent "timer must NOT be Persistent (avoids catch-up run on mid-day install)"
 else assert_eq 1 1 "timer omits Persistent=true (no catch-up run on install)"; fi
@@ -73,6 +79,17 @@ assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "nonexistent repo-dir refused"
 case "$err" in
   *"/no/such/repo-dir-xyz"*) assert_eq 1 1 "error names the offending repo-dir path" ;;
   *) assert_eq "path-named" "path-blank" "error must include the offending repo-dir path" ;;
+esac
+
+# --- unresolvable claude: refused at INSTALL time, error names what was looked for ---
+# (pre-fix, the unit's hardcoded PATH could miss claude entirely and the runner
+# failed with exit 127 at first trigger, error only in cron.log)
+err=$(XDG_CONFIG_HOME="$XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 LOOP_ENG_CLAUDE_BIN=/no/such/claude-bin \
+  bash "$INSTALL" polish "$SB" 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "unresolvable claude refused at install time"
+case "$err" in
+  *"/no/such/claude-bin"*) assert_eq 1 1 "claude refusal names the binary looked for" ;;
+  *) assert_eq "claude-named" "other-error" "refusal must name the claude binary" ;;
 esac
 
 # --- uninstall symmetry: install then uninstall leaves NO residue ---

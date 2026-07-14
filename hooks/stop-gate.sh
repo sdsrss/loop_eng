@@ -62,7 +62,9 @@ fi
 case "$COUNT" in *[!0-9]* | "") COUNT=0 ;; esac
 
 if [ "$COUNT" -ge "$MAX_BLOCKS" ]; then
-  echo "loop-eng stop-gate: block ceiling ($MAX_BLOCKS) reached; allowing stop. Contract remains UNSATISFIED — see $LOOP_DIR/state.md." >&2
+  # Reaching the ceiling usually means the orchestrator failed to disarm — tell
+  # the human how, or every future stop eats another 3 blocks (audit M5).
+  echo "loop-eng stop-gate: block ceiling ($MAX_BLOCKS) reached; allowing stop. Contract remains UNSATISFIED — see $LOOP_DIR/state.md. To disarm manually: rm $ACTIVE" >&2
   # Clear the counter so a stale gate-count can't leave a re-armed loop instantly
   # inert (COUNT>=MAX). .loop/active stays until the orchestrator disarms.
   rm -f "$COUNT_FILE"

@@ -34,6 +34,14 @@ MAX_MINUTES="${LOOP_ENG_MAX_MINUTES:-120}"
 case "$MAX_MINUTES" in
   ''|*[!0-9]*) echo "warning: LOOP_ENG_MAX_MINUTES='$MAX_MINUTES' is not a non-negative integer; using 120" >&2; MAX_MINUTES=120 ;;
 esac
+# 0 passes the digit check but `timeout 0m` DISABLES the timeout (GNU semantics)
+# — the opposite of what a budget knob should mean at its lowest value. Config
+# error: warn and fall back. (10#: "00" and "08" are digit strings too; force
+# base-10 so the arithmetic never sees a bad octal token.)
+if [ "$((10#$MAX_MINUTES))" -eq 0 ]; then
+  echo "warning: LOOP_ENG_MAX_MINUTES=0 would disable the timeout (timeout 0m = no limit); using 120" >&2
+  MAX_MINUTES=120
+fi
 
 MODE="report-only"
 if [ "$FLAG" = "--auto-fix" ]; then

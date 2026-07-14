@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased
+
+Roadmap Batch 0 + Batch 1 (source: `docs/optimization-roadmap-2026-07-14.md`,
+derived from `docs/audit-report-v0.4.1-2026-07-14.md`). All bugfixes/hardening;
+no breaking changes.
+
+### Fixed
+- `unattended-autoloop.sh`: each `claude -p` session now runs under
+  `timeout -k 30 <remaining-wall-clock-budget>` (with the stop-gate's
+  timeout/gtimeout fallback and a loud warning when neither exists). Previously
+  `LOOP_ENG_MAX_MINUTES` was only checked BETWEEN sessions, so a single hung
+  session (network stall, wedged tool) blocked the driver indefinitely — under
+  a systemd oneshot unit, potentially for days. A timed-out session (exit 124)
+  is named in the driver log and counts toward the no-progress breaker.
+  (audit N2)
+- `install-timer.sh`: the claude CLI is now resolved to an absolute path at
+  INSTALL time (honoring `LOOP_ENG_CLAUDE_BIN`) and pinned into the unit via
+  `Environment=LOOP_ENG_CLAUDE_BIN=<abs>`; an unresolvable claude dies at
+  install. Previously the unit's hardcoded `PATH` could simply not contain
+  claude (nvm / custom npm prefix), so the runner failed with exit 127 at first
+  trigger with the error only in cron.log — the "installed but silently never
+  runs" trap this script exists to kill. A claude path containing whitespace is
+  refused like the repo/plugin paths. (audit N3)
+- `unattended-autoloop.sh`: a backlog file deleted mid-run made `count_pending`
+  return an empty string, which silently skipped the "backlog empty" stop (the
+  `[ "" -eq 0 ]` error is swallowed by `if`) and kept launching sessions against
+  a missing backlog; it now counts as 0 pending and the driver stops cleanly.
+  (audit N4)
+- `unattended-{polish,autoloop}.sh`: `LOOP_ENG_MAX_MINUTES=0` passed the digit
+  check but `timeout 0m` DISABLES the timeout (GNU semantics) — the opposite of
+  a budget knob's lowest value; 0 now warns and falls back to the default.
+  (audit L7)
+- `stop-gate.sh`: the block-ceiling message now includes the manual disarm
+  command (`rm .loop/active`) — reaching the ceiling usually means the
+  orchestrator failed to disarm, and without it every later stop attempt in the
+  session eats another 3 blocks. (audit M5)
+
+### Dogfood
+- `.claude/settings.json` (untracked): registered the evidence-gate PreToolUse
+  hook and aligned hook timeouts with `hooks/hooks.json` (Stop 120s — the
+  previous unset timeout defaulted below the gate's 100s internal budget;
+  PreToolUse 30s). The audit found the evidence-gate had ZERO live mileage:
+  never marketplace-installed, and the dogfood settings registered only the
+  Stop hook. (audit N1)
+- `scripts/sync-local.sh`: after syncing, warns if `.claude/settings.json`
+  does not register stop-gate.sh or evidence-gate.sh — synced-but-unregistered
+  hooks mean the dogfood repo exercises only part of the enforcement layer.
+
+### Tests
+- Suite 143 → 159 assertions: `test-unattended-autoloop` +10 (fake-timeout
+  wiring, expire→breaker, backlog-deleted stop, MAX_MINUTES=0),
+  `test-install-timer` +3 (pinned claude Environment line, unresolvable-claude
+  refusal ×2), `test-unattended-polish` +2 (MAX_MINUTES=0),
+  `test-stop-gate` +1 (ceiling disarm hint). install-timer tests now inject a
+  stub claude (`LOOP_ENG_CLAUDE_BIN`) so they stay hermetic on claude-less CI.
+
 ## 0.4.1 — 2026-07-11
 
 Audit-driven fix batch (source: `docs/audit-report-v0.4.0-2026-07-11.md`). All

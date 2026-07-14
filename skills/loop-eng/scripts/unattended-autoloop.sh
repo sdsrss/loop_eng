@@ -13,7 +13,9 @@
 #   - refuses dirty trees; every session starts from a committed state
 #   - circuit breaker: 2 consecutive sessions with no new commit -> OPEN, stop
 #   - session cap (arg 2, default 8) + wall-clock budget (LOOP_ENG_MAX_MINUTES,
-#     default 240) checked between sessions
+#     default 240) checked between sessions; each session is additionally run
+#     under `timeout` bounded by the remaining budget, so a hung session cannot
+#     stall the driver past the deadline
 #   - provider-limit aware: a failed session whose log mentions a usage/rate
 #     limit waits once (LOOP_ENG_LIMIT_WAIT_MIN, default 60) and retries;
 #     a second hit stops the driver with exit 75 (EX_TEMPFAIL)
@@ -46,6 +48,14 @@ _num_or_default() { # $1=name $2=value $3=default -> echoes a base-10 integer
 MAX_SESSIONS=$(_num_or_default max-sessions "$MAX_SESSIONS" 8)
 MAX_MINUTES=$(_num_or_default LOOP_ENG_MAX_MINUTES "$MAX_MINUTES" 240)
 LIMIT_WAIT_MIN=$(_num_or_default LOOP_ENG_LIMIT_WAIT_MIN "$LIMIT_WAIT_MIN" 60)
+# 0 is a valid digit string but means "no budget at all": DEADLINE=now, and —
+# worse — a 0-second per-session `timeout` DISABLES the timeout entirely (GNU
+# semantics), the exact opposite of what a budget knob should do on its lowest
+# value. Treat it as a config error and fall back, like the non-numeric case.
+if [ "$MAX_MINUTES" -eq 0 ]; then
+  echo "warning: LOOP_ENG_MAX_MINUTES=0 would disable the wall-clock budget (timeout 0 = no limit); using 240" >&2
+  MAX_MINUTES=240
+fi
 
 if [ "${LOOP_ENG_ALLOW_AUTOBUILD:-0}" != "1" ]; then
   echo "refusing: unattended building requires LOOP_ENG_ALLOW_AUTOBUILD=1" >&2
@@ -67,7 +77,26 @@ session=0
 
 note() { echo "$(date +%Y%m%d-%H%M%S) autoloop-driver $*" | tee -a "$LOG_MAIN" >&2; }
 
-count_pending() { grep -c '^- \[ \]' "$BACKLOG" 2>/dev/null || true; }
+count_pending() {
+  # A missing/unreadable backlog (e.g. a session deleted it mid-run) must count
+  # as 0 pending, not as an empty string — `[ "" -eq 0 ]` errors and the if
+  # swallows it as false, which would SKIP the "backlog empty" stop and keep
+  # launching sessions against a backlog that no longer exists.
+  local n
+  n=$(grep -c '^- \[ \]' "$BACKLOG" 2>/dev/null) || true
+  case "$n" in '' | *[!0-9]*) n=0 ;; esac
+  echo "$n"
+}
+
+# Per-session hard cap: without it, MAX_MINUTES is only checked BETWEEN sessions,
+# so a single hung `claude -p` (network stall, wedged tool) blocks the driver
+# forever — under a systemd oneshot unit, potentially for days. Mirror the
+# stop-gate's timeout/gtimeout fallback; if neither exists, warn once and run
+# unbounded (same degradation unattended-polish.sh already accepts).
+TIMEOUT_BIN=""
+if command -v timeout >/dev/null 2>&1; then TIMEOUT_BIN="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_BIN="gtimeout"; fi
+[ -n "$TIMEOUT_BIN" ] || note "warning: no timeout(1)/gtimeout — sessions run UNBOUNDED; a hung session will stall the driver"
 
 while :; do
   remaining=$(count_pending)
@@ -88,11 +117,23 @@ while :; do
   SLOG=".loop/unattended-session-$STAMP.log"
   note "session $session/$MAX_SESSIONS starting: $item"
 
+  # Bound the session to the REMAINING wall-clock budget (floor 1s: the deadline
+  # check above guarantees it was positive moments ago; never hand `timeout` a 0,
+  # which would disable it).
+  budget_left=$(( DEADLINE - $(date +%s) ))
+  [ "$budget_left" -ge 1 ] || budget_left=1
+  SESSION_WRAP=()
+  [ -n "$TIMEOUT_BIN" ] && SESSION_WRAP=("$TIMEOUT_BIN" -k 30 "$budget_left")
+
   STATUS=0
-  "$CLAUDE_BIN" -p "/autoloop Take exactly ONE backlog item — the first unchecked '- [ ]' line in .loop/backlog.md: \"$item\". Before writing the contract, read .loop/state.md (if present) and run 'git log --oneline -10' for handoff context from previous sessions. On ALL GREEN, mark that backlog line '- [x]'. Do not start any other backlog item." \
+  "${SESSION_WRAP[@]}" "$CLAUDE_BIN" -p "/autoloop Take exactly ONE backlog item — the first unchecked '- [ ]' line in .loop/backlog.md: \"$item\". Before writing the contract, read .loop/state.md (if present) and run 'git log --oneline -10' for handoff context from previous sessions. On ALL GREEN, mark that backlog line '- [x]'. Do not start any other backlog item." \
     --permission-mode bypassPermissions \
     --max-turns 150 \
     > "$SLOG" 2>&1 || STATUS=$?
+
+  if [ -n "$TIMEOUT_BIN" ] && [ "$STATUS" -eq 124 ]; then
+    note "session $session TIMED OUT after ${budget_left}s (wall-clock budget) — killed, counts toward no-progress unless it committed"
+  fi
 
   head_after=$(git rev-parse HEAD)
   if [ "$head_before" = "$head_after" ]; then

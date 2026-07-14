@@ -74,12 +74,23 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUNNER="$SCRIPT_DIR/unattended-$MODE.sh"
 [ -x "$RUNNER" ] || die "runner not found or not executable: $RUNNER"
 
+# Resolve the claude CLI to an ABSOLUTE path at install time. The unit hardcodes
+# a minimal PATH, so a claude living elsewhere (nvm, custom npm prefix) makes the
+# runner fail with exit 127 at first trigger — with the error only in cron.log,
+# the exact "installed but silently never runs" trap this script exists to kill.
+# Fail here, at install time, where the human can see it.
+CLAUDE_IN="${LOOP_ENG_CLAUDE_BIN:-claude}"
+CLAUDE_ABS="$(command -v "$CLAUDE_IN")" \
+  || die "claude CLI not found (looked for: $CLAUDE_IN). Install it, or set LOOP_ENG_CLAUDE_BIN to the binary the scheduled run should use."
+
 # systemd ExecStart is whitespace-delimited and both paths below are injected
 # unquoted; a space in the repo OR the plugin path yields a unit that passes
 # `systemctl enable` but fails at first trigger (error only in the journal).
-# Refuse up front so the failure is loud and at install time.
-case "$REPO"   in *[[:space:]]*) die "repo-dir path contains whitespace, which the systemd unit cannot represent unquoted: $REPO" ;; esac
-case "$RUNNER" in *[[:space:]]*) die "plugin path contains whitespace, which the systemd unit cannot represent unquoted: $RUNNER" ;; esac
+# Refuse up front so the failure is loud and at install time. (The claude path
+# lands in an Environment= line, which is whitespace-sensitive the same way.)
+case "$REPO"       in *[[:space:]]*) die "repo-dir path contains whitespace, which the systemd unit cannot represent unquoted: $REPO" ;; esac
+case "$RUNNER"     in *[[:space:]]*) die "plugin path contains whitespace, which the systemd unit cannot represent unquoted: $RUNNER" ;; esac
+case "$CLAUDE_ABS" in *[[:space:]]*) die "claude path contains whitespace, which the systemd unit cannot represent unquoted: $CLAUDE_ABS" ;; esac
 
 # Build the mode-specific ExecStart tail + write-enable Environment lines.
 ENV_LINES=""
@@ -125,6 +136,7 @@ TMR="$UNIT_DIR/$UNIT.timer"
   echo "[Service]"
   echo "Type=oneshot"
   echo "Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+  echo "Environment=LOOP_ENG_CLAUDE_BIN=$CLAUDE_ABS"
   [ -n "$ENV_LINES" ] && echo "$ENV_LINES"
   echo "ExecStart=$RUNNER $EXEC_ARGS"
   echo "StandardOutput=append:$REPO/.loop/cron.log"

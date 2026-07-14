@@ -43,4 +43,10 @@ STUB_MODE=ok LOOP_ENG_MAX_MINUTES=nope LOOP_ENG_CLAUDE_BIN="$STUB" \
 assert_eq 0 "$rc" "non-numeric MAX_MINUTES still runs (falls back to default)"
 assert_file_contains "$SD/warn" "not a non-negative integer" "warns on non-numeric MAX_MINUTES"
 
+# --- MAX_MINUTES=0 would DISABLE the timeout (GNU `timeout 0m` = no limit): warn + default ---
+STUB_MODE=ok LOOP_ENG_MAX_MINUTES=0 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SB" src/ 2>"$SD/warn0" && rc=0 || rc=$?
+assert_eq 0 "$rc" "MAX_MINUTES=0 still runs (falls back to default)"
+assert_file_contains "$SD/warn0" "would disable the timeout" "warns that 0 disables the timeout"
+
 report "test-unattended-polish"

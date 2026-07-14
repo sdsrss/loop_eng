@@ -25,6 +25,7 @@ run_gate /dev/null; assert_eq 2 $? "block 2"
 run_gate /dev/null; assert_eq 2 $? "block 3"
 run_gate .loop/err4; assert_eq 0 $? "4th attempt allows (ceiling)"
 assert_file_contains .loop/err4 'ceiling' "ceiling message on stderr"
+assert_file_contains .loop/err4 'rm .loop/active' "ceiling message gives the manual disarm command (audit M5)"
 
 # --- green criteria: allows and lifts the gate ---
 rm -f .loop/gate-count; touch .loop/active
