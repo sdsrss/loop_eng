@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `arm-contract.sh` provenance line: after arming, it prints the path the script
+  was invoked as (`armed from <path>`). In a dogfood run the loop arms from the
+  installed plugin CACHE, which can lag the repo — repo-side script edits are not
+  in effect until `/plugin update`. Surfacing the armed-from path makes that
+  cache-vs-repo divergence visible instead of silent (it bit a live pilot: a
+  stale cached red-check ran with no warning). Advisory, bash 3.2. (pilot retro)
+
+### Changed
+- `commands/autoloop.md`: new "Cost management (per-round model tiering)"
+  section — the dominant token cost on a small task is the fixed per-round
+  builder+checker overhead, so a genuinely trivial round MAY dispatch the builder
+  at a cheaper model tier, with the hard invariant that the checker's tier stays
+  >= the builder's (never let a weaker model certify a stronger one's work) and
+  never downgrade on a mechanism-layer round. (pilot retro — token efficiency)
+- `agents/loop-checker.md`: proof-line discipline — a green check's proof must be
+  the exact figure/line the command printed (`test: 12 passed, 0 failed`), not a
+  bare restated "passed"; added a matching red line. Raises the evidence quality
+  of ALL GREEN reports. (pilot retro — work quality)
+
 ## 0.6.0 — 2026-07-14
 
 ### Added

@@ -162,6 +162,25 @@ running the contract's commands.
   check results, next action. This file is the loop's memory across context
   compaction and sessions.
 
+## Cost management (per-round model tiering)
+
+Each round dispatches a fresh builder and a fresh checker, and the dominant
+token cost on a SMALL task is this fixed per-round overhead (full contract +
+brief + agent prompt), not the diff or the test output. Two levers, in order of
+safety:
+
+- Batch trivial micro-items into one round (the triage rule above) — amortizes a
+  whole builder+checker+suite cycle across several one-liners.
+- For a genuinely trivial round (single file, < ~10 lines, a purely static
+  verify — the same class that qualifies for batching), you MAY dispatch
+  loop-builder at a cheaper model tier via the Task tool's model parameter to
+  cut the fixed overhead. Hard invariant: the checker's tier must be **>= the
+  builder's tier** — never let a weaker model certify a stronger model's work,
+  that inverts the maker/checker rigor the loop exists to provide. When in doubt
+  do NOT downgrade: inherit the session model (the default). Never downgrade the
+  builder on a round that touches hooks/, run-contract, arm-contract, or any
+  mechanism-layer script — correctness there outweighs the token saving.
+
 ## Stop rules (any one of these stops the loop immediately)
 
 1. ALL GREEN — stop with proof of every check.

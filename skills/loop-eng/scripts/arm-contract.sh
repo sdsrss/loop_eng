@@ -107,3 +107,9 @@ fi
 : > "$ACTIVE"
 rm -f "$COUNT_FILE"
 echo "loop-eng arm-contract: stop-gate armed ($ACTIVE)." >&2
+# Provenance line (cache-vs-repo divergence guard, pilot retro finding): print
+# the path THIS script was invoked as. In a dogfood run the loop arms from the
+# installed plugin CACHE (…/plugins/cache/loop-eng/…), which can lag the repo —
+# repo-side script edits are NOT in effect until `/plugin update`. Surfacing the
+# armed-from path makes that divergence visible instead of silent. Advisory only.
+echo "loop-eng arm-contract: armed from $0" >&2

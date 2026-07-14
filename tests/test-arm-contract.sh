@@ -70,4 +70,12 @@ bash "$ARM" 2>/dev/null; assert_eq 0 $? "arm with no criteria.tsv still exits 0"
 assert_eq "1" "$([ -f .loop/active ] && echo 1)" "arm still creates .loop/active without criteria"
 assert_eq "" "$([ -f .loop/criteria.sha256 ] && echo 1)" "arm writes no hash-lock without criteria"
 
+# --- provenance line: arm reports the path it was invoked as (cache-vs-repo
+#     divergence guard). The armed-from path must be the exact $ARM path. ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+bash "$ARM" 2>.loop/armwarn
+assert_file_contains .loop/armwarn 'armed from' "arm prints the provenance (armed-from) line"
+assert_file_contains .loop/armwarn "$ARM" "provenance line names the exact invoked script path"
+rm -f .loop/active .loop/armwarn
+
 report "test-arm-contract"

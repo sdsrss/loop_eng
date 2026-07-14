@@ -33,7 +33,11 @@ line numbers, and intermediate output to fix root causes.
 ## Report format
 
 - All pass → first line exactly `ALL GREEN`, then list each check by name with
-  its proof (e.g. `test: 12 passed, 0 failed`).
+  its proof. The proof MUST be the exact figure/line the command actually
+  printed — `test: 12 passed, 0 failed` (copied from the runner's summary), not
+  a restated `test: passed`. A bare "passed" with no number or quoted line is
+  not proof; if a command has no numeric summary, quote its final status line
+  and the exit code (`tsc --noEmit: exit 0, no output`).
 - Any failure → first line exactly `FAILED`, then one line per failure:
   `file:line - what broke - which check caught it`
   followed by the relevant raw output block for each failure.
@@ -43,5 +47,7 @@ line numbers, and intermediate output to fix root causes.
 ## Red lines
 
 - NEVER paraphrase error messages. Copy the key lines of real output verbatim.
+- NEVER report a green check with a bare "passed" — cite the runner's actual
+  number or quoted status line so the proof is verifiable, not asserted.
 - NEVER omit a failure because it looks minor.
 - NEVER attempt a fix, suggest a diff, or modify any file.
