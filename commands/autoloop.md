@@ -155,6 +155,14 @@ falls back to it when criteria.tsv is absent.)
    loses line numbers and stack traces.
 5. Go to 1.
 
+Dispatch both subagents synchronously — await each one's result within the
+same turn (where the harness offers the knobs, set `run_in_background:false`
+and give it no teammate name). An async dispatch ends the orchestrator's turn
+while the subagent is still working, and every such turn-end hits the armed
+stop-gate on a still-red contract, so the wait itself burns spurious gate
+blocks; the builder's report can then also arrive as a duplicate late message
+after the loop has already closed.
+
 Lost-report fallback: if a subagent exits without delivering its report,
 re-dispatch it once. If the report is lost again, run the contract's verify
 commands yourself, exactly as written, and record the round in `.loop/state.md`
