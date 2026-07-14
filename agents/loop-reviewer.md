@@ -60,3 +60,10 @@ FINDINGS: <n>
 
 If nothing survives your own scrutiny, report `FINDINGS: 0` — an empty round
 is a valid and useful result. Do not pad.
+
+Cap the list at the ~10 strongest findings per round (severity first). If more
+survive scrutiny, add a final line `MORE BEYOND CAP: <n>` instead of listing
+them — every listed finding costs one adversarial-verifier dispatch, and an
+unbounded dump buries the strong findings in noise. Nothing is lost: the next
+macro round re-reviews the scope after the current queue is fixed and picks up
+the remainder.

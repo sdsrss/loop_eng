@@ -69,6 +69,10 @@ No adjectives.
    (file:line, defect, failure scenario). Batch only trivially independent
    low-severity items. Builder rules apply (root cause, no drive-by changes,
    commit per fix).
+   Cost: a low-severity single-file fix MAY dispatch the builder at a cheaper
+   model tier. Hard invariant (same as /autoloop): reviewer, verifier, and
+   checker are judgment tiers — NEVER downgrade them below the builder's tier;
+   when in doubt, inherit the session model.
    - correctness fixes: if the bug is not covered by an existing test, the
      builder MUST first add a failing test reproducing it, then fix
      (red → green — proof the bug was real and is gone).
@@ -77,7 +81,7 @@ No adjectives.
 3. Dispatch loop-checker for a full regression after the queue is done.
    - ALL GREEN → update `.loop/polish-state.md` (round summary: found /
      confirmed / refuted / fixed) and return to Phase 2 for the next round.
-   - FAILED → autoloop's stop rules apply: identify which fix broke it,
+   - FAILED → regression protocol: identify which fix broke it,
      have the builder fix or `git revert` that commit; a fix that cannot be
      made green in 2 attempts is reverted and its finding recorded as
      `deferred (fix regressed)`.

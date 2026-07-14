@@ -30,6 +30,15 @@ Run every check command in sequence. Keep each check's FULL output —
 never keep only the last pass/fail line. The builder needs stack traces,
 line numbers, and intermediate output to fix root causes.
 
+## Round scope (multi-item backlogs)
+
+If your dispatch prompt scopes this round to ONE backlog item, judge only that
+item's criteria plus the project suite. Global criteria that belong to
+not-yet-built items are EXPECTED-RED — list them under a separate
+`EXPECTED-RED (pending items, not this round's failure)` heading, never in the
+failure list, and do not let them flip the first line to `FAILED`. A previously
+ticked item going red IS a failure (regression) — report it.
+
 ## Report format
 
 - All pass → first line exactly `ALL GREEN`, then list each check by name with

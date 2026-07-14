@@ -21,6 +21,25 @@
   the exact figure/line the command printed (`test: 12 passed, 0 failed`), not a
   bare restated "passed"; added a matching red line. Raises the evidence quality
   of ALL GREEN reports. (pilot retro — work quality)
+- Prompt audit batch (5 gaps found by a line-by-line five-axis review, each
+  validated in a live sandbox simulation with real subagent dispatches):
+  - `agents/loop-checker.md` "Round scope": the roadmap-mode rule (judge only the
+    current round's item; pending items' criteria are EXPECTED-RED, a ticked item
+    going red IS a regression) now lives in the checker's own prompt too — the
+    contract was one-sided, only autoloop.md (orchestrator) knew it.
+  - `commands/polish.md`: cost note in Phase 3 — low-severity single-file fixes
+    MAY use a cheaper builder tier; reviewer/verifier/checker are judgment tiers
+    and are never downgraded (mirrors /autoloop's Cost management).
+  - `agents/loop-reviewer.md`: findings cap — at most the ~10 strongest per
+    round + `MORE BEYOND CAP: <n>`; every listed finding costs one verifier
+    dispatch, and later macro rounds pick up the remainder (bounded token cost,
+    no finding lost).
+  - `commands/polish.md`: "autoloop's stop rules apply" was a dangling
+    cross-reference (the polish orchestrator never loads autoloop.md) — now
+    self-contained ("regression protocol").
+  - `commands/autoloop.md`: the ALL-GREEN ledger-refresh step now carries the
+    same dogfood fallback path as the arm step (`${CLAUDE_PLUGIN_ROOT}` is
+    undefined in this plugin's own repo).
 
 ## 0.6.0 — 2026-07-14
 

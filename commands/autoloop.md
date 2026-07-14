@@ -133,6 +133,8 @@ falls back to it when criteria.tsv is absent.)
 3. If the checker's report starts with `ALL GREEN`: stop. First REFRESH the
    machine ledger so it reflects the fixed tree — run
    `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/run-contract.sh"`
+   (same dogfood fallback as the arm step: in this plugin's own repo use
+   `bash .claude/skills/loop-eng/scripts/run-contract.sh`)
    (the builder and checker run the raw verify commands, NOT run-contract, so
    `.loop/results.json` is still the pre-fix run and would show a stale
    `all_green: false` until it is re-run). Then show me the full diff
