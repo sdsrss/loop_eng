@@ -17,6 +17,10 @@ mechanically refuses to let a session quit while its contract is unsatisfied.
 /plugin install loop-eng
 ```
 
+After a marketplace install the commands may resolve namespace-prefixed —
+`/loop-eng:autoloop` and `/loop-eng:polish` — if the bare `/autoloop` /
+`/polish` form does not resolve.
+
 ## The two loops
 
 ### `/autoloop <task>` — drive a bounded task to completion
@@ -233,6 +237,22 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   the scheduled time is skipped, not caught up. (This is deliberate — a
   persistent timer enabled after the day's time has passed would fire an
   immediate catch-up run, a surprise mid-day execution just from installing.)
+
+## Environment variables
+
+| Variable | Layer | Default | Effect |
+|---|---|---|---|
+| `LOOP_ENG_ALLOW_AUTOFIX` | `unattended-polish.sh` | unset (`0`) | Required together with the `--auto-fix` flag before `unattended-polish.sh` will write fixes; without it the run stays report-only. |
+| `LOOP_ENG_ALLOW_AUTOBUILD` | `unattended-autoloop.sh` | unset (`0`) | Required before `unattended-autoloop.sh` will drive a builder; without it the driver refuses to run. |
+| `LOOP_ENG_ARM_REDCHECK` | `arm-contract.sh` | `1` (enabled) | Set to `0` to skip the arm-time advisory red-check entirely — zero criterion commands executed. |
+| `LOOP_ENG_ARM_REDCHECK_TIMEOUT` | `arm-contract.sh` | `10` (seconds) | Per-criterion timeout budget for the arm-time red-check; non-numeric or `0` falls back to `10`. |
+| `LOOP_ENG_CLAUDE_BIN` | `unattended-polish.sh`, `unattended-autoloop.sh`, `install-timer.sh` | `claude` | Path/name of the `claude` CLI binary the unattended runners and the systemd timer installer invoke. |
+| `LOOP_ENG_DISABLE_EVIDENCE_GATE` | `hooks/evidence-gate.sh` | unset (`0`) | Human escape hatch: set to `1` to disable the PreToolUse evidence-gate hook, letting a legitimate mid-loop contract edit through. |
+| `LOOP_ENG_GATE_TIMEOUT` | `hooks/stop-gate.sh` | `100` (seconds) | Internal budget for re-running the contract on each stop attempt, kept below the hook's own timeout in `hooks.json` (120s) so the gate fails closed by design instead of being killed by the platform. |
+| `LOOP_ENG_LIMIT_WAIT_MIN` | `unattended-autoloop.sh` | `60` (minutes) | Wait once and retry after a session log indicates a provider usage/rate limit; a second hit stops the driver (exit 75). |
+| `LOOP_ENG_LOOP_DIR` | `arm-contract.sh`, `run-contract.sh` | `.loop` | **TEST-ONLY.** The stop-gate and evidence-gate hooks are fixed to `.loop/`; pointing a production loop at a custom dir with this var silently removes it from both hooks' protection. |
+| `LOOP_ENG_MAX_MINUTES` | `unattended-polish.sh`, `unattended-autoloop.sh` | `120` (polish) / `240` (autoloop) | Wall-clock budget enforced via `timeout` for the unattended run; `0` is a config error (would disable the timeout) and falls back to the script's default. |
+| `LOOP_ENG_TIMER_NO_SYSTEMCTL` | `install-timer.sh`, `uninstall-timer.sh` | unset (`0`) | Set to `1` to write the systemd unit files without calling `systemctl` — used by the test suite, also useful on a box with no user D-Bus. |
 
 ## Safety model
 
