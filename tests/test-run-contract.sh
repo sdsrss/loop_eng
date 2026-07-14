@@ -104,6 +104,29 @@ rm -f .loop/active
 bash "$RUNNER"; assert_eq 0 $? "hash-lock: not armed -> hash ignored, runs normally"
 rm -f .loop/criteria.sha256
 
+# --- hash-lock present but NO SHA-256 tool on PATH: integrity unverifiable -> fail CLOSED ---
+# (armed + a stale criteria.sha256 on disk, but sha256sum/shasum/openssl all
+# missing: run-contract must refuse to execute the contract rather than skip
+# the integrity check. Forced with a minimal fake PATH holding only the tools
+# this code path needs — same PATH-stripping technique as test-evidence-gate.sh.)
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+: > .loop/active
+printf 'deadbeef-stale-hash\n' > .loop/criteria.sha256
+FAKEBIN="$SB/fakebin-run"; mkdir -p "$FAKEBIN"
+for t in bash mkdir cut mv rm; do
+  src=$(command -v "$t") && ln -sf "$src" "$FAKEBIN/$t"
+done
+if env PATH="$FAKEBIN" bash -c 'command -v sha256sum || command -v shasum || command -v openssl' >/dev/null 2>&1; then
+  echo "  SKIP: could not hide every SHA-256 tool from PATH" >&2
+else
+  env PATH="$FAKEBIN" bash "$RUNNER" 2>/dev/null
+  assert_eq 77 $? "no SHA-256 tool with a hash-lock present: fail closed, exit 77"
+  assert_file_contains .loop/results.json '"all_green": false' "no SHA-256 tool: results.json not green"
+  assert_file_contains .loop/results.json 'integrity could not be verified' "no SHA-256 tool: fail-closed reason recorded"
+fi
+rm -rf "$FAKEBIN"
+rm -f .loop/active .loop/criteria.sha256 .loop/results.json
+
 # --- missing criteria.tsv ---
 rm .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 78 $? "missing criteria exit 78"

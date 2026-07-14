@@ -88,4 +88,28 @@ assert_file_contains .loop/armwarn 'armed from' "arm prints the provenance (arme
 assert_file_contains .loop/armwarn "$ARM" "provenance line names the exact invoked script path"
 rm -f .loop/active .loop/armwarn
 
+# --- no SHA-256 tool on PATH: arm warns, still arms, writes NO hash-lock ---
+# (fail-open by design at arm time: the loop still runs, but post-arm drift can
+# never fail closed — the stderr warning is the only signal. Forced with a
+# minimal fake PATH holding the tools arm-contract needs but none of
+# sha256sum/shasum/openssl; LOOP_ENG_ARM_REDCHECK=0 keeps the case focused on
+# the hash branch. Same PATH-stripping technique as test-evidence-gate.sh.)
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count .loop/armwarn
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+FAKEBIN="$SB/fakebin-arm"; mkdir -p "$FAKEBIN"
+for t in bash awk mkdir rm; do
+  src=$(command -v "$t") && ln -sf "$src" "$FAKEBIN/$t"
+done
+if env PATH="$FAKEBIN" bash -c 'command -v sha256sum || command -v shasum || command -v openssl' >/dev/null 2>&1; then
+  echo "  SKIP: could not hide every SHA-256 tool from PATH" >&2
+else
+  env PATH="$FAKEBIN" LOOP_ENG_ARM_REDCHECK=0 bash "$ARM" 2>.loop/armwarn
+  assert_eq 0 $? "arm without any SHA-256 tool still exits 0"
+  assert_file_contains .loop/armwarn 'no SHA-256 tool' "arm warns when no SHA-256 tool is on PATH"
+  assert_eq "1" "$([ -f .loop/active ] && echo 1)" "arm still creates .loop/active without a SHA-256 tool"
+  assert_eq "" "$([ -f .loop/criteria.sha256 ] && echo 1)" "arm writes no hash-lock without a SHA-256 tool"
+fi
+rm -rf "$FAKEBIN"
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count .loop/armwarn
+
 report "test-arm-contract"
