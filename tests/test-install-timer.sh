@@ -129,4 +129,25 @@ assert_eq yes "$(exists "$UNIT_DIR/loop-eng-autoloop.service")" "polish uninstal
 run_uninstall polish >/dev/null; rc=$?
 assert_eq 0 "$rc" "uninstall of absent unit is benign no-op"
 
+# --- uninstall symmetry, autoloop mode: both unit files gone, polish untouched ---
+# (mirror of the polish symmetry test above — pre-fix, uninstall was only ever
+# exercised in polish mode, so an autoloop-specific regression would slip by)
+run_install polish "$SB" >/dev/null
+run_install autoloop "$SB" >/dev/null
+run_uninstall autoloop >/dev/null; rc=$?
+assert_eq 0 "$rc" "autoloop uninstall exits 0"
+assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.service")" "autoloop uninstall removed .service"
+assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.timer")" "autoloop uninstall removed .timer"
+assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.service")" "autoloop uninstall left polish .service untouched"
+assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.timer")" "autoloop uninstall left polish .timer untouched"
+
+# --- bad-mode uninstall: refused with usage error, nothing removed ---
+err=$(run_uninstall bogus 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "bad-mode uninstall refused"
+case "$err" in
+  *usage*) assert_eq 1 1 "bad-mode uninstall refusal shows usage" ;;
+  *) assert_eq "usage-named" "other-error" "bad-mode uninstall must show usage" ;;
+esac
+assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.service")" "bad-mode uninstall removed nothing"
+
 report "test-install-timer"
