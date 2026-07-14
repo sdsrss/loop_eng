@@ -53,4 +53,13 @@ touch .loop/active
 run_gate /dev/null; assert_eq 2 $? "legacy verify.sh still blocks"
 rm -f .loop/active .loop/gate-count
 
+# --- armed but contract-less: active marker, NO criteria.tsv, NO verify.sh ---
+# Reachable in production (arm-contract.sh arms even without criteria.tsv);
+# falling through to a block here would deadlock a legitimately armed loop.
+rm -f .loop/criteria.tsv .loop/verify.sh .loop/results.json .loop/gate-count
+touch .loop/active
+run_gate .loop/errC; assert_eq 0 $? "armed without contract allows stop"
+assert_file_contains .loop/errC 'allowing stop' "contract-less allow notice on stderr"
+rm -f .loop/active
+
 report "test-stop-gate"
