@@ -41,7 +41,8 @@ them against a THROWAWAY project, never a real one.
    ```
    cd ~/tmp/loop-smoke && mkdir -p .loop
    printf 'red\talways fails\tfalse\n' > .loop/criteria.tsv
-   ARM=$(find ~/.claude/plugins -maxdepth 6 -path '*loop-eng*' -name arm-contract.sh | head -1)
+   ARM=$(find ~/.claude/plugins -maxdepth 6 -path '*loop-eng*' -name arm-contract.sh | sort -V | tail -1)
+   echo "$ARM"     # confirm this resolves to the just-released version, not a stale cached one
    bash "$ARM"     # expect: "pinned criteria.tsv @ <sha>" + "stop-gate armed"
    ```
 4. **Evidence-gate check** (in the Claude session): ask the model to write
