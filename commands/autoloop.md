@@ -47,6 +47,36 @@ done. When a backlog item's round ends ALL GREEN, mark its line `- [x]` —
 the unattended cross-session driver consumes this file and stops when no
 `- [ ]` lines remain.
 
+### Roadmap input (a document instead of a task)
+
+When $ARGUMENTS points at a roadmap / checklist document (a file path or a
+pasted prioritized list) rather than a single task, run a TRIAGE step before
+the contract. Treat the document's item order as priority order — do not
+reorder. For each item, in order:
+
+- **loopable** — a binary verify command is derivable, the scope is inside
+  this repo, no red action (prod / schema / payments / user-global state),
+  no human interaction required → one backlog line carrying its verify
+  command: `- [ ] <item> | verify: <command>`.
+- **too big for one round** → split into loopable sub-items (each with its
+  own verify command), inserted at the parent's position.
+- **not loopable** → do NOT put it in the backlog. Record it in
+  `.loop/state.md` under `## Deferred (not loopable)` with a one-line reason:
+  needs-human / interactive / no-machine-verify / out-of-repo-scope.
+
+State the triage result (backlog + deferred, with reasons) in one message,
+then proceed — do not wait for confirmation; the contract layer is the
+safety net (an unverifiable criterion warns at arm time and can never go
+green by claim). If more than 5 items are loopable, the 5-round cap still
+binds: finish what fits, leave the rest unchecked in the backlog and say so
+— the user re-invokes /autoloop to continue (checkboxes persist), or
+schedules unattended-autoloop.sh to consume the remainder across fresh
+sessions.
+
+The wrap-up report for a roadmap run MUST end with a three-part ledger:
+**Done** (checked items, each with its proof line) / **Deferred** (with
+reasons) / **Remaining backlog** (unchecked items, if the cap cut the run).
+
 Arm the stop-gate (mechanism-layer enforcement, if the loop-eng hooks are
 loaded in this project):
 - Write `.loop/criteria.tsv`: one line per acceptance criterion,

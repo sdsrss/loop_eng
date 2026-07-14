@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `/autoloop` roadmap input: pointing the command at a prioritized roadmap /
+  checklist document (instead of a single task) now runs a protocolized
+  TRIAGE step — items are processed in document order (priority order is the
+  document's own), each classified loopable (→ backlog line carrying its
+  verify command) / too-big (→ split into loopable sub-items in place) /
+  not-loopable (→ `.loop/state.md` "Deferred (not loopable)" with a one-line
+  reason). The backlog then runs under the unchanged loop rules (one item per
+  round, 5-round cap; overflow stays unchecked for a re-invoke or the
+  unattended driver), and the wrap-up ends with a Done / Deferred / Remaining
+  ledger. Prompt-layer only — no hook or script changes; the contract layer
+  remains the safety net for triage mistakes (an unverifiable criterion warns
+  at arm and can never go green by claim).
+
 ## 0.5.0 — 2026-07-14
 
 The full audit-driven roadmap batch (21/21 items from

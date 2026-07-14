@@ -8,8 +8,12 @@ description: Closed-loop task execution and quality polishing for Claude Code. U
 Two entry points:
 
 - `/autoloop <task>` — drive a bounded task to completion: contract →
-  builder/checker rounds → ALL GREEN or escalation. See
-  `commands/autoloop.md` (in this plugin) for the full protocol.
+  builder/checker rounds → ALL GREEN or escalation. Also accepts a
+  prioritized roadmap/checklist document: it triages items in document order
+  (loopable → backlog with verify commands; too-big → split; not-loopable →
+  deferred with reasons), loops the backlog, and ends with a
+  Done / Deferred / Remaining ledger. See `commands/autoloop.md` (in this
+  plugin) for the full protocol.
 - `/polish [scope]` — iterative quality improvement: numeric baseline →
   4 independent review lenses → adversarial verification of every finding →
   fix queue → full regression → repeat until a dry round (no fresh confirmed
