@@ -12,6 +12,11 @@ FAIL=0
 mk_sandbox_repo() {
   local sb
   sb=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-test.XXXXXX")
+  # Canonicalize: on macOS $TMPDIR lives under /var -> /private/var (symlink),
+  # so scripts that `cd && pwd` a repo argument (install-timer) print the
+  # /private/... form while the raw mktemp string says /var/... — assertions
+  # comparing the two then fail on paths that are the same directory.
+  sb=$(cd "$sb" && pwd)
   (
     cd "$sb"
     git init -q

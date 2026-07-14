@@ -32,9 +32,11 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
 
-      - name: Install modern bash + shellcheck (macOS)
+      - name: Install modern bash + shellcheck + coreutils (macOS)
         if: runner.os == 'macOS'
-        run: brew install bash shellcheck
+        # coreutils provides gtimeout, so the stop-gate's fail-closed timeout
+        # path is exercised on macOS instead of SKIPped.
+        run: brew install bash shellcheck coreutils
 
       - name: Show tool versions
         run: |

@@ -15,7 +15,11 @@ mk_stub() { # $1 = stub dir OUTSIDE any sandbox repo (untracked stub inside
 # "stall" produces no commit. Runs inside the repo cwd set by the driver.
 case "${STUB_MODE:-progress}" in
   progress)
-    sed -i.bak '0,/^- \[ \]/s//- [x]/' .loop/backlog.md && rm -f .loop/backlog.md.bak
+    # awk, not sed: GNU's first-match-only address `0,/re/` does not exist in
+    # BSD sed (macOS) — there the sed errored, the item was never marked, no
+    # commit happened, and the happy path flaked into the circuit breaker.
+    awk '!d && /^- \[ \]/ { sub(/^- \[ \]/, "- [x]"); d=1 } { print }' \
+      .loop/backlog.md > .loop/backlog.md.new && mv .loop/backlog.md.new .loop/backlog.md
     # $$-unique, not date-based: BSD date has no %N (prints a literal "N"), so
     # two same-second sessions would collide on the filename -> empty commit ->
     # stub exits non-zero -> flaky breaker counts on macOS CI.

@@ -46,6 +46,12 @@ No adjectives.
    ever reported this run, keyed `file:line|summary`). Append fresh ones to the
    seen file. Dedup against SEEN, not against confirmed — otherwise refuted
    findings resurface every round and the loop never converges.
+   (Known noise, accepted by design: after a fix round shifts line numbers, an
+   already-seen finding can re-enter as "fresh" at its new line and cost one
+   extra verifier pass — the verifier absorbs it. Keying without the line was
+   rejected: two genuinely distinct findings in one file can share a summary,
+   and line-less dedup would silently drop one. Noise is acceptable; losing a
+   real finding is not.)
 3. For each fresh finding, dispatch loop-verifier (one finding per dispatch,
    parallel). Only `VERDICT: CONFIRMED` findings with impact `correctness` or
    `requirement` enter the fix queue. Confirmed `optional` findings go to the

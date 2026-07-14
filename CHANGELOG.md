@@ -99,7 +99,31 @@ no breaking changes.
   hooks mean the dogfood repo exercises only part of the enforcement layer.
 
 ### Tests
-- Suite 143 → 161 assertions: `test-unattended-autoloop` +10 (fake-timeout
+- New `tests/test-hooks-json.sh` (+12): hooks.json must parse and carry the
+  structural contract — Stop → stop-gate.sh via CLAUDE_PLUGIN_ROOT with a
+  timeout above the gate's internal budget (cross-checked against the
+  LOOP_ENG_GATE_TIMEOUT default in stop-gate.sh); PreToolUse → evidence-gate.sh
+  covering Write/Edit/MultiEdit/NotebookEdit/Bash. One slipped comma in this
+  file silently disables the whole enforcement layer. (audit B5-1)
+- New `tests/test-sync-local.sh` (+10): sync fidelity against a sandboxed copy
+  of the plugin tree — byte-identical commands/agents/hooks/skills, executable
+  bits preserved, settings.json untouched, parity warning fires exactly when a
+  hook is unregistered, drift is detectable and a re-sync clears it. The sync
+  had a silent-omission precedent (evidence-gate.sh, pre-v0.2.2) and no test.
+  (audit B5-2)
+- CI portability fixes from the first macOS run (5 red assertions, all
+  test-side): `mk_sandbox_repo` now canonicalizes the sandbox path (macOS
+  $TMPDIR lives under /var → /private/var, so installer-canonicalized paths
+  never matched raw mktemp strings); the autoloop progress stub marks backlog
+  items with awk instead of GNU sed's `0,/re/` first-match address (BSD sed
+  lacks it — the stub never committed and the happy path flaked into the
+  breaker); macOS CI installs coreutils so the stop-gate timeout tests run
+  instead of SKIPping.
+- `commands/polish.md`: documented the dedup-key tradeoff (audit B5-3/P4) —
+  `file:line|summary` keeps line drift as accepted verifier-cost noise;
+  line-less keys were rejected because they can silently drop one of two
+  same-summary findings in a file.
+- Suite 143 → 183 assertions: `test-unattended-autoloop` +10 (fake-timeout
   wiring, expire→breaker, backlog-deleted stop, MAX_MINUTES=0),
   `test-install-timer` +3 (pinned claude Environment line, unresolvable-claude
   refusal ×2), `test-unattended-polish` +2 (MAX_MINUTES=0),
