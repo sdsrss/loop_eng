@@ -60,11 +60,17 @@ else
 fi
 
 deny() {
+  # Name the runner by a path that actually exists where the model runs: in a
+  # marketplace install the plugin lives in the plugin cache, not in the user's
+  # project, so a project-relative skills/... path would send the model to a
+  # file that isn't there. Print the real absolute path when the platform gave
+  # us CLAUDE_PLUGIN_ROOT; otherwise a placeholder the human can resolve.
+  local runner="${CLAUDE_PLUGIN_ROOT:-<loop-eng plugin root>}/skills/loop-eng/scripts/run-contract.sh"
   {
     echo "loop-eng evidence-gate DENIED: $1"
     echo ".loop/results.json and .loop/evidence/ are machine-written evidence."
     echo "let the stop-gate run the contract on your next stop attempt, or run"
-    echo "the plugin's run-contract.sh (skills/loop-eng/scripts/run-contract.sh)"
+    echo "the plugin's run-contract.sh ($runner)"
     echo "yourself instead of writing claims. Weakening a check to pass it is a"
     echo "red line."
     echo "(Human escape hatch: LOOP_ENG_DISABLE_EVIDENCE_GATE=1.)"

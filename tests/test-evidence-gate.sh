@@ -87,6 +87,13 @@ assert_eq 0 $? "escape hatch allows everything"
 printf '%s' "${W/FILE/.loop/results.json}" | bash "$GATE" 2>.loop/err || true
 assert_file_contains .loop/err 'machine-written' "deny explains machine-written"
 assert_file_contains .loop/err 'LOOP_ENG_DISABLE_EVIDENCE_GATE' "deny names escape hatch"
+# The runner path must be usable where the model runs: with CLAUDE_PLUGIN_ROOT
+# set (marketplace install) the message carries the real absolute path; without
+# it, a placeholder — never a project-relative skills/ path that isn't there.
+printf '%s' "${W/FILE/.loop/results.json}" | CLAUDE_PLUGIN_ROOT=/opt/plug bash "$GATE" 2>.loop/err || true
+assert_file_contains .loop/err '/opt/plug/skills/loop-eng/scripts/run-contract.sh' "deny resolves runner via CLAUDE_PLUGIN_ROOT"
+printf '%s' "${W/FILE/.loop/results.json}" | env -u CLAUDE_PLUGIN_ROOT bash "$GATE" 2>.loop/err || true
+assert_file_contains .loop/err '<loop-eng plugin root>' "deny falls back to a placeholder without CLAUDE_PLUGIN_ROOT"
 
 # --- python3 fallback path (jq absent): the gate must still enforce ---
 # jq-less environments (python3 only) are common; without this the whole fallback

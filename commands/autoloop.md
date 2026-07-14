@@ -12,6 +12,17 @@ subagent; all verification goes through the loop-checker subagent.
 
 ## Step 0 — Align
 
+Preconditions first:
+
+- `git status` must be clean (untracked `.loop/` bookkeeping is fine). If
+  dirty, STOP and tell the user — the final diff must be attributable to the
+  loop alone, and a dirty tree makes the wrap-up diff conflate the user's
+  uncommitted work with the loop's changes.
+- Record the baseline ref: run `git rev-parse HEAD` and write it into
+  `.loop/state.md` as `Baseline: <hash>`. The final report's diff (Step 3 and
+  Wrap-up) is `git diff <baseline>..HEAD` — without a recorded baseline there
+  is nothing exact to diff against after multiple builder commits.
+
 Write a one-line task brief: goal, files involved, completion criteria.
 This brief is passed to both builder and checker.
 
@@ -52,7 +63,10 @@ loaded in this project):
   `.loop/active`, and clears any stale `.loop/gate-count`. run-contract then
   fails CLOSED on every stop attempt if criteria.tsv no longer matches that
   hash — so weakening an armed contract fails loudly instead of passing
-  silently, whatever write path is used. (If arm-contract.sh is unavailable,
+  silently, whatever write path is used. (In this plugin's own repo, dogfooding
+  via the `.claude/` copy, `${CLAUDE_PLUGIN_ROOT}` is undefined — use
+  `bash .claude/skills/loop-eng/scripts/arm-contract.sh` there instead; do not
+  skip the hash-lock. Only if arm-contract.sh is unavailable through BOTH paths,
   fall back to `touch .loop/active` + `rm -f .loop/gate-count`; the Write/Edit
   lock still holds, but drift via exotic Bash verbs won't fail closed.)
 While `.loop/active` exists, the Stop hook executes the criteria via the
@@ -75,7 +89,8 @@ falls back to it when criteria.tsv is absent.)
    (the builder and checker run the raw verify commands, NOT run-contract, so
    `.loop/results.json` is still the pre-fix run and would show a stale
    `all_green: false` until it is re-run). Then show me the full diff
-   (`git diff` against the pre-loop commit) and each check's proof line.
+   (`git diff <baseline>..HEAD`, the baseline ref recorded in Step 0) and each
+   check's proof line.
    Cite the just-refreshed `.loop/results.json` (`all_green: true`) as the
    machine proof, and the per-criterion evidence files under `.loop/evidence/`.
    (The Stop hook also re-runs the contract on your stop attempt; refreshing it
@@ -131,10 +146,16 @@ Whenever you stop on rules 2–6, the report MUST carry:
 ## Wrap-up
 
 After the loop ends (any outcome):
-- Disarm the stop-gate: remove `.loop/active`, `.loop/gate-count`, and
-  `.loop/criteria.sha256`. (On ALL GREEN the gate lifts `.loop/active` +
-  `.loop/gate-count` itself, but remove all three defensively.) An escalation
-  stop is a legitimate end — never leave the gate armed behind you.
+- Disarm the stop-gate IN TWO SEPARATE Bash commands, in this order:
+  1. `rm -f .loop/active .loop/gate-count`
+  2. `rm -f .loop/criteria.sha256`
+  The order matters: while `.loop/active` exists, the evidence-gate denies ANY
+  Bash command touching `criteria.sha256` — including this legitimate wrap-up —
+  so a single `rm` of all three files is denied. Removing `active` first
+  disarms that lock and the second command passes. (On ALL GREEN the stop-gate
+  lifts `active` + `gate-count` itself; removing them again is a harmless
+  no-op.) An escalation stop is a legitimate end — never leave the gate armed
+  behind you.
 - Append one line to `.loop/lessons.md` in the fixed format:
   `- <YYYY-MM-DD> | <task one-liner> | rounds <n> | <ALL GREEN|stop-rule-N> | <one reusable lesson, or "-">`
   If a memory system is available (e.g.

@@ -37,6 +37,29 @@ no breaking changes.
   orchestrator failed to disarm, and without it every later stop attempt in the
   session eats another 3 blocks. (audit M5)
 
+### Changed (prompt revisions, /autoloop orchestration text)
+- `commands/autoloop.md` Wrap-up: disarming is now TWO ordered Bash commands
+  (`rm -f .loop/active .loop/gate-count`, then `rm -f .loop/criteria.sha256`).
+  The previous "remove all three" instruction, executed as one command while
+  armed, was denied by the plugin's own evidence-gate (sandbox-proven exit 2)
+  with a misleading "weakening a check" message — the model wasted a deny
+  round-trip on a legitimate step. (audit P1)
+- `commands/autoloop.md` Step 0: added preconditions — a clean tree (dirty
+  trees conflate the user's uncommitted work into the final diff) and a
+  recorded baseline ref (`git rev-parse HEAD` into `.loop/state.md`); Step 3's
+  final diff now cites `git diff <baseline>..HEAD` instead of the unrecorded
+  "pre-loop commit". Aligns /autoloop with /polish Phase 0. (audit P2)
+- `commands/autoloop.md` arming: when dogfooding this repo via `.claude/`
+  (`${CLAUDE_PLUGIN_ROOT}` undefined), use the local
+  `.claude/skills/loop-eng/scripts/arm-contract.sh` rather than silently
+  falling back to `touch .loop/active` — the fallback loses the hash-lock, so
+  dogfood loops were running a degraded contract without noticing. (audit P3)
+- `hooks/evidence-gate.sh`: the deny message now names the run-contract.sh
+  runner by `$CLAUDE_PLUGIN_ROOT/...` (real absolute path when the platform
+  provides it, an explicit placeholder otherwise) instead of a
+  project-relative `skills/...` path that does not exist in a user project
+  under a marketplace install. (audit P5)
+
 ### Dogfood
 - `.claude/settings.json` (untracked): registered the evidence-gate PreToolUse
   hook and aligned hook timeouts with `hooks/hooks.json` (Stop 120s — the
@@ -49,12 +72,14 @@ no breaking changes.
   hooks mean the dogfood repo exercises only part of the enforcement layer.
 
 ### Tests
-- Suite 143 → 159 assertions: `test-unattended-autoloop` +10 (fake-timeout
+- Suite 143 → 161 assertions: `test-unattended-autoloop` +10 (fake-timeout
   wiring, expire→breaker, backlog-deleted stop, MAX_MINUTES=0),
   `test-install-timer` +3 (pinned claude Environment line, unresolvable-claude
   refusal ×2), `test-unattended-polish` +2 (MAX_MINUTES=0),
-  `test-stop-gate` +1 (ceiling disarm hint). install-timer tests now inject a
-  stub claude (`LOOP_ENG_CLAUDE_BIN`) so they stay hermetic on claude-less CI.
+  `test-stop-gate` +1 (ceiling disarm hint), `test-evidence-gate` +2 (deny
+  message resolves the runner via CLAUDE_PLUGIN_ROOT / placeholder without it).
+  install-timer tests now inject a stub claude (`LOOP_ENG_CLAUDE_BIN`) so they
+  stay hermetic on claude-less CI.
 
 ## 0.4.1 — 2026-07-11
 
