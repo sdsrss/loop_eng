@@ -42,10 +42,12 @@ If the task is large (more than ~3 independent deliverables), also create
 `.loop/backlog.md`: one line per independently verifiable feature, priority
 ordered. Each loop round takes exactly ONE backlog item.
 
-Backlog lines use checkbox syntax: `- [ ] <item>` pending, `- [x] <item>`
-done. When a backlog item's round ends ALL GREEN, mark its line `- [x]` —
-the unattended cross-session driver consumes this file and stops when no
-`- [ ]` lines remain.
+Backlog lines use checkbox syntax: `- [ ] <item> | verify: <command>`
+pending, `- [x] <item> | verify: <command>` done — each line carries its
+verify command so per-item machine-verifiable criteria survive into the
+backlog, same format as roadmap triage below. When a backlog item's round
+ends ALL GREEN, mark its line `- [x]` — the unattended cross-session driver
+consumes this file and stops when no `- [ ]` lines remain.
 
 ### Roadmap input (a document instead of a task)
 
