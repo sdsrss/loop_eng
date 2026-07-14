@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-07-14
 
 ### Added
 - `/autoloop` roadmap input: pointing the command at a prioritized roadmap /
@@ -64,7 +64,7 @@
   checkable negative assertion. The loop's output quality is capped by the
   contract's spec quality. (round-3 pilot retro)
 
-## 0.6.0 — 2026-07-14
+## 0.5.0 — 2026-07-14
 
 The full audit-driven roadmap batch (21/21 items from
 `docs/optimization-roadmap-2026-07-14.md`, derived from
