@@ -8,8 +8,13 @@
 # - macos: stock /bin/bash is 3.2 — too old for the unattended drivers
 #   (bash >= 4.4: empty-array expansion under set -u), so install brew bash
 #   (lands first on PATH) + shellcheck. This makes the "hooks work on macOS,
-#   unattended needs modern bash" claim a TESTED fact on 5.x; a true 3.2
-#   hooks-only matrix leg is future work.
+#   unattended needs modern bash" claim a TESTED fact on 5.x.
+# - test-bash32: a SEPARATE macOS job that does NOT install brew bash and runs
+#   the five hooks-only suites through the stock /bin/bash (3.2) EXPLICITLY, so
+#   the "hooks are bash-3.2 compatible" claim is machine-verified, not asserted.
+#   It deliberately excludes the test-unattended-* suites (their drivers require
+#   bash >= 4.4) and invokes /bin/bash by absolute path so it can never fall
+#   through to a 5.x bash that happens to be on PATH.
 name: tests
 
 on:
@@ -45,3 +50,38 @@ jobs:
 
       - name: Run test suite
         run: bash tests/run-all.sh
+
+  # Stock macOS bash is 3.2. This job proves the hooks + their scripts run there
+  # by invoking the five hooks-only suites through /bin/bash directly. NO brew
+  # bash here — that is the whole point. The unattended suites are excluded
+  # because their drivers require bash >= 4.4.
+  test-bash32:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove /bin/bash is stock 3.2
+        run: /bin/bash --version | head -1
+
+      - name: Run hooks-only suites under stock /bin/bash (3.2)
+        run: |
+          set -e
+          for t in tests/test-arm-contract.sh \
+                   tests/test-evidence-gate.sh \
+                   tests/test-run-contract.sh \
+                   tests/test-stop-gate.sh \
+                   tests/test-hooks-json.sh; do
+            echo "=== /bin/bash $t ==="
+            /bin/bash "$t"
+          done
+
+      - name: Syntax-check the hooks-only scripts under /bin/bash (3.2)
+        run: |
+          set -e
+          for f in tests/lib.sh \
+                   hooks/stop-gate.sh \
+                   hooks/evidence-gate.sh \
+                   skills/loop-eng/scripts/run-contract.sh \
+                   skills/loop-eng/scripts/arm-contract.sh; do
+            /bin/bash -n "$f"
+          done

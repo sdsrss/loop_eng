@@ -109,6 +109,13 @@ to the red lines in the prompts and human review of the diff.
 Platform note: Claude Code force-allows a stop after 8 consecutive
 Stop-hook blocks; loop-eng's ceiling (3) stays safely under it.
 
+Bash compatibility: the hooks (`stop-gate.sh`, `evidence-gate.sh`) and their
+scripts (`arm-contract.sh`, `run-contract.sh`) run on stock macOS bash 3.2 —
+this is tested in CI, not asserted: a dedicated `test-bash32` job runs the
+hooks suites through macOS's `/bin/bash` (3.2) on every push. The unattended
+runners are the exception — they need bash ≥ 4.4 (empty-array expansion under
+`set -u`) and say so in their headers.
+
 Scope notes:
 
 - **One loop per repo at a time.** `.loop/` is shared, unversioned state: a

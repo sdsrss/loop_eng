@@ -48,6 +48,9 @@ json_str() { # escape for a JSON string: backslash, double quote, and the contro
   # those. LF can't occur (read splits on it) and NUL can't live in a bash var,
   # so replace the residual C0 set with a space — results.json is then valid
   # JSON for ANY field byte content, not just the common TAB/CRLF vectors.
+  # NB: the $'\xHH' ANSI-C escapes and this bracket-range pattern substitution
+  # are CI-verified on stock macOS bash 3.2 (the test-bash32 job) — do not
+  # "portability-rewrite" it speculatively; the CI leg is the ground truth.
   s="${s//[$'\x01'-$'\x08'$'\x0b'$'\x0c'$'\x0e'-$'\x1f']/ }"
   printf '%s' "$s"
 }
