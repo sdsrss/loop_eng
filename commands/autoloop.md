@@ -26,6 +26,14 @@ Preconditions first:
 Write a one-line task brief: goal, files involved, completion criteria.
 This brief is passed to both builder and checker.
 
+Dogfood fallback (later steps point here): dogfooding this plugin's own repo
+via the `.claude/` copy, `${CLAUDE_PLUGIN_ROOT}` is undefined — substitute
+`.claude/` in every script reference below
+(e.g. `bash .claude/skills/loop-eng/scripts/arm-contract.sh`); never skip the
+hash-lock. Last resort, arm-contract.sh unavailable via BOTH paths:
+`touch .loop/active` + `rm -f .loop/gate-count` — Write/Edit lock still holds,
+but exotic-Bash drift won't fail closed.
+
 ## Step 1 — Contract
 
 Create `.loop/contract.md` before any code is touched:
@@ -116,12 +124,7 @@ loaded in this project):
   `.loop/active`, and clears any stale `.loop/gate-count`. run-contract then
   fails CLOSED on every stop attempt if criteria.tsv no longer matches that
   hash — so weakening an armed contract fails loudly instead of passing
-  silently, whatever write path is used. (In this plugin's own repo, dogfooding
-  via the `.claude/` copy, `${CLAUDE_PLUGIN_ROOT}` is undefined — use
-  `bash .claude/skills/loop-eng/scripts/arm-contract.sh` there instead; do not
-  skip the hash-lock. Only if arm-contract.sh is unavailable through BOTH paths,
-  fall back to `touch .loop/active` + `rm -f .loop/gate-count`; the Write/Edit
-  lock still holds, but drift via exotic Bash verbs won't fail closed.)
+  silently, whatever write path is used. (Dogfood fallback: Step 0.)
 While `.loop/active` exists, the Stop hook executes the criteria via the
 plugin's run-contract.sh on every stop attempt and blocks premature quitting
 (up to a hard ceiling of 3 blocks). Each run machine-writes
@@ -146,8 +149,7 @@ falls back to it when criteria.tsv is absent.)
 3. If the checker's report starts with `ALL GREEN`: stop. First REFRESH the
    machine ledger so it reflects the fixed tree — run
    `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/run-contract.sh"`
-   (same dogfood fallback as the arm step: in this plugin's own repo use
-   `bash .claude/skills/loop-eng/scripts/run-contract.sh`)
+   (dogfood fallback: Step 0)
    (the builder and checker run the raw verify commands, NOT run-contract, so
    `.loop/results.json` is still the pre-fix run and would show a stale
    `all_green: false` until it is re-run). Then show me the full diff
