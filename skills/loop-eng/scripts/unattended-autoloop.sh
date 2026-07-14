@@ -159,7 +159,9 @@ while :; do
     note "session $session exit=$STATUS commits=$(git rev-list --count "$head_before..$head_after") log=$SLOG"
   fi
 
-  if [ "$STATUS" -ne 0 ] && grep -qiE 'usage limit|rate.?limit(ed)?' "$SLOG"; then
+  # Broad phrases are safe here because the grep only runs on FAILED sessions
+  # (STATUS != 0), which bounds the false-positive surface.
+  if [ "$STATUS" -ne 0 ] && grep -qiE 'usage limit|rate.?limit(ed)?|quota|overloaded|too many requests' "$SLOG"; then
     limit_hits=$((limit_hits + 1))
     if [ "$limit_hits" -ge 2 ]; then
       note "provider limit hit twice — stopping"; exit 75; fi

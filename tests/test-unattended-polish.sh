@@ -17,7 +17,7 @@ cat > "$STUB" <<'EOF'
 case "${STUB_MODE:-ok}" in
   ok)    echo "polish report: 0 findings"; exit 0 ;;
   fail)  echo "boom"; exit 3 ;;
-  limit) echo "Claude AI usage limit reached"; exit 1 ;;
+  limit) echo "${STUB_LIMIT_MSG:-Claude AI usage limit reached}"; exit 1 ;;
 esac
 EOF
 chmod +x "$STUB"
@@ -36,6 +36,11 @@ assert_file_contains "$SB/.loop/unattended.log" "exit=3" "logs exit=3 on failure
 STUB_MODE=limit LOOP_ENG_CLAUDE_BIN="$STUB" bash "$SCRIPT" "$SB" src/ && rc=0 || rc=$?
 assert_eq 75 "$rc" "rate-limited run exits 75"
 assert_file_contains "$SB/.loop/unattended.log" "rate-limited" "logs rate-limited marker"
+
+# --- broadened limit regex: a non-"usage limit" phrasing also takes the limit path ---
+STUB_MODE=limit STUB_LIMIT_MSG="quota exceeded" LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SB" src/ && rc=0 || rc=$?
+assert_eq 75 "$rc" "quota-exceeded run exits 75 (broadened limit regex)"
 
 # --- non-numeric MAX_MINUTES warns + falls back to default (was: opaque timeout fail) ---
 STUB_MODE=ok LOOP_ENG_MAX_MINUTES=nope LOOP_ENG_CLAUDE_BIN="$STUB" \

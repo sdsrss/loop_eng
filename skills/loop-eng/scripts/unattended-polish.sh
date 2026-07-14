@@ -92,7 +92,9 @@ STATUS=0
   --max-turns 120 \
   > "$LOG" 2>&1 || STATUS=$?
 
-if [ "$STATUS" -ne 0 ] && grep -qiE 'usage limit|rate.?limit(ed)?' "$LOG"; then
+# Broad phrases are safe here because the grep only runs on FAILED runs
+# (STATUS != 0), which bounds the false-positive surface.
+if [ "$STATUS" -ne 0 ] && grep -qiE 'usage limit|rate.?limit(ed)?|quota|overloaded|too many requests' "$LOG"; then
   echo "$STAMP mode=${MODE:-auto-fix} scope=$SCOPE exit=$STATUS rate-limited log=$LOG" >> "$LOG_DIR/unattended.log"
   tail -40 "$LOG"
   exit 75
