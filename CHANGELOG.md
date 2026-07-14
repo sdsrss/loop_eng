@@ -15,6 +15,36 @@
   ledger. Prompt-layer only — no hook or script changes; the contract layer
   remains the safety net for triage mistakes (an unverifiable criterion warns
   at arm and can never go green by claim).
+- `arm-contract.sh` pre-arm red-check: after pinning the hash-lock and before
+  dropping `.loop/active`, the criteria are run once and any criterion already
+  GREEN at arm time is warned about (stderr, advisory, non-gating). A check that
+  passes before any work is done — like a test that never failed — may be
+  vacuously satisfied and prove nothing. The loop still pins, still arms, still
+  exits 0; the warning only surfaces the untrustworthy criterion so the author
+  can tighten it. Portable bash 3.2. (pilot retro)
+
+### Changed
+- `hooks/evidence-gate.sh`: the armed deny for a single Bash command that
+  removes both `.loop/active` and the `.loop/criteria.sha256` hash-lock now
+  advises the two-call wrap-up split — remove `.loop/active` first (which
+  disarms), then the hash-lock in a second call. The gate scans the whole
+  command string while the marker still exists, so the one-command removal is a
+  legitimate step the model would otherwise waste a deny round-trip on; the
+  message now names the fix instead of just blocking. (pilot retro)
+- `commands/autoloop.md` protocol: on an ALL-GREEN outcome the orchestrator no
+  longer manually disarms — it ends the turn and lets the stop-gate self-clear
+  on the real stop attempt; the two-command manual disarm is now scoped to
+  ESCALATION stops only. Roadmap-mode: the per-round checker judges only the
+  current round's item — not-yet-built global criteria are expected-red, not
+  that round's failure. Triage: trivial single-file micro-items MAY share one
+  round, still one commit per item for traceability. (pilot retro)
+
+### Docs
+- README trust-boundary notes: a project-settings hook registration plus a
+  global plugin install double-fires the hooks; the backlog-ticked criterion
+  reads an orchestrator-writable file, so "tick a box only after the checker
+  reports ALL GREEN" is a red line, not a mechanism; on interrupt-resume,
+  reconcile `git log` against the backlog ticks before continuing. (pilot retro)
 
 ## 0.5.0 — 2026-07-14
 
