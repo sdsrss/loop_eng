@@ -85,6 +85,17 @@ case "$err" in
   *) assert_eq "whitespace-named" "other-error" "scope refusal must cite whitespace" ;;
 esac
 
+# --- value containing %: refused (systemd expands a literal % as a unit specifier) ---
+# (pre-fix, a % in any ExecStart=/Environment= value — e.g. a URL-encoded scope
+# like "src%2Ffoo/" — misexpanded via specifier substitution or failed unit load,
+# the same "enables cleanly, breaks at first trigger" class as whitespace)
+err=$(run_install polish "$SB" "src%2Ffoo/" 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "scope with percent refused"
+case "$err" in
+  *percent*) assert_eq 1 1 "percent refusal names the reason" ;;
+  *) assert_eq "percent-named" "other-error" "refusal must cite percent" ;;
+esac
+
 # --- nonexistent repo-dir: refused AND the error names the offending path (not blank) ---
 err=$(run_install polish /no/such/repo-dir-xyz 2>&1 >/dev/null); rc=$?
 assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "nonexistent repo-dir refused"

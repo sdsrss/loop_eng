@@ -92,6 +92,14 @@ case "$REPO"       in *[[:space:]]*) die "repo-dir path contains whitespace, whi
 case "$RUNNER"     in *[[:space:]]*) die "plugin path contains whitespace, which the systemd unit cannot represent unquoted: $RUNNER" ;; esac
 case "$CLAUDE_ABS" in *[[:space:]]*) die "claude path contains whitespace, which the systemd unit cannot represent unquoted: $CLAUDE_ABS" ;; esac
 
+# systemd treats a literal % in unit files as a specifier prefix (%i, %h, ...);
+# a % in any value injected into ExecStart=/Environment=/StandardOutput= lines
+# misexpands or makes the unit fail to load — the same "enables cleanly, breaks
+# at first trigger" class as the whitespace trap above. Refuse at install time.
+case "$REPO"       in *%*) die "repo-dir path contains a percent sign, which systemd expands as a unit specifier: $REPO" ;; esac
+case "$RUNNER"     in *%*) die "plugin path contains a percent sign, which systemd expands as a unit specifier: $RUNNER" ;; esac
+case "$CLAUDE_ABS" in *%*) die "claude path contains a percent sign, which systemd expands as a unit specifier: $CLAUDE_ABS" ;; esac
+
 # Build the mode-specific ExecStart tail + write-enable Environment lines.
 ENV_LINES=""
 if [ "$MODE" = polish ]; then
@@ -101,6 +109,7 @@ if [ "$MODE" = polish ]; then
   # plus a stray argument the runner mistakes for its flag — silently
   # report-only with the wrong scope, surfacing only at first trigger.
   case "$SCOPE" in *[[:space:]]*) die "polish scope contains whitespace, which the systemd unit cannot represent unquoted: $SCOPE" ;; esac
+  case "$SCOPE" in *%*) die "polish scope contains a percent sign, which systemd expands as a unit specifier: $SCOPE" ;; esac
   EXEC_ARGS="$REPO $SCOPE"
   if [ "$ALLOW_WRITE" = 1 ]; then
     EXEC_ARGS="$EXEC_ARGS --auto-fix"
