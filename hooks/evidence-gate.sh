@@ -73,6 +73,9 @@ deny() {
     echo "the plugin's run-contract.sh ($runner)"
     echo "yourself instead of writing claims. Weakening a check to pass it is a"
     echo "red line."
+    echo "(If a Bash command only NAMES a guarded path — in a string, comment,"
+    echo "subshell, or sed script — rather than writing it, this is a conservative"
+    echo "false match: reword the command, or use the escape hatch below.)"
     echo "(Human escape hatch: LOOP_ENG_DISABLE_EVIDENCE_GATE=1.)"
   } >&2
   exit 2
@@ -105,8 +108,18 @@ case "$TOOL" in
     esac
     ;;
   Bash)
+    # Strip `->` arrows before matching: a literal `->` (e.g. in an echoed
+    # message "logs -> $(ls .loop/evidence/)") has its `>` read as a redirect
+    # verb by the regex below, spuriously denying a command that only MENTIONS a
+    # guarded path. No real shell redirect ever contains `->`, so blanking it is
+    # provably true-positive-preserving (every `>`/`>>`/`2>` redirect survives).
+    # This is the ONLY normalization: the match stays deliberately conservative —
+    # a command that merely names a guarded path in a string/subshell/sed-script
+    # is still denied (over-blocking, never under-blocking), because the real
+    # integrity guarantee is run-contract's hash re-derivation, not this regex.
+    SCAN=$(printf '%s' "$CMD" | sed 's/->/ /g')
     # results.json + evidence/ are the machine ledger: always protected.
-    if printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/(results\.json|evidence/)'; then
+    if printf '%s' "$SCAN" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/(results\.json|evidence/)'; then
       deny "a Bash command writing to the .loop evidence ledger"
     fi
     # criteria.tsv + its hash-lock are locked only while the loop is armed
@@ -114,7 +127,7 @@ case "$TOOL" in
     # cwd-relative check suffices). This regex is best-effort (see header): the
     # real integrity guarantee is run-contract's hash re-derivation, which no
     # Bash verb can slip past.
-    if [ -e .loop/active ] && printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/criteria\.(tsv|sha256)'; then
+    if [ -e .loop/active ] && printf '%s' "$SCAN" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/criteria\.(tsv|sha256)'; then
       # Common legitimate case: a wrap-up that removes .loop/active AND
       # .loop/criteria.sha256 in ONE command is denied because the gate scans the
       # whole command string while active still exists. Advise splitting it.

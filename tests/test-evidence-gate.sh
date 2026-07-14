@@ -86,6 +86,25 @@ gate "${B/CMD/bash .loop/verify.sh}";             assert_eq 0 $? "running verify
 gate "${B/CMD/cat .loop/results.json}";           assert_eq 0 $? "reading results.json allowed"
 gate "${B/CMD/git add .loop/results.json}";       assert_eq 0 $? "git add allowed"
 
+# --- FP fix: a literal `->` arrow must NOT be read as a `>` redirect verb.
+#     "logs -> $(ls .loop/evidence/)" only READS the ledger via a subshell; the
+#     arrow's `>` used to trip the redirect branch. Stripping `->` before the
+#     match preserves every real redirect while dropping this false positive. ---
+gate "${B/CMD/echo \"logs -> \$(ls .loop\/evidence\/ | wc -l)\"}"; assert_eq 0 $? "arrow-then-mention of evidence/ (read subshell) allowed"
+gate "${B/CMD/echo \"count -> \$(ls .loop\/results.json)\"}";      assert_eq 0 $? "arrow-then-mention of results.json allowed"
+# --- but real redirects with a nearby arrow-in-data must STILL be denied ---
+gate "${B/CMD/printf '1->2' > .loop\/results.json}"; assert_eq 2 $? "real redirect denied even when payload contains an arrow"
+
+# --- TP preservation after the `->` strip: every real write path still denied ---
+gate "${B/CMD/echo x >> .loop\/results.json}";        assert_eq 2 $? "append >> results.json still denied"
+gate "${B/CMD/tee .loop\/results.json}";              assert_eq 2 $? "tee results.json still denied"
+gate "${B/CMD/rm .loop\/evidence\/1.log}";            assert_eq 2 $? "rm evidence log still denied"
+gate "${B/CMD/mv x .loop\/results.json}";             assert_eq 2 $? "mv into results.json still denied"
+
+# --- deny message names the mention-only false-positive escape ---
+printf '%s' "${W/FILE/.loop/results.json}" | bash "$GATE" 2>.loop/err || true
+assert_file_contains .loop/err 'only NAMES a guarded path' "deny explains the mention-only false positive"
+
 # --- escape hatch ---
 printf '%s' "${W/FILE/.loop/results.json}" | LOOP_ENG_DISABLE_EVIDENCE_GATE=1 bash "$GATE" 2>/dev/null
 assert_eq 0 $? "escape hatch allows everything"

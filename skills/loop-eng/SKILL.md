@@ -72,6 +72,25 @@ rules, learned from live pilots:
    for real (not sandboxed) at the arm-time red-check AND on every stop
    attempt, so a side-effecting criterion fires repeatedly.
 
+### What the mechanism does and does NOT guarantee
+
+Two limits worth stating plainly, so a loop's author does not over-trust it:
+
+- **The red-check catches _vacuous_ criteria, not _weak_ ones.** Arming warns
+  when a criterion is already green before any work (it may prove nothing). It
+  cannot tell that a criterion is red-now-but-tests-the-wrong-thing — a grep
+  that matches a substring the source will carry incidentally is red today and
+  green forever after, yet verifies nothing real. Author criteria that key on a
+  genuine symbol/behavior, not a coincidental string; the red-check is a floor,
+  not a ceiling.
+- **Machine-written evidence covers criteria pass/fail — not the orchestrator's
+  prose.** `results.json` and the stop-gate guarantee that a criterion's
+  `passes: true` was produced by running its command. They say nothing about
+  the narrative an orchestrator writes _around_ the loop (a summary figure, a
+  "reduced X to Y" claim). Those sentences are unguarded prose: cite them to
+  fresh tool output the same way you would outside a loop. The loop guarantees
+  the contract was met, not that every sentence about it is true.
+
 ## Templates
 
 - `templates/contract.md` — acceptance contract skeleton
