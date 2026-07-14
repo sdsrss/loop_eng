@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.10.0 — 2026-07-14
+
+The UX batch, from a real-user sandbox audit of the install / lifecycle /
+residue story, plus two robustness fixes. Driven by one /autoloop roadmap run
+(5 rounds, 5/5 ALL GREEN) and two direct mechanism edits. Test suite 263 → 320
+assertions.
+
+**Upgrade note**: additive — after updating run `/reload-plugins` or start a
+fresh session. Two of this release's improvements only take effect once the
+plugin cache is on 0.10.0 (they run from the installed copy, not the repo): the
+evidence-log pruning and the evidence-gate arrow fix. Revert path: pin v0.9.0.
+
+### Added
+- **Update-available notifier** (new `hooks/update-notify.sh`, SessionStart):
+  once per 24h (cached under `${XDG_CACHE_HOME:-$HOME/.cache}/loop-eng/`, never
+  `~/.claude/`) it checks the latest GitHub release and, only when the installed
+  version is behind, prints a one-line "update available — run `/plugin update
+  loop-eng`" notice via the SessionStart JSON envelope. A single 3s-timeout
+  curl; no auto-download; fails silent and non-blocking on missing curl / no
+  network / parse error / throttle. Fills the gap where a marketplace user got
+  zero signal that a new version existed.
+- `run-contract.sh` **prunes stale evidence logs**: `.loop/evidence/<id>.log`
+  files whose id is not in the current contract are removed each run, so a repo
+  that runs many loops no longer accumulates orphan evidence forever. Runs after
+  the ledger is written, never deletes the current run's evidence, and never
+  fires on a fail-closed run (hash mismatch / no-sha-tool → evidence preserved).
+
+### Fixed
+- `evidence-gate.sh`: a Bash command that only NAMES a guarded ledger path via a
+  literal `->` arrow plus a read subshell (e.g. an echoed progress line) had the
+  arrow's `>` read as a redirect verb and was spuriously denied. Arrows are now
+  blanked before the match — true-positive-preserving (no real redirect contains
+  `->`); the match stays deliberately conservative otherwise (the hash-lock is
+  the real backstop). The deny message now names this mention-only false positive
+  and its escapes.
+- `uninstall-timer.sh` reaps the orphan it used to leave behind: install-timer
+  pre-creates `$REPO/.loop/` for the unit's log, and uninstall now parses `$REPO`
+  from the `.service` unit before deleting it and removes `.loop/cron.log` +
+  `rmdir`s `.loop` — but ONLY when `.loop` holds nothing else (a live loop's
+  state is never destroyed; preservation is tested).
+
+### Docs
+- README `## Safety model`: unattended write mode (`--allow-write` /
+  `LOOP_ENG_ALLOW_AUTOBUILD` / `LOOP_ENG_ALLOW_AUTOFIX`) is real no-approval
+  write+commit via `--permission-mode bypassPermissions` (off by default,
+  guarded); `.loop/` is local state and is not auto-removed on uninstall.
+- CLAUDE.md `### Packaging scope`: a git-based marketplace install ships the
+  **full git tree** (tests included, ~40KB) — Claude Code has no manifest
+  exclude field or `.claudeignore`; documented as acceptable rather than
+  contorting the repo.
+- `skills/loop-eng/SKILL.md`: "What the mechanism does and does NOT guarantee" —
+  the arm-time red-check catches vacuous (already-green) criteria, not weak
+  (red-but-tests-the-wrong-thing) ones; machine-written evidence covers criteria
+  pass/fail, not the orchestrator's surrounding prose.
+
 ## 0.9.0 — 2026-07-14
 
 The audit-closure batch: every remaining finding from
