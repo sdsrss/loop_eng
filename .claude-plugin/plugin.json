@@ -6,5 +6,7 @@
     "name": "sds"
   },
   "license": "MIT",
+  "homepage": "https://github.com/sdsrss/loop_eng",
+  "repository": "https://github.com/sdsrss/loop_eng",
   "keywords": ["claude-code", "loop-engineering", "automation", "code-quality"]
 }
