@@ -115,7 +115,13 @@ case "$TOOL" in
     # real integrity guarantee is run-contract's hash re-derivation, which no
     # Bash verb can slip past.
     if [ -e .loop/active ] && printf '%s' "$CMD" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/criteria\.(tsv|sha256)'; then
-      deny "a Bash command writing to the armed contract .loop/criteria.tsv or its hash-lock"
+      # Common legitimate case: a wrap-up that removes .loop/active AND
+      # .loop/criteria.sha256 in ONE command is denied because the gate scans the
+      # whole command string while active still exists. Advise splitting it.
+      deny "a Bash command writing to the armed contract .loop/criteria.tsv or its hash-lock.
+If this is a wrap-up removing both .loop/active and .loop/criteria.sha256 in one
+command, split it into two Bash calls: remove .loop/active first (that disarms
+the loop), then remove .loop/criteria.sha256 in a second call."
     fi
     ;;
 esac

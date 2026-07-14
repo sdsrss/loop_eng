@@ -44,6 +44,13 @@ gate "${W/FILE/.loop/criteria.sha256}";           assert_eq 2 $? "overwrite crit
 gate "${E/FILE/.loop/criteria.sha256}";           assert_eq 2 $? "Edit criteria.sha256 denied when armed"
 gate "${B/CMD/echo x > .loop/criteria.sha256}";   assert_eq 2 $? "Bash redirect criteria.sha256 denied when armed"
 
+# --- wrap-up that removes .loop/active AND criteria.sha256 in ONE Bash command is
+#     denied (active still exists when the whole string is scanned); the deny must
+#     advise splitting it — remove active first, then the hash-lock in a 2nd call. ---
+gate "${B/CMD/rm -f .loop/active .loop/criteria.sha256}"; assert_eq 2 $? "Bash rm active+sha256 in one command denied when armed"
+printf '%s' "${B/CMD/rm -f .loop/active .loop/criteria.sha256}" | bash "$GATE" 2>.loop/err || true
+assert_file_contains .loop/err 'active first' "deny advises removing active first"
+
 # --- results.json/evidence: always denied, armed or not ---
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied while armed"
 rm -f .loop/active
