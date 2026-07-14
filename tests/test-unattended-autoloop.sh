@@ -16,7 +16,10 @@ mk_stub() { # $1 = stub dir OUTSIDE any sandbox repo (untracked stub inside
 case "${STUB_MODE:-progress}" in
   progress)
     sed -i.bak '0,/^- \[ \]/s//- [x]/' .loop/backlog.md && rm -f .loop/backlog.md.bak
-    echo "done one item" > "progress-$(date +%s%N).txt"
+    # $$-unique, not date-based: BSD date has no %N (prints a literal "N"), so
+    # two same-second sessions would collide on the filename -> empty commit ->
+    # stub exits non-zero -> flaky breaker counts on macOS CI.
+    echo "done one item" > "progress-$$.txt"
     git add -A >/dev/null
     git commit -qm "stub: item done"
     echo "ALL GREEN"

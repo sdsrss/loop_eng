@@ -45,6 +45,12 @@ BAD fits (do NOT loop these — handle interactively):
    `.loop/results.json` + `.loop/evidence/`; the evidence-gate hook denies
    model writes to them.
 
+Asymmetry worth knowing: the stop-gate (criteria.tsv / `.loop/active`)
+mechanically enforces /autoloop's completion contract. /polish has no
+mechanism-layer completion gate — its dry-round convergence rests on the
+orchestration prompt and the behavior-preserving red lines. One loop per
+repo at a time: `.loop/` is shared state.
+
 ## Templates
 
 - `templates/contract.md` — acceptance contract skeleton

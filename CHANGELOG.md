@@ -60,6 +60,33 @@ no breaking changes.
   project-relative `skills/...` path that does not exist in a user project
   under a marketplace install. (audit P5)
 
+### Added
+- CI (`.github/workflows/test.yml`): `bash tests/run-all.sh` on
+  ubuntu-latest + macos-latest for every push to main / PR. The project's own
+  philosophy applied to itself — a push's "done" is now a machine-verified
+  fact, not a human remembering to run the suite. macOS installs brew bash
+  (stock 3.2 is too old for the unattended drivers) + shellcheck. (audit H3)
+
+### Docs
+- README scope notes (stop-gate section): one loop per repo at a time
+  (concurrent arming overwrites the hash-lock → tamper fail-closed) (audit
+  M6); the stop-gate guards /autoloop only — /polish has no mechanism-layer
+  completion gate (also noted in SKILL.md); `LOOP_ENG_LOOP_DIR` declared
+  test-only, with matching header comments in arm-contract.sh /
+  run-contract.sh — the hooks are fixed to `.loop/`, so a custom dir silently
+  disarms them (audit M3); ledger backup via `cat > dest` (the gate's Bash
+  pattern can't tell copy direction) (audit L1).
+- README safety-model table: new row naming test/build output as untrusted
+  text — checker reports are forwarded verbatim by design, and
+  prompt-injection riding in tool output is a residual covered by red lines +
+  human diff review.
+- README unattended runs: systemd timer pair promoted to the preferred
+  scheduling path; cron demoted to the no-systemd fallback (audit N5).
+- Test stub portability: the autoloop stub's progress filename is now
+  `$$`-unique instead of `date +%s%N` (BSD date prints a literal N — a
+  same-second collision would make an empty commit and a flaky breaker count
+  on macOS CI).
+
 ### Dogfood
 - `.claude/settings.json` (untracked): registered the evidence-gate PreToolUse
   hook and aligned hook timeouts with `hooks/hooks.json` (Stop 120s — the

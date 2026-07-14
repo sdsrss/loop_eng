@@ -107,6 +107,23 @@ to the red lines in the prompts and human review of the diff.
 Platform note: Claude Code force-allows a stop after 8 consecutive
 Stop-hook blocks; loop-eng's ceiling (3) stays safely under it.
 
+Scope notes:
+
+- **One loop per repo at a time.** `.loop/` is shared, unversioned state: a
+  second session arming the same repo overwrites the hash-lock, so the first
+  session's contract then fails closed as tampered (safe, but confusing) and
+  the two loops fight over `results.json`.
+- **The stop-gate guards `/autoloop` only.** `/polish` has no mechanism-layer
+  completion gate — its dry-round convergence rests on the orchestration
+  prompt and the behavior-preserving red lines, not on a hook.
+- **`LOOP_ENG_LOOP_DIR` is a test-only knob** (used by the plugin's own test
+  suite). Only `arm-contract.sh`/`run-contract.sh` honor it; the stop-gate and
+  evidence-gate are fixed to `.loop/`, so pointing production loops at a
+  custom dir silently disarms both hooks.
+- **Backing up the ledger:** use `cat .loop/results.json > backup.json` — the
+  evidence-gate's Bash pattern cannot tell read-from from write-to direction,
+  so `cp`/`mv` touching a protected path is denied even outward.
+
 If your Claude Code version does not auto-load plugin hooks, register manually
 in your project's `.claude/settings.json`:
 
@@ -136,7 +153,9 @@ skills/loop-eng/scripts/unattended-polish.sh <repo> [scope] [--auto-fix]
   `--auto-fix` (which additionally requires `LOOP_ENG_ALLOW_AUTOFIX=1`)
   only after the findings prove trustworthy.
 - Refuses dirty trees; logs every run to `.loop/unattended.log`.
-- Cron example: `0 3 * * * /path/unattended-polish.sh /path/to/repo src/`
+- Scheduling: prefer the systemd timer pair below (tracked, one-command
+  removable). Where systemd isn't available, cron works too:
+  `0 3 * * * /path/unattended-polish.sh /path/to/repo src/`
 
 Cross-session building (fresh context per backlog item — compaction is not
 a recovery strategy):
@@ -195,6 +214,7 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 | Loops can't run away | round caps, block ceiling, same-failure and no-progress brakes |
 | Red actions stay human | money / production / schema / public API are never looped |
 | Output is a proposal | every run ends by showing the diff for human review |
+| Test/build output is untrusted text | checker reports are forwarded verbatim by design (fidelity over filtering); prompt-injection riding in tool output is a residual covered by the red lines and the human review of the diff |
 
 ## What to loop (and what not to)
 

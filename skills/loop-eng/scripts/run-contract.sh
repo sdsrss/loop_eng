@@ -12,6 +12,9 @@
 # cwc-long-running-agents.)
 set -u
 
+# LOOP_ENG_LOOP_DIR is a TEST-ONLY knob (the plugin's own suite sandboxes with
+# it). The stop-gate and evidence-gate are fixed to .loop/ — pointing a real
+# loop at a custom dir silently removes it from both hooks' protection.
 LOOP_DIR="${LOOP_ENG_LOOP_DIR:-.loop}"
 CRIT="$LOOP_DIR/criteria.tsv"
 RESULTS="$LOOP_DIR/results.json"

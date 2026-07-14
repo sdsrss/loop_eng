@@ -16,6 +16,9 @@
 # note that .loop/ is gitignored, so a weakened contract is invisible in git.
 set -u
 
+# LOOP_ENG_LOOP_DIR is a TEST-ONLY knob (the plugin's own suite sandboxes with
+# it). The stop-gate and evidence-gate are fixed to .loop/ — arming a custom
+# dir in production means NEITHER hook watches it (silently disarmed loop).
 LOOP_DIR="${LOOP_ENG_LOOP_DIR:-.loop}"
 CRIT="$LOOP_DIR/criteria.tsv"
 SHA_LOCK="$LOOP_DIR/criteria.sha256"

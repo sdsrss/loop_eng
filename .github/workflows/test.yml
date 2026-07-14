@@ -1,0 +1,45 @@
+# loop-eng CI — the project's own philosophy applied to itself: "done" for a
+# push must be a machine-verified fact, not a human remembering to run the
+# suite. (Audit H3: releases previously relied entirely on a manual
+# `bash tests/run-all.sh`.)
+#
+# Matrix notes:
+# - ubuntu: shellcheck via apt; bash 5.x system-wide.
+# - macos: stock /bin/bash is 3.2 — too old for the unattended drivers
+#   (bash >= 4.4: empty-array expansion under set -u), so install brew bash
+#   (lands first on PATH) + shellcheck. This makes the "hooks work on macOS,
+#   unattended needs modern bash" claim a TESTED fact on 5.x; a true 3.2
+#   hooks-only matrix leg is future work.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+
+      - name: Install modern bash + shellcheck (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bash shellcheck
+
+      - name: Show tool versions
+        run: |
+          bash --version | head -1
+          shellcheck --version | grep version: || true
+
+      - name: Run test suite
+        run: bash tests/run-all.sh
