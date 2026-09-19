@@ -8,7 +8,14 @@ cd "$(dirname "$0")/.."
 mkdir -p .claude/commands .claude/agents .claude/hooks .claude/skills
 cp commands/*.md .claude/commands/
 cp agents/*.md .claude/agents/
-cp hooks/stop-gate.sh hooks/evidence-gate.sh .claude/hooks/
+# Derived from hooks/, never a hand-written list: the previous form named
+# stop-gate.sh and evidence-gate.sh, so update-notify.sh was added and silently
+# never synced — the same omission this script was hardened against once before
+# (pre-v0.2.2, evidence-gate.sh). Deliberately excluded: hooks/hooks.json. It is
+# the plugin auto-load manifest, read only at a plugin root, while .claude/ is
+# read as a project directory — copying it there would be inert at best and a
+# second registration of the same hooks at worst.
+cp hooks/*.sh .claude/hooks/
 rm -rf .claude/skills/loop-eng
 cp -r skills/loop-eng .claude/skills/loop-eng
 chmod +x .claude/hooks/*.sh .claude/skills/loop-eng/scripts/*.sh

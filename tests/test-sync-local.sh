@@ -41,16 +41,28 @@ done
 for f in "$SB"/agents/*.md; do
   diff -q "$f" "$SB/.claude/agents/$(basename "$f")" >/dev/null 2>&1 || drift="$drift $f"
 done
-for f in stop-gate.sh evidence-gate.sh; do
-  diff -q "$SB/hooks/$f" "$SB/.claude/hooks/$f" >/dev/null 2>&1 || drift="$drift hooks/$f"
+# Derived from the source tree, NOT hand-written: every hook SCRIPT under
+# hooks/ must land in .claude/hooks/. The previous form of this fence named
+# stop-gate.sh and evidence-gate.sh literally — a hand-written list standing
+# guard over a hand-written list, so a hook added later (update-notify.sh) went
+# unsynced without turning anything red. What this gate deliberately does NOT
+# cover: hooks/hooks.json. That is the plugin auto-load manifest, meaningful
+# only at a plugin root, and .claude/ is read as a project directory — syncing
+# it would either do nothing or double-register the hooks.
+for f in "$SB"/hooks/*.sh; do
+  b=$(basename "$f")
+  diff -q "$f" "$SB/.claude/hooks/$b" >/dev/null 2>&1 || drift="$drift hooks/$b"
 done
 assert_eq "" "$drift" "commands/agents/hooks synced byte-identical"
+assert_eq "$(ls "$SB"/hooks/*.sh | wc -l | tr -d ' ')" \
+          "$(ls "$SB"/.claude/hooks/*.sh 2>/dev/null | wc -l | tr -d ' ')" \
+          "hook-script count matches the source tree (no omissions, no strays)"
 diff -rq "$SB/skills/loop-eng" "$SB/.claude/skills/loop-eng" >/dev/null 2>&1
 assert_eq 0 $? "skills tree synced byte-identical"
 
 # --- executables stay executable ---
 xfail=""
-for f in "$SB/.claude/hooks/stop-gate.sh" "$SB/.claude/hooks/evidence-gate.sh" \
+for f in "$SB"/.claude/hooks/*.sh \
          "$SB/.claude/skills/loop-eng/scripts/run-contract.sh"; do
   [ -x "$f" ] || xfail="$xfail $f"
 done
