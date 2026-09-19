@@ -17,6 +17,26 @@ dependency lived only in a code comment, one quiet corner of the hash-lock, and
 two release-blocking facts that were checklist lines rather than tests. Test
 suite 411 → 456 assertions.
 
+**Release smoke** (RELEASING.md §1, run against this release's content at
+0.12.2): PASS on Claude Code 2.1.278, machine-verified rather than
+model-reported. Step 4 — the model's `Write` to `.loop/evidence/smoke.log` was
+DENIED, the file did not land under `--permission-mode bypassPermissions`, and
+an instrumented `deny()` logged a real `root=` path rather than the
+`<loop-eng plugin root>` placeholder, so `CLAUDE_PLUGIN_ROOT` reaches hook
+processes. Step 5 — a `false` criterion blocked the stop and `run-contract.sh`
+machine-wrote `"all_green": false`. Step 6 — a full `/loop-eng:autoloop` round
+reached `"all_green": true` on two criteria with `.loop/active` and
+`.loop/criteria.sha256` removed by the gate rather than by the model, which is
+reachable only if `${CLAUDE_PLUGIN_ROOT}` expanded inside the command markdown.
+
+Source-type disclosure, owed by the rule this release adds to RELEASING.md §1:
+the marketplace was added by local path, because 0.12.2 was not yet pushed and
+`marketplace add owner/repo` can only take the default branch. The instrumented
+markers read `SRC-DENY` / `SRC-BLOCK`, confirming the source copy enforced and
+the version-pinned `plugins/cache/` copy did not — exactly what that new rule
+predicts, verified on its first use. The GitHub-source path is re-smoked against
+the released tag per §3 Post-ship.
+
 **fix: the two timer scripts shipped non-executable.** `install-timer.sh` and
 `uninstall-timer.sh` were recorded in git as `100644`, while README documents
 both as bare-path commands (`skills/loop-eng/scripts/install-timer.sh <polish|
