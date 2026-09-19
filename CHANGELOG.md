@@ -88,21 +88,32 @@ copies. Instrumenting the cache under a directory source yields an empty log
 that reads exactly like "the hook never fired" — the fourth instance of that
 family in these two steps.
 
-**fix(run-contract): a deleted hash-lock is no longer silent.** The integrity
+**fix(run-contract): a missing hash-lock is no longer silent.** The integrity
 check ran under `[ -f "$ACTIVE" ] && [ -f "$SHA_LOCK" ]`, so a missing
 `criteria.sha256` skipped it entirely and a lockless run was indistinguishable
 from a locked one — the corner where "weakening an armed contract can never
-pass silently" stopped being true. `arm-contract.sh` drops the lock in exactly
-one case (no SHA-256 tool), so armed + no lock + a tool present is a state it
-never produces: that combination now warns on stderr and stamps
-`"contract_lock": "absent"` into `results.json`. Deliberately a warning, not a
-refusal — a toolchain that changed between arming and running reaches the same
-state honestly, and failing closed there would strand a live loop whose only
-exit is deleting `.loop/active`, trading a documented residual for a new way to
-lose work. The ledger carries it because a green contract lets the stop-gate
-exit 0, which discards hook output. All four arms of the branch are tested
-(+11 assertions), including the one that must stay silent: armed with no lock
-on a machine with no hashing tool is the expected state, not drift.
+pass silently" stopped being true. Armed, no lock, and a SHA-256 tool present
+now warns on stderr and stamps `"contract_lock": "absent"` into
+`results.json`.
+
+It reports the **state, not a cause**, and that distinction is this entry's own
+correction: the first draft asserted that `arm-contract.sh` "drops the lock in
+exactly one case" and told the reader to re-arm through it. Both halves were
+wrong. `arm-contract.sh` omits the lock on two paths (no hashing tool, and no
+`criteria.tsv` at arm time), and `commands/autoloop.md` documents a last-resort
+arm that is a bare `touch .loop/active` — on which the warning fired every run
+and prescribed re-running a script that path exists because it is unavailable.
+Caught by the pre-ship reviewer, not by the author. The message now states only
+what the code can observe: the tamper check did not run.
+
+Deliberately a warning, not a refusal — every route to this state is
+legitimate, and failing closed would strand a live loop whose only exit is
+deleting `.loop/active`, trading a documented residual for a new way to lose
+work. The ledger carries it because a green contract lets the stop-gate exit 0,
+which discards hook output. Every arm of the branch is tested (+13 assertions),
+including the two that must stay silent: a machine with no hashing tool, and
+the documented `touch .loop/active` fallback, which must warn without
+misdiagnosing.
 
 **test: `tests/test-manifest.sh`** (new, 20 assertions) turns two RELEASING.md
 checklist lines into failures. "A version bump touches THREE fields across TWO

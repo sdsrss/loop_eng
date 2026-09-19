@@ -157,6 +157,11 @@ falls back to it when criteria.tsv is absent.)
    check's proof line.
    Cite the just-refreshed `.loop/results.json` (`all_green: true`) as the
    machine proof, and the per-criterion evidence files under `.loop/evidence/`.
+   If that ledger carries `"contract_lock": "absent"`, say so in the same
+   breath as the green: it means no hash-lock was in force, so the contract
+   this run verified is not provably the contract that was armed. Reporting
+   `all_green` while silently dropping that qualifier overstates the proof —
+   and a field nothing is told to read is not a safeguard.
    (The Stop hook also re-runs the contract on your stop attempt; refreshing it
    here makes the citation truthful at the moment you write it.)
 4. If it starts with `FAILED`: forward the checker's COMPLETE report to the

@@ -128,20 +128,30 @@ if [ -f "$ACTIVE" ] && [ -f "$SHA_LOCK" ]; then
   fi
 fi
 
-# Armed, with a criteria.tsv, and NO hash-lock beside it. arm-contract.sh drops
-# the lock in exactly one case — no SHA-256 tool was available — so if a tool is
-# available NOW, the absence is unexplained: either the arm predates the tool, or
-# the lock was removed after arming, and in that case the whole tamper check
-# above was skipped. The block above cannot tell those apart (both look like
-# "no SHA_LOCK"), so before this it simply fell through in SILENCE.
+# Armed, with a criteria.tsv, and NO hash-lock beside it — while this machine CAN
+# hash. Whatever produced it, the consequence is the same and it is the only thing
+# worth saying: the tamper check above did not run, so a criteria.tsv weakened
+# after arming passes unnoticed. Before this the run simply fell through in
+# SILENCE, which is indistinguishable from a locked run.
 #
-# Deliberately NOT fail-closed. A toolchain that changed between arm and run is a
-# legitimate way to reach this state, and refusing would strand a real loop whose
-# only remaining exit is deleting .loop/active — trading a documented residual
-# for a new way to lose work. Loud, and recorded, is the right strength: the
-# evidence-gate already denies the plausible accidental removals (Write/Edit on
-# criteria.sha256, and `rm` naming it in a Bash command) while armed, so what is
-# left here is the adversarial class the header already declares out of scope.
+# State, not cause. Several routes lead here and the runner cannot tell them
+# apart: arm-contract.sh omits the lock when no hashing tool was available
+# (arm-contract.sh) AND when there was no criteria.tsv at arm time; the
+# orchestrator's documented last-resort arm (commands/autoloop.md) is a bare
+# `touch .loop/active` that never writes one at all; and a lock removed after
+# arming looks the same. An earlier version of this warning asserted the first
+# route as the cause and told the reader to re-run arm-contract.sh — advice that
+# is wrong on the fallback path, where arm-contract.sh is unavailable by
+# definition. Diagnosing a cause the code cannot observe is how a true warning
+# acquires a false sentence.
+#
+# Deliberately NOT fail-closed. Every route above is a legitimate way to reach
+# this state, and refusing would strand a real loop whose only remaining exit is
+# deleting .loop/active — trading a documented residual for a new way to lose
+# work. Loud, and recorded, is the right strength: the evidence-gate already
+# denies the plausible accidental removals (Write/Edit on criteria.sha256, and
+# `rm` naming it in a Bash command) while armed, so what is left here is the
+# adversarial class the header already declares out of scope.
 #
 # It goes in the LEDGER as well as on stderr because stderr is not durable on the
 # path that matters: a GREEN contract makes the stop-gate exit 0, which discards
@@ -151,7 +161,7 @@ if [ -f "$ACTIVE" ] && [ ! -f "$SHA_LOCK" ] \
    && { command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 \
         || command -v openssl >/dev/null 2>&1; }; then
   LOCK_STATE="absent"
-  echo "run-contract: WARNING — the loop is armed but $SHA_LOCK is missing while a SHA-256 tool is available, so this run verified NO contract integrity: a criteria.tsv weakened after arming would pass unnoticed. arm-contract only omits the lock when no hashing tool exists. Re-arm to restore it (bash arm-contract.sh), or treat this run's result as unlocked." >&2
+  echo "run-contract: WARNING — the loop is armed but $SHA_LOCK is missing while a SHA-256 tool is available, so this run verified NO contract integrity: a criteria.tsv weakened after arming would pass unnoticed. This is expected if the loop was armed by a bare \`touch .loop/active\` (the orchestrator's documented last resort) or with no criteria.tsv present; if arm-contract.sh is available, arming through it records the lock." >&2
 fi
 {
   printf '{\n  "generated_by": "run-contract.sh",\n'

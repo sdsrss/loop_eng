@@ -254,6 +254,24 @@ fi
 rm -rf "$FAKEBIN2"
 rm -f .loop/active .loop/nolock.err .loop/notool.err .loop/results.json
 
+# The route the author missed and the pre-ship reviewer found: commands/autoloop.md
+# documents a last-resort arm that is a bare `touch .loop/active` with no
+# arm-contract.sh at all. That lands in the same arm as above and SHOULD warn —
+# nothing verified the contract — but the first version of the message asserted a
+# single cause ("arm-contract only omits the lock when no hashing tool exists")
+# and prescribed re-running arm-contract.sh, which on this very path is
+# unavailable by definition. A true warning carrying a false sentence.
+# Pin the corrected shape: it fires, it names the fallback as an expected route,
+# and it does NOT carry the retracted diagnosis.
+rm -rf .loop/evidence; rm -f .loop/results.json
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+: > .loop/active                      # exactly the documented fallback: no lock is ever written
+bash "$RUNNER" 2>.loop/fallback.err; assert_eq 0 $? "documented touch-active fallback: contract still runs"
+assert_file_contains .loop/results.json '"contract_lock": "absent"' "documented fallback: recorded in the ledger"
+assert_file_contains .loop/fallback.err 'touch .loop/active' "documented fallback: warning names it as an expected route"
+assert_eq "" "$(grep -c 'arm-contract only omits' .loop/fallback.err | sed 's/^0$//')" "documented fallback: the retracted single-cause diagnosis is gone"
+rm -f .loop/active .loop/fallback.err .loop/results.json
+
 # --- LOOP_ENG_LOOP_DIR: the sandbox knob redirects EVERY loop path ---
 # (the scripts' comments call this the suite's sandboxing knob — this is the
 # test that makes that claim true. Assert both the custom-dir writes AND that
