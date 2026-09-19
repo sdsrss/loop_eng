@@ -1,5 +1,74 @@
 # Changelog
 
+## 0.12.1 — 2026-09-19
+
+Hardening batch. Nothing here changes what the enforcement layer decides: no
+contract that passed before fails now, and no stop that was blocked is allowed.
+Two of the three are the same defect shape — a hand-written roster standing in
+for a set that should be derived from the source — which makes it this repo's
+most frequent one. Test suite 394 → 411 assertions.
+
+### Fixed
+- **`arm-contract.sh` said nothing about a criterion that can never run.** The
+  pre-arm red-check only warned when a criterion was ALREADY green. A criterion
+  whose command is not valid shell stayed silent, and that is the worse case:
+  `criteria.tsv` is hash-locked the moment the loop arms, so such a criterion
+  can never go green and the loop can only end by hitting a stop rule. Not
+  hypothetical — it is what the 0.12.0 live-install smoke recorded, where the
+  orchestrator's `printf` ate the outer quotes off a git pathspec and left
+  `:(exclude)…` bare.
+
+  The check keys on the PARSE, not on an exit status. That shape exits 2, and so
+  does `grep -q needle a-file-the-work-will-create`, which is a legitimate RED;
+  126 and 127 are ambiguous the same way, since `bash tests/not-yet-written.sh`
+  is 127 and a perfectly good criterion. `run-contract.sh` executes each
+  criterion as `bash -c "$cmd"`, so `bash -n -c` is that same invocation's parse
+  phase: a failure there is a property of the command string rather than of the
+  tree, which is why it cannot be a false positive. It executes nothing, so it
+  runs with the other static pre-arm warnings and is NOT governed by
+  `LOOP_ENG_ARM_REDCHECK` (the knob whose whole purpose is to execute zero
+  criterion commands). Advisory only: arming still succeeds.
+
+- **`scripts/sync-local.sh` silently skipped a hook.** The dogfood sync named
+  `stop-gate.sh` and `evidence-gate.sh` literally, so `update-notify.sh` was
+  added to `hooks/` and never copied. The suite did not catch it because its
+  fence was also a hand-written list, copied from a roster that was already
+  wrong — one hand-written list standing guard over another, in the file whose
+  own header calls it "the regression fence for that class". Both sides now
+  derive from `hooks/*.sh`, and so does the executable-bit check. `hooks.json`
+  stays out on purpose: it is the plugin auto-load manifest, read only at a
+  plugin root, while `.claude/` is read as a project directory. Affects
+  dogfooding inside this repo only; nothing a marketplace install consumes.
+
+### Added
+- The README's manual hook-registration snippet is now held equal to
+  `hooks/hooks.json` by `tests/test-hooks-json.sh`. Its PreToolUse matcher was a
+  hand-copied duplicate with nothing keeping the two in step, so adding a write
+  tool to `hooks.json` would have left the registration the README tells users
+  to paste silently under-matching — a weaker evidence-gate on a documented
+  path. The gate states what it does not cover: that Claude Code honours the
+  snippet at all (platform contract, live-install smoke only), the SessionStart
+  notifier the snippet omits deliberately, and the timeouts it omits safely.
+- README now says why the snippet omits the SessionStart hook and the timeouts
+  rather than leaving both as silent gaps. A command hook without `timeout` gets
+  the platform default of 600s, already above the stop-gate's own
+  `LOOP_ENG_GATE_TIMEOUT` budget of 100s; and `Stop` has no matcher support, so
+  the snippet's missing `matcher` is correct rather than an omission. Both facts
+  were checked against the hooks documentation, after each had first been
+  suspected of being a fail-open hole and turned out not to be.
+
+### Tests
+- Suite 394 → 411 assertions. `test-arm-contract` +12: five confirmed red
+  against the unfixed script, the other seven driven red by three targeted
+  mutations (warn unconditionally; drop the one-line fold of bash's diagnosis;
+  `bash -n -c` → `bash -c`, which the zero-side-effect assertion catches).
+- `test-sync-local` +1 with its hook fence re-derived from the source tree —
+  both confirmed red against the unfixed script, naming `update-notify.sh`.
+- `test-hooks-json` +4, each driven red by mutation: matcher drift from either
+  side, a broken README snippet, and a wrong script path.
+- Real bash 3.2.57 (docker `bash:3.2`): 247 passed / 0 failed across the five
+  suites that run on the 3.2 axis.
+
 ## 0.12.0 — 2026-09-19
 
 A convergence pass over the completion mechanism itself. Four defects of one
