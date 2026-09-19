@@ -21,6 +21,30 @@ After a marketplace install the commands may resolve namespace-prefixed —
 `/loop-eng:autoloop` and `/loop-eng:polish` — if the bare `/autoloop` /
 `/polish` form does not resolve.
 
+### Requirements
+
+POSIX shell and git are the only hard requirements. Everything else is probed
+at run time and degrades on a documented path rather than failing — but two of
+those paths quietly weaken a guard, so they are listed here rather than left in
+the scripts' comments.
+
+| Tool | Used by | Absent → |
+|---|---|---|
+| `jq` **or** `python3` | `evidence-gate.sh` | the gate goes **inert** — it cannot parse the hook event, so it allows every write and says so on stderr (`no jq or python3 available`). See the note below. |
+| `sha256sum` / `shasum` / `openssl` | `arm-contract.sh`, `run-contract.sh` | the contract arms **without a hash-lock**, so post-arm drift no longer fails closed. `arm-contract.sh` warns at arm time. |
+| `timeout` / `gtimeout` | `stop-gate.sh`, `arm-contract.sh` | the contract runs **unbounded** on each stop attempt; the near-timeout fail-closed guard is inactive and the gate says so. Keep `criteria.tsv` fast. |
+| `curl` | `update-notify.sh` | no update-available notices. Silent by design. |
+| `systemctl --user` | `install-timer.sh` | scheduling is unavailable; use cron, or `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` to write the unit files only. |
+| bash ≥ 4.4 | `unattended-*.sh` only | the unattended drivers refuse to run. The hooks and their scripts run on stock macOS bash 3.2 (CI-tested). |
+
+An inert evidence-gate does **not** forfeit the completion invariant. The gate
+is defense-in-depth on the write path; the stop-gate is the load-bearing one,
+and it needs no JSON parser. Verified on a parser-less box: a hand-forged
+`{"all_green": true}` in `.loop/results.json` is overwritten by
+`run-contract.sh` on the next stop attempt (`generated_by` flips back,
+`all_green` returns to `false`) and the stop is still blocked. What you lose
+without a parser is the early, explanatory denial — not the guarantee.
+
 ## The two loops
 
 ### `/autoloop <task>` — drive a bounded task to completion

@@ -144,4 +144,27 @@ if command -v python3 >/dev/null 2>&1; then
   rm -rf "$FAKE"
 fi
 
+# --- NEITHER parser present: the gate fails OPEN, loudly ---
+# This is a deliberate design choice (a PreToolUse hook must never brick a
+# session), but it is also the one environment in which the gate looks installed
+# and enforces nothing — so pin BOTH halves. The exit code keeps the fail-open
+# honest; the warning on stderr is the only signal a human gets that the layer
+# is inert, and a silent version of this path is indistinguishable from a
+# working gate. README's "Requirements" section documents it for users.
+FAKE=$(mktemp -d)
+# Only what the gate itself needs to reach its own parser check — no jq, no
+# python3. `cat` is required: the gate reads stdin before deciding anything.
+for t in bash cat grep dirname sed; do
+  src=$(command -v "$t") && ln -sf "$src" "$FAKE/$t"
+done
+if ! PATH="$FAKE" bash -c 'command -v jq || command -v python3' >/dev/null 2>&1; then
+  printf '%s' "${W/FILE/.loop/results.json}" | PATH="$FAKE" bash "$GATE" 2>.loop/noparser
+  assert_eq 0 $? "no jq and no python3: gate fails OPEN (never bricks the session)"
+  assert_file_contains .loop/noparser 'no jq or python3 available' \
+    "no jq and no python3: the inert gate says so on stderr"
+else
+  echo "  SKIP: could not hide both jq and python3 from PATH" >&2
+fi
+rm -rf "$FAKE"
+
 report "test-evidence-gate"
