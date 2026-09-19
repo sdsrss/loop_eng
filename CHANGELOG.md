@@ -9,6 +9,31 @@ reproduced against the real scripts in a sandbox before a line was changed, and
 every new assertion was confirmed red against the unfixed code. Test suite
 358 → 394 assertions.
 
+**Live-install smoke** (RELEASING.md §1): PASS on Claude Code 2.1.278, against a
+genuine `claude plugin marketplace add sdsrss/loop_eng` + `install` of this
+commit's content into an isolated `CLAUDE_CONFIG_DIR`. Every check is
+machine-verified, not model-reported: the plugin resolved to
+`plugins/cache/loop-eng/loop-eng/0.12.0/`; `arm-contract` printed `armed from
+<that cache path>`; an instrumented `evidence-gate.sh` logged `DENY-FIRED
+tool=Write file=<proj>/.loop/evidence/smoke.log root=<real cache path>` and the
+file did not land under `--permission-mode bypassPermissions` (so hooks.json
+auto-loaded AND `CLAUDE_PLUGIN_ROOT` reached the hook process — no placeholder);
+an instrumented `stop-gate.sh` logged three `BLOCK-red` entries followed by
+`CEILING-RELEASE count=3` over a `generated_by: run-contract.sh` ledger; and a
+full `/loop-eng:autoloop` round reached `all_green: true` and logged
+`GREEN-SELFCLEAR`, with `.loop/active` and `.loop/criteria.sha256` removed by the
+gate rather than by the model — reachable only if `${CLAUDE_PLUGIN_ROOT}`
+expanded inside the command markdown.
+
+One unplanned run during that smoke is worth recording, because it is the thesis
+working: an earlier `/autoloop` attempt had the orchestrator author a criterion
+whose git pathspecs lost their quotes to `printf`, leaving `:(exclude)…`
+unquoted — a bash syntax error, exit 127, a criterion that can never go green.
+The checker subagent reported ALL GREEN. The machine ledger said
+`all_green: false`. The orchestrator took the ledger over its own subagent's
+claim, declined to self-authorize `LOOP_ENG_DISABLE_EVIDENCE_GATE=1` to repair a
+hash-locked contract mid-loop, and escalated to the human under stop rule 6.
+
 **Upgrade note**: after updating run `/reload-plugins` or start a fresh session
 — the hook-side changes take effect only once the plugin cache is on 0.12.0.
 **One behavior change can strand an armed loop.** A `criteria.tsv` line that

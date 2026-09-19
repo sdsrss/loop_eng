@@ -53,10 +53,18 @@ step 4 and re-arm for step 5.
    ```
    cd ~/tmp/loop-smoke && mkdir -p .loop
    printf 'red\talways fails\tfalse\n' > .loop/criteria.tsv
-   ARM=$(find ~/.claude/plugins -maxdepth 6 -path '*loop-eng*' -name arm-contract.sh | sort -V | tail -1)
-   echo "$ARM"     # confirm this resolves to the just-released version, not a stale cached one
+   # Scope the search to plugins/CACHE. The bare plugins/ search below matched
+   # plugins/marketplaces/loop-eng/... first (observed 2026-09-19) — that is the
+   # marketplace CLONE, not the copy that enforces, so the smoke then exercised
+   # the wrong file. Same distinction step 4 warns about for instrumentation.
+   CACHE_ROOT=~/.claude/plugins/cache/loop-eng/loop-eng
+   ARM=$(find "$CACHE_ROOT" -maxdepth 3 -name arm-contract.sh | sort -V | tail -1)
+   echo "$ARM"     # must contain /plugins/cache/ AND the version you are releasing
    bash "$ARM"     # expect: "pinned criteria.tsv @ <sha>" + "stop-gate armed"
    ```
+   The `armed from` line this prints is the check that matters: it must cite the
+   cache path for the version under test. A path under `plugins/marketplaces/`
+   means you armed the clone and the run proves nothing about what ships.
 4. **Evidence-gate check** (in the Claude session): ask the model to write
    `hello` into `.loop/evidence/smoke.log` — NOT `{"all_green": true}` into
    `results.json`. Both paths are protected unconditionally, but the second
@@ -89,8 +97,21 @@ step 4 and re-arm for step 5.
      (`FAIL [red] always fails (exit 1)`); before 0.11.0 that tail was empty,
      so this line of the checklist was passing on no signal at all.
    - Headless equivalent (the block text goes to hook stderr, which `claude -p`
-     does not print): assert the disk instead — `.loop/gate-count` reaches `3`
-     and `.loop/results.json` carries `"generated_by": "run-contract.sh"`.
+     does not print): assert the disk instead — `.loop/results.json` carries
+     `"generated_by": "run-contract.sh"` with `"all_green": false`.
+   - **Do NOT use "`.loop/gate-count` reaches 3" as the headless PASS signal, and
+     do not expect `.loop/active` to survive** (both were in this checklist and
+     both misread a healthy run as a failure, observed 2026-09-19 on 0.12.0).
+     `gate-count` is deleted by the ceiling path itself — the 4th stop attempt
+     prints "block ceiling reached", clears the counter and allows — so a session
+     that runs past three blocks ends with the file ABSENT, not at `3`. And the
+     block reason explicitly offers the model a legitimate exit ("record it in
+     `.loop/state.md` and remove `.loop/active`"), which a capable model takes,
+     leaving `active` gone and a stop-rule entry in `state.md`. Both are the gate
+     working. If you need the block count as a fact rather than an inference,
+     instrument the LIVE cached `stop-gate.sh` the way step 4 instruments the
+     evidence-gate — append a marker at the two block exits and at the ceiling —
+     and assert the marker log (`BLOCK-red n=1..3`, then `CEILING-RELEASE`).
    - Teardown (human terminal): `rm -f .loop/active .loop/criteria.sha256 .loop/gate-count`
 6. **`${CLAUDE_PLUGIN_ROOT}` in command bodies**: in the session run
    `/autoloop create hello.txt containing "hi"; acceptance: test -f hello.txt`.
