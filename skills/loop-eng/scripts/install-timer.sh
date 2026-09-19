@@ -115,6 +115,24 @@ if [ "$MODE" = polish ]; then
   # report-only with the wrong scope, surfacing only at first trigger.
   case "$SCOPE" in *[[:space:]]*) die "polish scope contains whitespace, which the systemd unit cannot represent unquoted: $SCOPE" ;; esac
   case "$SCOPE" in *%*) die "polish scope contains a percent sign, which systemd expands as a unit specifier: $SCOPE" ;; esac
+  # A scope that isn't in the repo is the same "enables cleanly, breaks at first
+  # trigger" family as the two guards above, and the one hardest to notice: the
+  # unit loads, `systemctl enable` succeeds, and every nightly run reviews a path
+  # that isn't there — finds nothing, exits 0, logs success, indefinitely.
+  # unattended-polish.sh's header records this exact outcome from a flag mistaken
+  # for the scope; it rejects that shape now, but a typo'd or since-moved
+  # directory still reached the unit file. Check it here, at install time, with a
+  # human watching — the same reason the claude binary is resolved here and not
+  # left to exit 127 at 03:00.
+  # Unquoted on purpose: /polish takes scope PATHS, and a glob like src/*.ts is
+  # legitimate input that `test -e` would never match literally. An unmatched
+  # glob stays literal, so it fails the check exactly like a plain typo.
+  scope_found=0
+  # shellcheck disable=SC2086
+  for _m in $REPO/$SCOPE; do
+    if [ -e "$_m" ]; then scope_found=1; break; fi
+  done
+  [ "$scope_found" = 1 ] || die "polish scope not found in the repo: $SCOPE (looked for $REPO/$SCOPE). A scheduled run would review a path that does not exist — finding nothing, every night, while reporting success. Pass a path or glob that exists relative to the repo root, e.g. src/ or lib/."
   EXEC_ARGS="$REPO $SCOPE"
   if [ "$ALLOW_WRITE" = 1 ]; then
     EXEC_ARGS="$EXEC_ARGS --auto-fix"

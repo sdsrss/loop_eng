@@ -17,6 +17,13 @@ trap 'rm -rf "$SB" "$XDG"' EXIT
 # $SB; the real plugin runners under $PLUGIN_ROOT are what ExecStart points at.
 RUNNER_DIR="$PLUGIN_ROOT/skills/loop-eng/scripts"
 
+# The installer checks that a polish scope actually exists in the target repo,
+# so the sandbox needs the source dirs a real polish target would have. (Before
+# that check existed these tests passed src/ and lib/ into a repo containing
+# neither — a fixture that quietly asserted the very gap being closed.)
+mkdir -p "$SB/src" "$SB/lib"
+printf '#!/usr/bin/env bash\ntrue\n' > "$SB/src/a.sh"
+
 UNIT_DIR="$XDG/systemd/user"
 # Hermetic claude: the installer resolves the claude CLI at install time (and
 # dies if it can't) — point it at a stub so the tests don't depend on a real
@@ -104,6 +111,27 @@ case "$err" in
   *percent*) assert_eq 1 1 "percent refusal names the reason" ;;
   *) assert_eq "percent-named" "other-error" "refusal must cite percent" ;;
 esac
+
+# --- scope that does not exist in the repo: refused at INSTALL time ---
+# Same "enables cleanly, breaks at first trigger" family as the two guards above,
+# and the one this installer was least able to see: the unit loads, `systemctl
+# enable` succeeds, and every nightly run reviews a path that isn't there — finds
+# nothing, exits 0, forever. unattended-polish.sh's own header records this having
+# happened (a flag mistaken for the scope); it now rejects THAT shape, but a plain
+# typo'd or moved-away directory still sailed through.
+err=$(run_install polish "$SB" nosuchdir/ 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "scope missing from the repo refused"
+case "$err" in
+  *nosuchdir/*) assert_eq 1 1 "missing-scope refusal names the offending scope" ;;
+  *) assert_eq "scope-named" "other-error" "missing-scope refusal must cite the scope" ;;
+esac
+# zero false positives on the scope shapes that ARE legitimate: an existing dir
+# (asserted throughout above), and a glob, which /polish takes as scope paths and
+# which never matches `test -e` literally
+run_install polish "$SB" 'src/*.sh' >/dev/null 2>&1
+assert_eq 0 $? "a glob scope that matches real files is accepted"
+run_install polish "$SB" src/a.sh >/dev/null 2>&1
+assert_eq 0 $? "a single-file scope is accepted"
 
 # --- nonexistent repo-dir: refused AND the error names the offending path (not blank) ---
 err=$(run_install polish /no/such/repo-dir-xyz 2>&1 >/dev/null); rc=$?

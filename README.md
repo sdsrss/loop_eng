@@ -234,7 +234,10 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   repo path must be whitespace-free (systemd `ExecStart` is unquoted; a spaced
   path is refused at install time rather than silently failing at first run).
 - `arg` = scope (polish, default `src/`) or max-sessions (autoloop, default 8);
-  `--time` sets the daily `OnCalendar` (default `03:00`).
+  `--time` sets the daily `OnCalendar` (default `03:00`). A polish scope must
+  exist in the repo (a path or a glob that matches) — otherwise the unit would
+  enable cleanly and review nothing every night, so it is refused at install
+  time, like the whitespace and `%` cases above.
 - **Safe by default**: without `--allow-write` the timer runs polish report-only
   and autoloop refuses to build — a scheduled run cannot modify the repo.
   `--allow-write` injects the mode's write-enable env (`LOOP_ENG_ALLOW_AUTOFIX`
