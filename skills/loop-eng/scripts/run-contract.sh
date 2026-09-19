@@ -127,9 +127,36 @@ if [ -f "$ACTIVE" ] && [ -f "$SHA_LOCK" ]; then
     exit 77
   fi
 fi
+
+# Armed, with a criteria.tsv, and NO hash-lock beside it. arm-contract.sh drops
+# the lock in exactly one case — no SHA-256 tool was available — so if a tool is
+# available NOW, the absence is unexplained: either the arm predates the tool, or
+# the lock was removed after arming, and in that case the whole tamper check
+# above was skipped. The block above cannot tell those apart (both look like
+# "no SHA_LOCK"), so before this it simply fell through in SILENCE.
+#
+# Deliberately NOT fail-closed. A toolchain that changed between arm and run is a
+# legitimate way to reach this state, and refusing would strand a real loop whose
+# only remaining exit is deleting .loop/active — trading a documented residual
+# for a new way to lose work. Loud, and recorded, is the right strength: the
+# evidence-gate already denies the plausible accidental removals (Write/Edit on
+# criteria.sha256, and `rm` naming it in a Bash command) while armed, so what is
+# left here is the adversarial class the header already declares out of scope.
+#
+# It goes in the LEDGER as well as on stderr because stderr is not durable on the
+# path that matters: a GREEN contract makes the stop-gate exit 0, which discards
+# our output entirely. results.json is the completion record a human reviews.
+LOCK_STATE=""
+if [ -f "$ACTIVE" ] && [ ! -f "$SHA_LOCK" ] \
+   && { command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 \
+        || command -v openssl >/dev/null 2>&1; }; then
+  LOCK_STATE="absent"
+  echo "run-contract: WARNING — the loop is armed but $SHA_LOCK is missing while a SHA-256 tool is available, so this run verified NO contract integrity: a criteria.tsv weakened after arming would pass unnoticed. arm-contract only omits the lock when no hashing tool exists. Re-arm to restore it (bash arm-contract.sh), or treat this run's result as unlocked." >&2
+fi
 {
   printf '{\n  "generated_by": "run-contract.sh",\n'
   printf '  "generated_at": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [ -n "$LOCK_STATE" ] && printf '  "contract_lock": "%s",\n' "$(json_str "$LOCK_STATE")"
   printf '  "criteria": [\n'
   first=1
   ran=0

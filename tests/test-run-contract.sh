@@ -207,6 +207,53 @@ fi
 rm -rf "$FAKEBIN"
 rm -f .loop/active .loop/criteria.sha256 .loop/results.json
 
+# --- armed with NO hash-lock, on a box that HAS a SHA-256 tool ---
+# arm-contract removes criteria.sha256 only when no hashing tool was available,
+# so a tool being present now leaves the lock's absence unexplained: either the
+# arm predates the tool, or the lock was removed afterwards — and in that second
+# case every tamper check above was skipped in SILENCE. This must not fail
+# closed (a toolchain that changed between arm and run is a legitimate way to
+# get here, and failing would strand a real loop whose only exit is deleting
+# .loop/active), but it must not be invisible either. Assert both halves: the
+# contract still runs, and the fact is on stderr AND in the ledger — the ledger
+# because a GREEN contract lets the stop-gate exit 0, which discards our stderr.
+rm -rf .loop/evidence; rm -f .loop/results.json
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+: > .loop/active
+bash "$RUNNER" 2>.loop/nolock.err; assert_eq 0 $? "no hash-lock while armed: contract still RUNS (not fail-closed)"
+assert_file_contains .loop/results.json '"contract_lock": "absent"' "no hash-lock while armed: recorded in the ledger"
+assert_file_contains .loop/results.json '"all_green": true' "no hash-lock while armed: a green contract is still green"
+assert_file_contains .loop/nolock.err 'armed but' "no hash-lock while armed: warned on stderr"
+
+# ...and the field must NOT appear on the ordinary paths, or it is noise that
+# teaches readers to ignore it.
+sha_of .loop/criteria.tsv > .loop/criteria.sha256
+bash "$RUNNER" 2>/dev/null; assert_eq 0 $? "hash-lock present: exit 0"
+assert_eq "" "$(grep -c 'contract_lock' .loop/results.json | sed 's/^0$//')" "hash-lock present: no contract_lock field"
+rm -f .loop/active .loop/criteria.sha256
+bash "$RUNNER" 2>/dev/null; assert_eq 0 $? "not armed: exit 0"
+assert_eq "" "$(grep -c 'contract_lock' .loop/results.json | sed 's/^0$//')" "not armed: no contract_lock field"
+
+# The fourth arm of the same branch, and the one that decides whether this is a
+# warning or a false alarm: armed, no lock, and NO SHA-256 tool. That is exactly
+# what arm-contract leaves behind on a hashless box, so it is the expected state,
+# not a missing lock — it must stay silent, or every run on such a box cries wolf.
+: > .loop/active
+FAKEBIN2="$SB/fakebin-nolock"; mkdir -p "$FAKEBIN2"
+for t in bash mkdir cut mv rm date tail sed printf; do
+  src=$(command -v "$t") && ln -sf "$src" "$FAKEBIN2/$t"
+done
+if env PATH="$FAKEBIN2" bash -c 'command -v sha256sum || command -v shasum || command -v openssl' >/dev/null 2>&1; then
+  echo "  SKIP: could not hide every SHA-256 tool from PATH (no-tool arm)" >&2
+else
+  env PATH="$FAKEBIN2" bash "$RUNNER" 2>.loop/notool.err
+  assert_eq 0 $? "armed, no lock, no SHA tool: contract runs"
+  assert_eq "" "$(grep -c 'contract_lock' .loop/results.json | sed 's/^0$//')" "armed, no lock, no SHA tool: no contract_lock field (expected state, not drift)"
+  assert_eq "" "$(grep -c 'armed but' .loop/notool.err | sed 's/^0$//')" "armed, no lock, no SHA tool: no false warning"
+fi
+rm -rf "$FAKEBIN2"
+rm -f .loop/active .loop/nolock.err .loop/notool.err .loop/results.json
+
 # --- LOOP_ENG_LOOP_DIR: the sandbox knob redirects EVERY loop path ---
 # (the scripts' comments call this the suite's sandboxing knob — this is the
 # test that makes that claim true. Assert both the custom-dir writes AND that

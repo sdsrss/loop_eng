@@ -137,6 +137,19 @@ can never pass *silently*; a fully adversarial model with arbitrary Bash that
 rewrites both `criteria.tsv` and its hash-lock in lockstep is out of scope, left
 to the red lines in the prompts and human review of the diff.
 
+A *deleted* hash-lock used to be the quiet corner of that guarantee: with no
+`criteria.sha256` beside it, `run-contract.sh` simply skipped the integrity
+check, and a lockless run looked exactly like a locked one. It no longer does.
+When the loop is armed, the lock is gone, and a SHA-256 tool is available —
+the one combination `arm-contract.sh` never produces, since it drops the lock
+only on a machine that cannot hash — the run warns on stderr and stamps
+`"contract_lock": "absent"` into `results.json`. That is a warning, not a
+refusal: a toolchain that changed between arming and running reaches the same
+state honestly, and failing closed there would strand a live loop whose only
+exit is deleting `.loop/active`. The field is in the ledger rather than only on
+stderr because a green contract lets the stop-gate exit 0, which discards hook
+output — so `"contract_lock"` is what survives to the human reading the record.
+
 Platform note: Claude Code force-allows a stop after 8 consecutive
 Stop-hook blocks; loop-eng's ceiling (3) stays safely under it.
 
