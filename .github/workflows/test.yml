@@ -43,10 +43,31 @@ jobs:
         # path is exercised on macOS instead of SKIPped.
         run: brew install bash shellcheck coreutils
 
+      # tests/test-manifest.sh runs `claude plugin validate` when the CLI is on
+      # PATH and SKIPs with a note when it is not (the shellcheck convention).
+      # Installing it here is what turns that SKIP into a real gate: the
+      # validator is the only thing that reads frontmatter, manifest fields and
+      # component references, and nothing else in this suite can see them.
+      # Linux only — manifest validity is platform-independent, so paying for it
+      # on all three legs would buy nothing.
+      # Credential-free: the suite points CLAUDE_CONFIG_DIR at an empty temp dir,
+      # verified to exit 0 there, so no secret is needed.
+      # NOT made non-fatal with `|| true`: an install that fails silently would
+      # turn the gate off while CI still reported green, which is the exact
+      # silent-disarm shape the rest of this repo is built to refuse. Unpinned on
+      # purpose too — a plugin ships to users running the CURRENT CLI, so that is
+      # the validator whose verdict matters; if a new upstream rule reddens this
+      # leg, that is a release blocker worth seeing, not noise to pin away.
+      - name: Install Claude Code CLI (Linux — enables the manifest gate)
+        if: runner.os == 'Linux'
+        run: npm i -g @anthropic-ai/claude-code
+
       - name: Show tool versions
         run: |
           bash --version | head -1
           shellcheck --version | grep version: || true
+          # Whether the manifest gate is live on this leg, stated rather than assumed.
+          claude --version || echo "claude CLI absent — test-manifest will SKIP platform validation"
 
       - name: Run test suite
         run: bash tests/run-all.sh
