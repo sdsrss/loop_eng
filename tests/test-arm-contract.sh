@@ -74,6 +74,28 @@ else
   echo "  SKIP: no timeout(1)/gtimeout — cannot exercise the red-check timeout" >&2
 fi
 
+# --- family invariant: a budget knob set to 0 must never mean "no budget" ---
+# GNU `timeout 0` DISABLES the timeout, so 0 is a config error for every budget
+# knob in this plugin: LOOP_ENG_GATE_TIMEOUT (stop-gate), LOOP_ENG_MAX_MINUTES
+# (both unattended runners) and this one. The other three warn and fall back, and
+# each has an assertion pinning that. arm-contract fell back correctly but
+# SILENTLY, and was the only one of the four with nothing asserting it — which is
+# exactly how the same gap survived in stop-gate.sh until an audit caught it.
+# Keep this test and its three siblings in lockstep when adding a budget knob.
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+printf 'ok\ttrivially green\ttrue\n' > .loop/criteria.tsv
+LOOP_ENG_ARM_REDCHECK_TIMEOUT=0 bash "$ARM" 2>.loop/armwarn0; assert_eq 0 $? "REDCHECK_TIMEOUT=0 still arms"
+assert_file_contains .loop/armwarn0 "would disable" "REDCHECK_TIMEOUT=0 warns that 0 would disable the budget"
+LOOP_ENG_ARM_REDCHECK_TIMEOUT=00 bash "$ARM" 2>.loop/armwarn00
+assert_file_contains .loop/armwarn00 "would disable" "REDCHECK_TIMEOUT=00 (leading zero) hits the same guard"
+LOOP_ENG_ARM_REDCHECK_TIMEOUT=10 bash "$ARM" 2>.loop/armwarnok
+if grep -q 'would disable' .loop/armwarnok; then
+  assert_eq "quiet" "warned" "a valid REDCHECK_TIMEOUT does not warn"
+else
+  assert_eq 0 0 "a valid REDCHECK_TIMEOUT does not warn"
+fi
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn0 .loop/armwarn00 .loop/armwarnok
+
 # --- no criteria.tsv: arms without a hash-lock, does not error ---
 rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
 bash "$ARM" 2>/dev/null; assert_eq 0 $? "arm with no criteria.tsv still exits 0"

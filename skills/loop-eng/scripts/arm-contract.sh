@@ -84,7 +84,14 @@ if [ -f "$CRIT" ] && [ "${LOOP_ENG_ARM_REDCHECK:-1}" != "0" ]; then
   # 10#: "00"/"08" are digit strings too; force base-10 so the arithmetic never
   # sees a bad octal token. 0 would DISABLE timeout(1) (GNU semantics) — the
   # opposite of a budget at its lowest value — so it also falls back to 10.
-  if [ "$((10#$REDCHECK_TIMEOUT))" -eq 0 ]; then REDCHECK_TIMEOUT=10; fi
+  # Say so, rather than falling back in silence: this was the only one of the
+  # plugin's four budget knobs (GATE_TIMEOUT, MAX_MINUTES ×2, this) that handled
+  # 0 correctly but invisibly — so it was also the only one no test could pin,
+  # and an unpinned invariant is how the same gap survived in stop-gate.sh.
+  if [ "$((10#$REDCHECK_TIMEOUT))" -eq 0 ]; then
+    echo "loop-eng arm-contract: LOOP_ENG_ARM_REDCHECK_TIMEOUT=$REDCHECK_TIMEOUT would disable the per-criterion red-check budget (timeout 0 = no limit); using 10." >&2
+    REDCHECK_TIMEOUT=10
+  fi
   # Same detection as stop-gate.sh (bash 3.2-safe): prefer timeout(1), else
   # gtimeout (macOS coreutils), else run unbounded rather than fail — advisory.
   REDCHECK_TIMEOUT_BIN=""

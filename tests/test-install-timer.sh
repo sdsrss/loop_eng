@@ -60,6 +60,15 @@ assert_file_contains "$UNIT_DIR/loop-eng-autoloop.service" "LOOP_ENG_ALLOW_AUTOB
 # --- validation: bad mode / bad time / non-git repo / bad max-sessions all refuse ---
 run_install bogus "$SB" 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "bad mode refused"
 run_install polish "$SB" --time 25:00 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "bad --time refused"
+# --time with its value omitted: `shift 2` on a single remaining arg fails, and
+# under `set -e` that aborted the script BEFORE the HH:MM validation could speak
+# — a bare exit 1 with nothing on stderr, indistinguishable from a crash.
+terr=$(run_install polish "$SB" --time 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "--time with no value refused"
+case "$terr" in
+  *--time*) assert_eq 0 0 "--time with no value says what is missing" ;;
+  *) assert_eq "a message naming --time" "[$terr]" "--time with no value says what is missing" ;;
+esac
 run_install polish "$XDG" 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-git repo refused"
 run_install autoloop "$SB" abc 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-numeric max-sessions refused"
 

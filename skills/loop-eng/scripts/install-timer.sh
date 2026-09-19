@@ -43,7 +43,12 @@ ALLOW_WRITE=0
 ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --time) TIME="${2:-}"; shift 2 ;;
+    # Check for the value BEFORE shifting: `shift 2` with one arg left fails,
+    # and under `set -e` that killed the script right here — exit 1, empty
+    # stderr, before the HH:MM validation below could name what was wrong.
+    --time)
+      [ $# -ge 2 ] || die "--time requires an HH:MM value (24h), e.g. --time 03:00"
+      TIME="$2"; shift 2 ;;
     --allow-write) ALLOW_WRITE=1; shift ;;
     --*) die "unknown option: $1" ;;
     *) [ -z "$ARG" ] || die "unexpected extra argument: $1"; ARG="$1"; shift ;;
