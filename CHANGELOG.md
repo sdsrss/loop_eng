@@ -1,5 +1,132 @@
 # Changelog
 
+## Unreleased
+
+New-user lifecycle QA: install → use → update → self-heal → uninstall, driven
+end to end against a genuine `claude plugin marketplace add sdsrss/loop_eng`
+install into an isolated `CLAUDE_CONFIG_DIR` on Claude Code 2.1.278. The
+enforcement layer passed every leg on the real artifact — evidence-gate denied
+a `Write` to `.loop/evidence/` with `CLAUDE_PLUGIN_ROOT` resolved to the cache
+path, the stop-gate blocked a red contract and machine-wrote
+`"generated_by": "run-contract.sh"` / `"all_green": false`, `/autoloop` armed
+via `${CLAUDE_PLUGIN_ROOT}` and reached ALL GREEN, the hash-lock caught a
+post-arm rewrite (exit 77), and a runner deleted from the cache produced the
+fail-closed block that names `/plugin update loop-eng`. What the sweep found
+was on the edges: one packaging defect, three places where a real environment
+dependency lived only in a code comment, one quiet corner of the hash-lock, and
+two release-blocking facts that were checklist lines rather than tests. Test
+suite 411 → 456 assertions.
+
+**fix: the two timer scripts shipped non-executable.** `install-timer.sh` and
+`uninstall-timer.sh` were recorded in git as `100644`, while README documents
+both as bare-path commands (`skills/loop-eng/scripts/install-timer.sh <polish|
+autoloop> <repo>`). A marketplace install materializes the tree with its
+recorded modes, so the first line a new user pasted answered `Permission
+denied` — reproduced in the installed cache copy, not just the repo. Their two
+siblings in the same directory, `unattended-polish.sh` and
+`unattended-autoloop.sh`, were already `100755`, which is why the gap survived:
+every test in the suite invokes these scripts as `bash <path>`, a form that
+works at any mode, so nothing exercised the documented one. Now `100755`.
+
+**test: `tests/test-packaging.sh`** (new, 12 assertions) closes that blind spot
+by asserting the git-index mode of every script README invokes bare-path. The
+candidate list is *derived* from README rather than written down — a runner
+documented tomorrow is covered tomorrow — and the scan fails closed if its
+pattern ever matches nothing, so the suite cannot go green while checking zero
+files. It also pins the converse: `hooks.json` spawns every hook through
+`bash "<path>"`, so hook modes are deliberately not part of the contract.
+
+**docs: a Requirements table in README.** `jq`/`python3`, a SHA-256 tool,
+`timeout`/`gtimeout`, `curl`, `systemctl`, and the bash ≥ 4.4 floor were each
+probed at run time and documented only in the script that probes them. Two of
+those absences silently weaken a guard, which is exactly the class that should
+not live in a comment. Each row states what actually degrades; every claim was
+grep-verified against the probing script.
+
+**test: the parser-less evidence-gate is now pinned** (+2 assertions). With
+neither `jq` nor `python3` the gate fails open — deliberate, since a PreToolUse
+hook must never brick a session, but it was the one environment where the gate
+looks installed and enforces nothing, and no test covered it. Both halves are
+now asserted: the exit code stays 0, and the stderr warning that is a human's
+only signal stays present. README states the consequence and its bound,
+measured rather than reasoned: on a parser-less box a hand-forged
+`{"all_green": true}` in `.loop/results.json` was overwritten by
+`run-contract.sh` on the next stop attempt and the stop was still blocked
+(exit 2). The evidence-gate is defense-in-depth; the stop-gate is load-bearing
+and needs no parser.
+
+**docs: two traps in RELEASING.md.** (1) The pre-flight now validates the
+plugin manifest by path — given `.` the validator finds `marketplace.json`
+first and reports `"contents": []`, a green that checked no command, agent, or
+skill; the one expected `--strict` warning (root `CLAUDE.md`) is named so any
+other is a blocker. (2) §1 now requires adding the marketplace by its GitHub
+source: a `directory` source runs the plugin *from the source directory*,
+leaves `plugins/marketplaces/` empty and never executes the version-pinned
+`plugins/cache/` copy that every path in steps 3–4 points at. Confirmed by
+running the same smoke once per source type with a marker in `deny()` in both
+copies. Instrumenting the cache under a directory source yields an empty log
+that reads exactly like "the hook never fired" — the fourth instance of that
+family in these two steps.
+
+**fix(run-contract): a deleted hash-lock is no longer silent.** The integrity
+check ran under `[ -f "$ACTIVE" ] && [ -f "$SHA_LOCK" ]`, so a missing
+`criteria.sha256` skipped it entirely and a lockless run was indistinguishable
+from a locked one — the corner where "weakening an armed contract can never
+pass silently" stopped being true. `arm-contract.sh` drops the lock in exactly
+one case (no SHA-256 tool), so armed + no lock + a tool present is a state it
+never produces: that combination now warns on stderr and stamps
+`"contract_lock": "absent"` into `results.json`. Deliberately a warning, not a
+refusal — a toolchain that changed between arming and running reaches the same
+state honestly, and failing closed there would strand a live loop whose only
+exit is deleting `.loop/active`, trading a documented residual for a new way to
+lose work. The ledger carries it because a green contract lets the stop-gate
+exit 0, which discards hook output. All four arms of the branch are tested
+(+11 assertions), including the one that must stay silent: armed with no lock
+on a machine with no hashing tool is the expected state, not drift.
+
+**test: `tests/test-manifest.sh`** (new, 20 assertions) turns two RELEASING.md
+checklist lines into failures. "A version bump touches THREE fields across TWO
+files" was a thing a human remembered; now a drifted `metadata.version` or
+`plugins[].version` fails the suite, as does a missing CHANGELOG section for the
+shipped version. It also asserts every shipped component `.md` has frontmatter
+(without one, a command loads as nothing and nothing fails), and that each
+agent's `name:` matches its filename — the Task tool dispatches on that field,
+and the platform validator does not check it. JSON is parsed by explicit path
+with python3 and the marketplace entry is selected BY NAME: `plugins[]` is an
+array, and a positional grep reads the wrong field the day a second entry
+appears. Where the `claude` CLI is installed the suite also runs
+`claude plugin validate` (credential-free, verified against an empty
+`CLAUDE_CONFIG_DIR`) and asserts zero errors with the root-`CLAUDE.md` warning
+as the only warning — strict-grade rigor without tripping on the one warning
+the plugins reference documents as unavoidable and unsuppressable. Every
+assertion was mutation-tested: bumping `plugin.json` alone, stripping a
+frontmatter block, and typo-ing an agent name each turn the suite red.
+
+**ci: the manifest gate is live on the Linux leg.** `npm i -g
+@anthropic-ai/claude-code` on ubuntu only — manifest validity is
+platform-independent, so paying for it on all three legs buys nothing, and the
+validator needs no credentials. Not softened with `|| true`: an install that
+failed quietly would switch the gate off while CI still reported green, the
+silent-disarm shape this repo exists to refuse. Unpinned for the same reason a
+plugin's verdict comes from the CLI its users run. `Show tool versions` now
+prints `claude --version` so each run states whether the gate was live rather
+than leaving it inferred.
+
+**docs: CLAUDE.md no longer states the plugin cache is enforcing.** It claimed
+loop-eng "is also installed as a marketplace plugin (user scope)" as
+unconditional fact; on this machine it is not installed at all, which makes the
+guidance a trap in the other direction — an agent assuming a stale cache
+enforces will misread which copy it is testing. Now conditional, with the
+one-line `claude plugin list` check, a pointer to `arm-contract.sh`'s
+`armed from` line as the authority over any belief, and the directory-vs-GitHub
+source distinction.
+
+**docs: one file outlives an uninstall.** The update notifier's throttle stamp
+at `${XDG_CACHE_HOME:-~/.cache}/loop-eng/update-check.json` sits outside
+`~/.claude/` on purpose (so it survives a version bump rather than being
+orphaned in the version-pinned cache), and `/plugin uninstall` does not know
+about it. README now says so, with the one-line `rm` and what the file holds.
+
 ## 0.12.1 — 2026-09-19
 
 Hardening batch. Nothing here changes what the enforcement layer decides: no
