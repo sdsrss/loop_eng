@@ -57,8 +57,13 @@ step 4 and re-arm for step 5.
    # plugins/marketplaces/loop-eng/... first (observed 2026-09-19) — that is the
    # marketplace CLONE, not the copy that enforces, so the smoke then exercised
    # the wrong file. Same distinction step 4 warns about for instrumentation.
+   # -maxdepth 6, not 3: from CACHE_ROOT the runner sits five components down,
+   # at <version>/skills/loop-eng/scripts/arm-contract.sh. At 3 the find matched
+   # NOTHING (observed 2026-09-19 on 0.12.1) and `bash "$ARM"` then ran the empty
+   # string — "bash: : No such file or directory", which reads like a broken
+   # install rather than a broken checklist line.
    CACHE_ROOT=~/.claude/plugins/cache/loop-eng/loop-eng
-   ARM=$(find "$CACHE_ROOT" -maxdepth 3 -name arm-contract.sh | sort -V | tail -1)
+   ARM=$(find "$CACHE_ROOT" -maxdepth 6 -name arm-contract.sh | sort -V | tail -1)
    echo "$ARM"     # must contain /plugins/cache/ AND the version you are releasing
    bash "$ARM"     # expect: "pinned criteria.tsv @ <sha>" + "stop-gate armed"
    ```

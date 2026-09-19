@@ -8,6 +8,32 @@ Two of the three are the same defect shape — a hand-written roster standing in
 for a set that should be derived from the source — which makes it this repo's
 most frequent one. Test suite 394 → 411 assertions.
 
+**Live-install smoke** (RELEASING.md §1): PASS on Claude Code 2.1.278, against a
+genuine `claude plugin marketplace add sdsrss/loop_eng` + `install` of this
+release's content into an isolated `CLAUDE_CONFIG_DIR`. Machine-verified, not
+model-reported. The plugin resolved to
+`plugins/cache/loop-eng/loop-eng/0.12.1/` and `arm-contract` printed `armed
+from <that cache path>`. The release's own change was smoked directly: arming a
+two-line contract whose second criterion is the 0.12.0 pathspec shape
+(`:(exclude)…` unquoted) printed `criterion 'scope' can never run` with bash's
+own diagnosis, while the legitimately-RED `false` criterion beside it drew no
+such warning. An instrumented `evidence-gate.sh` logged `DENY-FIRED tool=Write
+file=<proj>/.loop/evidence/smoke.log root=<real cache path>` and the file did
+not land under `--permission-mode bypassPermissions`, so hooks.json auto-loaded
+and `CLAUDE_PLUGIN_ROOT` reached the hook process. An instrumented
+`stop-gate.sh` logged `BLOCK-red n=1..3` then `CEILING-RELEASE count=3` over a
+`generated_by: run-contract.sh` ledger reading `all_green: false`. A full
+`/loop-eng:autoloop` round then reached `all_green: true` on both criteria with
+`.loop/active` and `.loop/criteria.sha256` removed by the gate rather than by
+the model — reachable only if `${CLAUDE_PLUGIN_ROOT}` expanded inside the
+command markdown.
+
+One checklist defect surfaced and is fixed in RELEASING.md: step 3's
+`find "$CACHE_ROOT" -maxdepth 3` cannot reach the runner, which sits five
+components down at `<version>/skills/loop-eng/scripts/arm-contract.sh`. It
+matched nothing and `bash "$ARM"` ran the empty string, which reads like a
+broken install rather than a broken checklist line.
+
 ### Fixed
 - **`arm-contract.sh` said nothing about a criterion that can never run.** The
   pre-arm red-check only warned when a criterion was ALREADY green. A criterion
