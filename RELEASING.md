@@ -14,6 +14,18 @@ memory of having run it.
       `plugins[0].version`). Verify:
       `grep -n '"version"' .claude-plugin/plugin.json .claude-plugin/marketplace.json`
 - [ ] CHANGELOG has a dated section for the version (move `## Unreleased` down).
+- [ ] Manifest + components validate:
+      `claude plugin validate .claude-plugin/plugin.json`
+      **Point it at the plugin manifest, not at `.`** — given the repo root the
+      validator finds `marketplace.json` first, validates only that, and reports
+      `"contents": []`: a green that checked no command, agent, or skill. Aiming
+      at `plugin.json` is what walks the components.
+      `--strict` currently exits 1 on ONE known warning — "CLAUDE.md at the
+      plugin root is not loaded as project context". That file is this repo's
+      own dev guidance, not shipped plugin context, and it has to sit at the
+      repo root for Claude Code to load it here; it ships inert (see CLAUDE.md,
+      "Packaging scope"). Treat exactly that one warning as expected and any
+      other as a release blocker.
 
 ## 1. Live-install smoke (REQUIRED before any release that touches
 ##    hooks/, commands/, skills/, or .claude-plugin/ — audit H2)
