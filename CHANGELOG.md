@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.2 — 2026-09-19
+## 0.13.0 — 2026-09-19
 
 New-user lifecycle QA: install → use → update → self-heal → uninstall, driven
 end to end against a genuine `claude plugin marketplace add sdsrss/loop_eng`
