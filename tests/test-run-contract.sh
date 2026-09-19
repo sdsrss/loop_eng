@@ -348,6 +348,14 @@ if [ "$(id -u)" -ne 0 ]; then
   # 2>/dev/null precedes the probe redirect — see the note in run-contract.sh)
   assert_eq "" "$(grep -c 'run-contract.sh: line' .loop-err-ro 2>/dev/null | grep -v '^0$')" "the writability probe leaks no raw bash redirect error"
   rm -f .loop-err-ro
+else
+  # Say so. Silently dropping four fail-closed assertions is how a 93 gets read
+  # as a 97 minus platform noise: CLAUDE.md's documented local bash-3.2 recipe
+  # runs the container as ROOT, so this block vanished there with no note, and
+  # the whole 97-vs-93 delta had no visible cause. CI's macOS test-bash32 leg
+  # runs non-root, so real coverage exists — this note is what tells a human
+  # reading the local recipe's output that it does not.
+  echo "  SKIP: running as root — the chmod-based unwritable-.loop half is not exercised (4 assertions)" >&2
 fi
 rm -rf .loop/evidence; rm -f .loop/results.json
 

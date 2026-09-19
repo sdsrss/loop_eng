@@ -66,11 +66,26 @@ esac
 # CHANGELOG must carry a DATED section for the version being shipped, which is
 # what RELEASING.md step 0 actually asks for ("a dated section for the version").
 # A bare `grep "^## $p_ver"` was weaker than the line it mechanizes on two counts
-# the pre-ship reviewer drove red: it is a PREFIX match, so `## 0.12.2-rc1`
-# satisfies a 0.12.2 release, and it accepts an undated `## 0.12.2` heading — the
-# exact omission a hurried release makes. Anchor the whole heading instead:
-# "## <version> — <something>", with the version terminated.
-if grep -qE "^## ${p_ver//./\\.}[[:space:]]+[—-][[:space:]]*[0-9]" CHANGELOG.md 2>/dev/null; then
+# the pre-ship reviewer drove green: it is a PREFIX match, so `## 0.12.2-rc1`
+# satisfies a 0.12.2 release, and it accepts an undated `## 0.12.2` — the exact
+# omission a hurried release makes. Anchor the full heading, date included.
+#
+# `$p_ver` interpolates UNESCAPED on purpose, so its dots are regex-any. That is
+# harmless: the shape check above already proved $p_ver is digits-and-dots, so
+# the only characters its dots can over-match are other digits. The escaped form
+# `${p_ver//./\.}` was tried and does behave identically on bash 3.2.57 and
+# 5.3.9 (measured: both expand to `0\.12\.2`, both match) — but it is the same
+# pattern-substitution-with-backslash-replacement shape CLAUDE.md warns readers
+# away from for json_str, and a construct costing a paragraph to defend is not
+# worth using where plain interpolation is provably safe.
+#
+# The separator accepts an em-dash or a hyphen on purpose: RELEASING.md asks for
+# a dated section, not for a typographic convention, so pinning `—` would
+# enforce a rule the checklist does not state.
+# Braces are load-bearing, not style: `$p_ver[[:space:]]` reads as an array
+# expansion (shellcheck SC1087, an *error*-level finding, so run-all.sh's
+# `shellcheck -S error` gate fails on it even though every assertion passes).
+if grep -qE "^## ${p_ver}[[:space:]]+[—-][[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$" CHANGELOG.md 2>/dev/null; then
   PASS=$((PASS+1))
 else
   FAIL=$((FAIL+1))
