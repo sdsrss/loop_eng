@@ -1,12 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 — 2026-09-19
 
 An end-to-end QA pass driven as a real user (drive the loop, not read the code):
 five rounds over the `/autoloop` mechanism, the dogfood sync, the unattended
 runners, the systemd timer pair, and the update notifier. Six defects, four of
 them in guards that failed quietly, plus the family invariant those four kept
 violating. Test suite 320 → 358 assertions.
+
+**Upgrade note**: mostly additive — after updating run `/reload-plugins` or
+start a fresh session; the hook-side changes only take effect once the plugin
+cache is on 0.11.0. **One behavior change can break an existing schedule**:
+`unattended-polish.sh` now rejects malformed arguments with exit 64 instead of
+silently degrading to report-only, so a cron line like
+`unattended-polish.sh /repo --auto-fix` (scope omitted) that appeared to work
+will now fail loudly. That is the fix — it was never doing what it looked like —
+but check your crontab and any hand-written systemd units before updating.
+Units written by `install-timer.sh` are unaffected. Revert path: pin v0.10.0.
 
 ### Fixed
 - **The stop-gate's block reason was empty on the primary path.** `run-contract.sh`
