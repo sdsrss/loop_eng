@@ -250,6 +250,42 @@ assert_eq 1 "$([ -f .loop/evidence/1.log ] && echo 1)" "fail-closed run does NOT
 rm -f .loop/active .loop/criteria.sha256 .loop/results.json
 rm -rf .loop/evidence
 
+# --- an unrecordable result must fail closed WITH A REASON, not by accident ---
+# Pre-fix, an unwritable .loop/ made the `{ … } > "$TMP"` group's redirect fail,
+# so the criteria loop never ran and `ran`/`malformed` were never assigned; the
+# script then exited non-zero only because `set -u` tripped over an unbound
+# variable three lines later, printing bash internals instead of a cause. Safe —
+# but by coincidence: hoisting those initialisations out of the group command (an
+# ordinary cleanup) would have turned a full disk into a false ALL GREEN.
+# Occupying the evidence path with a FILE reproduces it independently of uid, so
+# this assertion also holds in the root-run bash 3.2 container.
+rm -rf .loop/evidence; rm -f .loop/results.json
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+printf 'not a directory\n' > .loop/evidence
+bash "$RUNNER" 2>.loop/rc-err-nowrite; assert_eq 73 $? "unusable evidence dir fails closed, exit 73 (EX_CANTCREAT)"
+assert_file_contains .loop/rc-err-nowrite 'cannot write' "the refusal states it could not write, not a bash internal"
+assert_eq "" "$(grep -c 'unbound variable' .loop/rc-err-nowrite 2>/dev/null | grep -v '^0$')" "no bash internals leak into the refusal"
+rm -f .loop/evidence .loop/rc-err-nowrite
+
+# Same invariant via the other door: a .loop/ the process cannot write at all.
+# chmod cannot take write access away from root, so this half is skipped there.
+if [ "$(id -u)" -ne 0 ]; then
+  rm -rf .loop/evidence; rm -f .loop/results.json
+  printf '1\tok\ttrue\n' > .loop/criteria.tsv
+  chmod a-w .loop
+  bash "$RUNNER" 2>.loop-err-ro; rc=$?
+  chmod u+w .loop
+  assert_eq 73 "$rc" "unwritable .loop fails closed, exit 73"
+  assert_file_contains .loop-err-ro 'cannot write' "read-only .loop refusal states the cause"
+  # this is the door that actually leaked bash internals pre-fix
+  assert_eq "" "$(grep -c 'unbound variable' .loop-err-ro 2>/dev/null | grep -v '^0$')" "read-only .loop refusal leaks no bash internals"
+  # ...and the probe's own redirect must not leak one either (it does unless
+  # 2>/dev/null precedes the probe redirect — see the note in run-contract.sh)
+  assert_eq "" "$(grep -c 'run-contract.sh: line' .loop-err-ro 2>/dev/null | grep -v '^0$')" "the writability probe leaks no raw bash redirect error"
+  rm -f .loop-err-ro
+fi
+rm -rf .loop/evidence; rm -f .loop/results.json
+
 # --- missing criteria.tsv ---
 rm .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 78 $? "missing criteria exit 78"

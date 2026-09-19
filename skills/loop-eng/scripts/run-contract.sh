@@ -23,7 +23,14 @@ ACTIVE="$LOOP_DIR/active"
 SHA_LOCK="$LOOP_DIR/criteria.sha256"
 
 [ -f "$CRIT" ] || { echo "run-contract: $CRIT not found — write the contract first" >&2; exit 78; }
-mkdir -p "$EVID"
+
+# 73 = EX_CANTCREAT, matching the sysexits vocabulary these scripts already speak
+# (64 EX_USAGE, 75 EX_TEMPFAIL, 78 EX_CONFIG).
+cannot_write() { # $1 = what, $2 = why
+  echo "run-contract: cannot write $1 ($2) — refusing to run (fail closed). results.json and evidence/ ARE the completion record the harness trusts, so a contract whose result cannot be recorded has not been verified. Check permissions and free space under $LOOP_DIR/." >&2
+  exit 73
+}
+mkdir -p "$EVID" 2>/dev/null || cannot_write "$EVID" "mkdir failed"
 
 # Portable SHA-256 of a file -> stdout (empty if no hashing tool is available).
 loop_sha256() {
@@ -67,6 +74,25 @@ nfail=0
 fail_report=""
 TMP="$RESULTS.tmp.$$"
 trap 'rm -f "$TMP"' EXIT
+
+# Prove BOTH output paths are writable before a single criterion runs. Without
+# this the failures were safe only by accident: an unwritable .loop/ made the
+# `{ … } > "$TMP"` group's redirect fail, so the criteria loop never executed and
+# `ran`/`malformed` were never assigned — the script exited non-zero three lines
+# later purely because `set -u` tripped over an unbound variable, printing bash
+# internals where a cause belonged. Hoisting those initialisations out of the
+# group command (an ordinary cleanup someone will eventually make) would have
+# converted a full disk into a false ALL GREEN. An unusable evidence dir was
+# quieter still: every criterion's log redirect failed, so PASSING checks were
+# reported as failing, with nothing saying why. Fail closed, on purpose, here.
+# NB the redirection ORDER: `2>/dev/null` must come BEFORE the probe redirect.
+# Redirections are applied left to right, so `: > "$TMP" 2>/dev/null` sets up the
+# failing one first and bash reports "Permission denied" on the still-open
+# stderr — leaking a raw `run-contract.sh: line NN:` above our own message, which
+# is the very noise this check exists to replace. Do not reorder.
+: 2>/dev/null > "$TMP" || cannot_write "$RESULTS" "ledger file not creatable"
+: 2>/dev/null > "$EVID/.writable" || cannot_write "$EVID" "evidence directory not writable"
+rm -f "$EVID/.writable"
 
 # Contract lock (hash-lock): while the loop is armed, criteria.tsv is pinned to
 # the SHA-256 recorded by arm-contract.sh. If the live file no longer matches,
