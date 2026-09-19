@@ -80,6 +80,18 @@ fi
 # hook timeout in hooks.json.
 GATE_TIMEOUT="${LOOP_ENG_GATE_TIMEOUT:-100}"
 case "$GATE_TIMEOUT" in *[!0-9]* | "") GATE_TIMEOUT=100 ;; esac
+# 0 is all-digits, so the check above passes it through — but GNU `timeout 0`
+# means NO limit, which removes the very fail-closed guard this budget exists to
+# provide: the contract would then run past the hook's own 120s timeout and be
+# killed by the platform, and a killed Stop hook does not reliably block, so an
+# UNVERIFIED contract could stop. Config error: warn and fall back, exactly as
+# arm-contract.sh and both unattended runners already do for their own budgets.
+# (10#: "00"/"08" are digit strings too; force base-10 so the arithmetic never
+# sees a bad octal token.)
+if [ "$((10#$GATE_TIMEOUT))" -eq 0 ]; then
+  echo "loop-eng stop-gate: LOOP_ENG_GATE_TIMEOUT=$GATE_TIMEOUT would disable the fail-closed contract budget (timeout 0 = no limit); using 100." >&2
+  GATE_TIMEOUT=100
+fi
 TIMEOUT_BIN=""
 if command -v timeout >/dev/null 2>&1; then TIMEOUT_BIN="timeout"
 elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT_BIN="gtimeout"; fi
@@ -116,7 +128,12 @@ echo $((COUNT + 1)) > "$COUNT_FILE"
 {
   echo "loop-eng stop-gate BLOCKED this stop ($((COUNT + 1))/$MAX_BLOCKS): the loop contract is not satisfied."
   echo "$CHECK_DESC failed with exit $STATUS. Output tail:"
-  printf '%s\n' "$OUT" | tail -15
+  # 40, not 15: run-contract's failure summary is ~4 lines per red criterion
+  # (name + up to 3 evidence lines) under a "N of M criteria FAILED" header, so
+  # a 15-line window dropped the header — and on a multi-criterion contract the
+  # earlier failures with it. run-contract bounds its own summary (3 log lines
+  # per criterion, 200 columns each), so this stays a small payload.
+  printf '%s\n' "$OUT" | tail -40
   echo "Continue the loop: fix per the checker report, or end it legitimately"
   echo "via a stop rule (record it in .loop/state.md and remove .loop/active)."
 } >&2

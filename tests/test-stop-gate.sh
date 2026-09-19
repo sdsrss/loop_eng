@@ -20,6 +20,22 @@ run_gate .loop/err1; assert_eq 2 $? "red criteria blocks stop"
 assert_file_contains .loop/results.json '"all_green": false' "gate refreshed results.json"
 assert_file_contains .loop/err1 'BLOCKED' "block reason on stderr"
 
+# --- the block reason must name WHICH criterion failed ---
+# exit 2 feeds this stderr back to the model as the sole in-band reason; an
+# "Output tail:" with nothing under it tells it the contract is unsatisfied but
+# not what to fix (run-contract writes its detail to results.json + evidence/).
+rm -f .loop/gate-count
+printf 'typecheck\ttsc noEmit clean\tsh -c "echo boom-evidence >&2; exit 3"\n' > .loop/criteria.tsv
+touch .loop/active
+run_gate .loop/err1b; assert_eq 2 $? "red criteria blocks stop (named-criterion case)"
+assert_file_contains .loop/err1b 'typecheck' "block reason names the failing criterion id"
+assert_file_contains .loop/err1b 'tsc noEmit clean' "block reason names the failing criterion description"
+assert_file_contains .loop/err1b 'boom-evidence' "block reason carries the failing criterion's evidence"
+rm -f .loop/gate-count
+printf '1\tred\tfalse\n' > .loop/criteria.tsv
+touch .loop/active
+run_gate /dev/null   # restore "one block recorded" so the ceiling test below still counts 1->3
+
 # --- ceiling: blocks 2 and 3, then 4th attempt allows ---
 run_gate /dev/null; assert_eq 2 $? "block 2"
 run_gate /dev/null; assert_eq 2 $? "block 3"
@@ -45,6 +61,30 @@ if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; th
 else
   echo "  SKIP: no timeout(1)/gtimeout — cannot exercise fail-closed timeout" >&2
 fi
+
+# --- LOOP_ENG_GATE_TIMEOUT=0 must not silently DISABLE the fail-closed budget ---
+# "0" passes the digits-only check, and GNU `timeout 0` means NO limit — so the
+# guard that exists to block deliberately before the platform kills an
+# overrunning Stop hook (a killed Stop hook does not reliably block) was simply
+# gone. arm-contract.sh and both unattended runners already reject 0 for exactly
+# this reason; the gate was the one that let it through.
+rm -f .loop/gate-count .loop/results.json
+printf '1\tred\tfalse\n' > .loop/criteria.tsv
+touch .loop/active
+echo '{}' | LOOP_ENG_GATE_TIMEOUT=0 bash "$GATE" 2>.loop/err0 >/dev/null
+assert_eq 2 $? "GATE_TIMEOUT=0 still blocks a red contract"
+assert_file_contains .loop/err0 'would disable' "GATE_TIMEOUT=0 warns that 0 removes the fail-closed budget"
+rm -f .loop/gate-count
+echo '{}' | LOOP_ENG_GATE_TIMEOUT=00 bash "$GATE" 2>.loop/err00 >/dev/null
+assert_file_contains .loop/err00 'would disable' "GATE_TIMEOUT=00 (leading zero) hits the same guard"
+rm -f .loop/gate-count
+echo '{}' | LOOP_ENG_GATE_TIMEOUT=100 bash "$GATE" 2>.loop/errOK >/dev/null
+if grep -q 'would disable' .loop/errOK; then
+  assert_eq "quiet" "warned" "a valid GATE_TIMEOUT does not warn"
+else
+  assert_eq 0 0 "a valid GATE_TIMEOUT does not warn"
+fi
+rm -f .loop/active .loop/gate-count
 
 # --- legacy verify.sh fallback (no criteria.tsv) ---
 rm -f .loop/criteria.tsv .loop/results.json

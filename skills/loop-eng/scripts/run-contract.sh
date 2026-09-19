@@ -56,6 +56,15 @@ json_str() { # escape for a JSON string: backslash, double quote, and the contro
 }
 
 overall=0
+# Human/model-readable failure summary, emitted to stderr after the ledger is
+# written. results.json + evidence/ are the machine record, but they are FILES:
+# a caller that only sees this process's output (the stop-gate, whose stderr IS
+# the block reason fed back to the model; a human running the runner by hand)
+# used to get an exit code and nothing else. Accumulated in the criteria loop
+# below — the `{ ... } > "$TMP"` group is a group command, not a subshell, so
+# these assignments survive it (same reason `ran`/`used_ids` are read after it).
+nfail=0
+fail_report=""
 TMP="$RESULTS.tmp.$$"
 trap 'rm -f "$TMP"' EXIT
 
@@ -138,7 +147,28 @@ fi
     # the remaining criteria lines from the while-read loop (dropped criteria,
     # possibly a false all_green)
     bash -c "$cmd" > "$log" 2>&1 </dev/null || status=$?
-    if [ "$status" -eq 0 ]; then pass=true; else pass=false; overall=1; fi
+    if [ "$status" -eq 0 ]; then pass=true; else
+      pass=false; overall=1
+      nfail=$((nfail + 1))
+      # Bounded on purpose: the last 3 lines of this criterion's log, each cut to
+      # 200 columns. The stop-gate tails our output into a hook stderr payload,
+      # so an unbounded dump (a minified stack trace, a 10k-line test log) would
+      # push the actual criterion names out of the model's block reason.
+      # Past the 8th failure, drop to ONE evidence line: the stop-gate tails this
+      # summary into a 40-line block reason, and 3 lines each put a 10-failure
+      # contract at 41 — one line over, costing the header. Worst case is now
+      # 1 + 4*min(N,8) + 2*max(N-8,0) lines: 37 at N=10. Beyond that the earliest
+      # failures still scroll out; results.json remains the complete record.
+      ev_lines=3
+      [ "$nfail" -gt 8 ] && ev_lines=1
+      ev_tail=$(tail -n "$ev_lines" "$log" 2>/dev/null | cut -c 1-200)
+      fail_report="$fail_report
+  FAIL [$id] $desc (exit $status)"
+      if [ -n "$ev_tail" ]; then
+        fail_report="$fail_report
+$(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
+      fi
+    fi
     ran=$((ran + 1))
     [ "$first" -eq 0 ] && printf ',\n'
     first=0
@@ -159,6 +189,20 @@ fi
   printf '}\n'
 } > "$TMP"
 mv "$TMP" "$RESULTS"
+
+# Say what failed, on stderr. The ledger stays the machine record; this is the
+# only channel a caller sees without opening files — and for the stop-gate that
+# channel IS the block reason handed back to the model, so an empty one costs
+# the loop a whole round of rediscovery. Failures only: a green contract stays
+# silent so the summary never becomes noise.
+if [ "$overall" -ne 0 ]; then
+  if [ "$ran" -eq 0 ]; then
+    echo "run-contract: no runnable criteria in $CRIT (empty, all-comment, or malformed) — vacuous contract fails closed; a contract that verifies nothing can never be 'done'. Add <id>TAB<description>TAB<command> lines." >&2
+  else
+    printf 'run-contract: %d of %d criteria FAILED (ledger: %s, logs: %s/):%s\n' \
+      "$nfail" "$ran" "$RESULTS" "$EVID" "$fail_report" >&2
+  fi
+fi
 
 # Prune stale evidence logs so .loop/evidence/ reflects only the CURRENT contract.
 # `used_ids` holds "|id1|id2|...|" for exactly the criteria that ran this pass, and

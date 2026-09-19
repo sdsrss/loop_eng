@@ -17,9 +17,49 @@ assert_file_contains .loop/evidence/1.log 'hello-evidence' "evidence captures re
 
 # --- one red ---
 printf '1\tok\ttrue\n2\tfails\tfalse\n' > .loop/criteria.tsv
-bash "$RUNNER"; assert_eq 1 $? "red contract exit 1"
+bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "red contract exit 1"
 assert_file_contains .loop/results.json '"all_green": false' "all_green false"
 assert_file_contains .loop/results.json '"id": "2", "desc": "fails", "cmd": "false", "exit": 1, "passes": false' "criterion 2 failed with exit code"
+
+# --- a red contract must SAY what failed on stderr, not just exit 1 ---
+# Every failure detail used to live ONLY in results.json + evidence/, so a
+# consumer that reads the runner's output saw an exit code and nothing else —
+# most visibly the stop-gate, whose "Output tail:" block reason (the one signal
+# fed back to the model on a blocked stop) was empty on the primary path.
+printf 'lint\tstays green\ttrue\ntypecheck\ttsc noEmit clean\tsh -c "echo boom-evidence >&2; exit 3"\n' > .loop/criteria.tsv
+bash "$RUNNER" >/dev/null 2>.loop/rc-err; assert_eq 1 $? "red contract exits 1 (stderr-summary case)"
+assert_file_contains .loop/rc-err 'typecheck' "stderr summary names the failing criterion id"
+assert_file_contains .loop/rc-err 'tsc noEmit clean' "stderr summary names the failing criterion description"
+assert_file_contains .loop/rc-err 'exit 3' "stderr summary names the failing exit code"
+assert_file_contains .loop/rc-err 'boom-evidence' "stderr summary quotes the failing criterion's evidence"
+assert_eq 0 "$(grep -c 'stays green' .loop/rc-err)" "stderr summary lists only failures, not passing criteria"
+# a green contract stays quiet — the summary must not become noise on success
+printf 'lint\tstays green\ttrue\n' > .loop/criteria.tsv
+bash "$RUNNER" >/dev/null 2>.loop/rc-err-green; assert_eq 0 $? "green contract exits 0"
+assert_eq 0 "$(wc -c < .loop/rc-err-green | tr -d ' ')" "green contract writes nothing to stderr"
+rm -f .loop/rc-err .loop/rc-err-green
+
+# --- the summary must fit the stop-gate's 40-line feedback window ---
+# The gate tails our stderr into the block reason. At 3 evidence lines per red
+# criterion a 10-failure contract produced 41 lines, so `tail -40` dropped the
+# "N of M criteria FAILED" header. Evidence degrades to 1 line per criterion
+# past the 8th, bounding the worst case at 1 + 4*min(N,8) + 2*max(N-8,0).
+: > .loop/criteria.tsv
+i=1
+while [ "$i" -le 10 ]; do
+  printf 'c%s\tdesc %s\tsh -c "echo L1 >&2; echo L2 >&2; echo L3 >&2; exit 1"\n' "$i" "$i" >> .loop/criteria.tsv
+  i=$((i + 1))
+done
+bash "$RUNNER" >/dev/null 2>.loop/rc-many
+many_lines=$(wc -l < .loop/rc-many | tr -d ' ')
+if [ "$many_lines" -le 40 ]; then
+  assert_eq 0 0 "10-failure summary fits the gate's 40-line window ($many_lines lines)"
+else
+  assert_eq "<=40" "$many_lines" "10-failure summary fits the gate's 40-line window"
+fi
+assert_eq 1 "$(grep -c 'criteria FAILED' .loop/rc-many)" "header survives at 10 failures"
+assert_eq 10 "$(grep -c 'FAIL \[' .loop/rc-many)" "every failing criterion is still named"
+rm -f .loop/rc-many
 
 # --- comments/blank lines ignored; quotes in desc escaped ---
 printf '# comment line\n\n1\tsays "hi"\ttrue\n' > .loop/criteria.tsv
@@ -43,7 +83,9 @@ assert_file_contains .loop/results.json 'a_b.2.log' "results.json cites the suff
 
 # --- vacuous contract (zero runnable criteria) fails CLOSED, never a false green ---
 printf '# only comments\n\n' > .loop/criteria.tsv
-bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "all-comment criteria fails closed, exit 1"
+bash "$RUNNER" 2>.loop/rc-err-vac; assert_eq 1 $? "all-comment criteria fails closed, exit 1"
+assert_file_contains .loop/rc-err-vac 'no runnable criteria' "vacuous contract explains itself on stderr, not only in results.json"
+rm -f .loop/rc-err-vac
 assert_file_contains .loop/results.json '"all_green": false' "vacuous contract not green"
 assert_file_contains .loop/results.json 'no runnable criteria' "vacuous contract reason recorded"
 : > .loop/criteria.tsv   # truly empty file
@@ -74,7 +116,7 @@ assert_file_contains .loop/evidence/2.log 'second-ran' "later criterion produced
 
 # --- last criterion with NO trailing newline must NOT be silently dropped (#1) ---
 printf '1\tok\ttrue\n2\tmust-fail\tfalse' > .loop/criteria.tsv   # no final newline
-bash "$RUNNER"; assert_eq 1 $? "no-trailing-newline: failing last criterion caught (exit 1)"
+bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "no-trailing-newline: failing last criterion caught (exit 1)"
 assert_file_contains .loop/results.json '"id": "2"' "no-trailing-newline: last criterion present"
 assert_file_contains .loop/results.json '"all_green": false' "no-trailing-newline: not a false green"
 
