@@ -1,5 +1,84 @@
 # Changelog
 
+## Unreleased
+
+An end-to-end QA pass driven as a real user (drive the loop, not read the code):
+five rounds over the `/autoloop` mechanism, the dogfood sync, the unattended
+runners, the systemd timer pair, and the update notifier. Six defects, four of
+them in guards that failed quietly, plus the family invariant those four kept
+violating. Test suite 320 → 358 assertions.
+
+### Fixed
+- **The stop-gate's block reason was empty on the primary path.** `run-contract.sh`
+  writes every detail to `.loop/results.json` + `.loop/evidence/`, and nothing to
+  its own stdout/stderr — so the stop-gate's "Output tail:" had nothing under it,
+  and the one in-band signal a blocked model gets said the contract was
+  unsatisfied without saying which criterion failed. `run-contract.sh` now prints
+  a failure summary to stderr (`N of M criteria FAILED`, then per red criterion
+  its id, description, exit code and the last 3 lines of its evidence log, each
+  cut to 200 columns); a vacuous contract likewise explains itself instead of
+  failing closed in silence. Green runs stay silent. The gate's feedback window
+  grew 15 → 40 lines to fit the summary, and evidence drops to one line per
+  criterion past the eighth failure so the worst case stays inside it
+  (1 + 4·min(N,8) + 2·max(N−8,0) lines: 37 at N=10, where 3-lines-each gave 41
+  and cost the header). Ledger and evidence files are unchanged — this adds a
+  channel, it does not move the machine record.
+- **`unattended-polish.sh` let its dirty-tree guard fail OPEN outside a git repo.**
+  `git status --porcelain` in a non-repo writes its fatal to stderr and leaves
+  stdout empty, so `grep -vq` reported "not dirty" and the run proceeded — an
+  unattended `--permission-mode bypassPermissions` session editing a directory
+  with no version control, where nothing is attributable and nothing can be
+  reverted, which is precisely what the guard exists to prevent. Both unattended
+  runners now establish a git work tree up front and refuse otherwise;
+  `unattended-autoloop.sh` previously reached this point only to die on
+  `git rev-parse` under `set -e` (exit 128 plus raw git noise).
+- **`LOOP_ENG_GATE_TIMEOUT=0` silently disabled the stop-gate's fail-closed
+  budget.** `0` passes an all-digits check, but GNU `timeout 0` means *no* limit,
+  so the guard that blocks deliberately before the platform kills an overrunning
+  Stop hook (a killed Stop hook does not reliably block, which would let an
+  UNVERIFIED contract stop) was simply absent. Now warns and falls back to 100 —
+  the same `10#`-guarded treatment `arm-contract.sh` and both unattended runners
+  already gave their own budgets. The gate was the one call site that lacked it.
+- **`unattended-polish.sh` accepted malformed arguments as a clean run.**
+  `unattended-polish.sh <repo> --auto-fix` (scope omitted) put the flag in the
+  scope slot: report-only, exit 0, reviewing a scope that does not exist — a
+  nightly timer would look healthy for weeks. `--auto-fixx` was ignored just as
+  quietly. Malformed arguments are now a usage error (exit 64, EX_USAGE),
+  naming what was wrong; `install-timer.sh` already refused unknown options this
+  way. The installer-generated `ExecStart` shapes are unaffected.
+- **`arm-contract.sh` handled `LOOP_ENG_ARM_REDCHECK_TIMEOUT=0` correctly but
+  silently**, and was the only one of the plugin's four budget knobs with no
+  assertion pinning it — which is how the very same gap survived in
+  `stop-gate.sh`. It now warns like its three siblings, and each of the four has
+  a test asserting that 0 warns and a valid value does not. The invariant, in
+  one line: for every budget knob, `0` is a config error, never "no budget"
+  (GNU `timeout 0` disables the timeout).
+- **`install-timer.sh --time` with no value exited 1 with an empty stderr.**
+  `shift 2` on a single remaining argument fails, and under `set -e` that killed
+  the script before the HH:MM validation could speak. The value is now checked
+  before the shift.
+
+### Changed
+- README: the evidence-gate's Bash matching rule is described as implemented —
+  a write verb (`>`/`>>`, `tee`, `mv`, `cp`, `sed -i`, `truncate`, `rm`) ahead of
+  a protected path in the same segment. Merely naming a protected path does not
+  trip it, so the documented example of a false positive (a commit message
+  quoting the pattern) was not one; `grep passes .loop/results.json` and
+  `git commit -m "document .loop/results.json"` both pass today.
+- README: the safety table said checker/reviewer/verifier agents "have no write
+  tools". They have no Write/Edit tools and keep Bash — they must run the checks
+  — so it is a whitelist, not a sandbox. Stated that way now, matching how the
+  evidence-gate's own Bash residual is already documented.
+- README: the unattended runners' refusal list now names non-git targets and
+  malformed arguments.
+- CLAUDE.md documents a local way to check the bash 3.2 floor
+  (`docker run --rm bash:3.2` — a real 3.2.57, the release stock macOS ships)
+  and bans `BASH_COMPAT=3.2` as a stand-in. `BASH_COMPAT` restores bash ≤4.2
+  replacement-backslash semantics, so `json_str`'s `${s//\\/\\\\}` stops
+  doubling backslashes and the TAB assertion fails against code that is correct
+  on every real bash — a false positive that, acted on, breaks the ledger.
+  Verified: 3.2.57 and 5.3.9 agree; only `BASH_COMPAT=3.2` differs.
+
 ## 0.10.0 — 2026-07-14
 
 The UX batch, from a real-user sandbox audit of the install / lifecycle /

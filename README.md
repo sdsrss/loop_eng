@@ -136,13 +136,17 @@ Scope notes:
 - **Backing up the ledger:** use `cat .loop/results.json > backup.json` — the
   evidence-gate's Bash pattern cannot tell read-from from write-to direction,
   so `cp`/`mv` touching a protected path is denied even outward.
-- **The gate matches the command string, not the write target.** A command
-  that merely names a protected path — a git commit message quoting the
-  pattern, a test command aimed at an unrelated mktemp sandbox — is denied
-  even though it writes nothing protected. This is a conservative false
-  positive inherent to the best-effort design; reword the command so the
-  literal protected filename doesn't appear, or have a human use the
-  escape hatch.
+- **The gate matches the command string, not the write target.** It denies a
+  command in which a write verb (`>`/`>>`, `tee`, `mv`, `cp`, `sed -i`,
+  `truncate`, `rm`) appears ahead of a protected path in the same segment —
+  whether or not that path is what gets written. So `git commit -m "rm
+  .loop/results.json on wrap-up"`, or a test command aimed at an unrelated
+  mktemp sandbox, is denied although nothing protected is touched. Naming a
+  protected path *without* such a verb is not enough to trip it:
+  `grep passes .loop/results.json` and `git commit -m "document
+  .loop/results.json"` both pass. This is a conservative false positive
+  inherent to the best-effort design; reword the command so the verb and the
+  literal filename don't co-occur, or have a human use the escape hatch.
 - **Register the hooks in one place only.** If a project lists the loop-eng
   hooks in its own `.claude/settings.json` AND the plugin is installed globally,
   every event fires both — a **double-fire**: the stop-gate's block counter then
@@ -187,7 +191,10 @@ skills/loop-eng/scripts/unattended-polish.sh <repo> [scope] [--auto-fix]
 - Default is **report-only**. Run nightly report-only for a week; grant
   `--auto-fix` (which additionally requires `LOOP_ENG_ALLOW_AUTOFIX=1`)
   only after the findings prove trustworthy.
-- Refuses dirty trees; logs every run to `.loop/unattended.log`.
+- Refuses dirty trees, and targets that are not a git work tree at all
+  (unattended edits must stay attributable and revertable); logs every run to
+  `.loop/unattended.log`. Malformed arguments — a flag in the scope slot, an
+  unknown flag — are a usage error (exit 64), never a silent report-only run.
 - Scheduling: prefer the systemd timer pair below (tracked, one-command
   removable). Where systemd isn't available, cron works too:
   `0 3 * * * /path/unattended-polish.sh /path/to/repo src/`
@@ -199,7 +206,7 @@ a recovery strategy):
 skills/loop-eng/scripts/unattended-autoloop.sh <repo> [max-sessions]
 ```
 
-- Requires `LOOP_ENG_ALLOW_AUTOBUILD=1`; refuses dirty trees.
+- Requires `LOOP_ENG_ALLOW_AUTOBUILD=1`; refuses dirty trees and non-git targets.
 - One fresh `claude -p` session per `.loop/backlog.md` item; each session
   starts from `.loop/state.md` + `git log` handoff.
 - Circuit breaker: 2 consecutive sessions with no new commits → stop.
@@ -258,7 +265,7 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 
 | Principle | Enforcement |
 |---|---|
-| Verifier ≠ implementer | checker/reviewer/verifier agents have no write tools |
+| Verifier ≠ implementer | checker/reviewer/verifier agents have no Write/Edit tools (they keep Bash — they must run the checks — so this is a whitelist, not a sandbox) |
 | Done = machine signal | contracts allow only binary criteria with verify commands |
 | Done = machine-written fact | results.json/evidence written only by run-contract.sh; PreToolUse gate denies model writes |
 | Never weaken a check to pass it | red line in every agent + orchestrator |

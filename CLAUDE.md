@@ -24,6 +24,33 @@ throwaway git repo with `mk_sandbox_repo`, and cleans it on a `trap ... EXIT` �
 tests must never touch the real tree, `~/.claude/`, or real systemd (the timer
 tests set `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` + a fake `XDG_CONFIG_HOME`).
 
+### Checking the bash 3.2 floor locally
+
+```
+docker run --rm -v "$PWD":/repo:ro bash:3.2 sh -c '
+  apk add --no-cache git coreutils grep sed findutils python3 jq >/dev/null 2>&1
+  cp -r /repo /work && cd /work
+  git config --global user.email t@t; git config --global user.name t
+  for t in tests/test-arm-contract.sh tests/test-evidence-gate.sh \
+           tests/test-run-contract.sh tests/test-stop-gate.sh \
+           tests/test-hooks-json.sh; do /usr/local/bin/bash "$t"; done'
+```
+
+`bash:3.2` is a real 3.2.57 — the same release stock macOS ships — so this
+settles the bash-version axis without waiting for CI. Install the parsers:
+without `jq`/`python3` the evidence-gate takes its documented fail-open path and
+every deny assertion "fails" for the wrong reason. Alpine's musl userland is
+**not** BSD, so the macOS coreutils axis (BSD `sed`/`find`, `wc` padding,
+`gtimeout`, `/private/var` canonicalization) still belongs to CI's macOS legs.
+
+**Never use `BASH_COMPAT=3.2` as a substitute.** It restores bash ≤4.2
+pattern-substitution semantics for replacement backslashes (changed in 4.3),
+producing behavior *neither* real 3.2.57 *nor* 5.x exhibits: `${s//\\/\\\\}` in
+`run-contract.sh`'s `json_str` stops doubling backslashes, and the TAB-escaping
+assertion fails against working code. Acting on that false positive would break
+`json_str` on every real bash — which is exactly what the "do not
+portability-rewrite it speculatively" note at `run-contract.sh:51` warns about.
+
 ## Dual-source layout — the one gotcha that bites
 
 The **repo root is the canonical plugin source** (`commands/`, `agents/`,
