@@ -92,6 +92,44 @@ assert_file_contains .loop/results.json 'no runnable criteria' "vacuous contract
 bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "empty criteria fails closed, exit 1"
 assert_file_contains .loop/results.json '"all_green": false' "empty contract not green"
 
+# --- PARTIALLY parsed contract fails CLOSED too. The vacuous guard above only
+#     fires at ZERO runnable criteria; between 1 and N-1 a criterion line that
+#     misses the TSV shape (the classic slip: spaces where TABs belong, which
+#     parses the whole line into $id) used to be skipped in SILENCE — so a
+#     contract could report all_green over fewer criteria than its author wrote,
+#     and the dropped one is exactly the one nobody is watching. ---
+rm -f .loop/results.json
+{ printf 'lint\tsyntax ok\ttrue\n'
+  printf 'smoke must print world false\n'     # spaces, not TABs -> whole line is $id
+  printf 'types\ttypecheck\ttrue\n'; } > .loop/criteria.tsv
+bash "$RUNNER" 2>.loop/rc-err-partial; assert_eq 1 $? "partially parsed contract fails closed, exit 1"
+assert_file_contains .loop/results.json '"all_green": false' "dropped criterion line is never a green contract"
+assert_file_contains .loop/rc-err-partial 'malformed' "stderr says the contract was only partly parsed"
+assert_file_contains .loop/rc-err-partial 'line(s): 2' "stderr names the offending line number"
+# the well-formed criteria still run: the ledger stays informative, it just
+# cannot be green while a line the author wrote is unaccounted for
+assert_file_contains .loop/results.json '"id": "lint"' "well-formed criteria before the bad line still run"
+assert_file_contains .loop/results.json '"id": "types"' "well-formed criteria after the bad line still run"
+assert_file_contains .loop/results.json '"malformed_lines": "2"' "ledger records which line was unparseable"
+# a partly parsed contract's id set is incomplete, so it must NOT prune: the
+# dropped line's evidence would look stale and be deleted on the very run that
+# is telling the author their contract is wrong
+printf 'evidence from the line that stopped parsing\n' > .loop/evidence/smoke.log
+bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "partly parsed contract stays red on re-run"
+assert_eq 1 "$([ -f .loop/evidence/smoke.log ] && echo 1)" "partly parsed run does NOT prune evidence"
+rm -f .loop/rc-err-partial .loop/evidence/smoke.log
+
+# --- ...and zero false positives on the shapes the parser legitimately skips.
+#     A warning that fires on correct input is a warning people learn to ignore. ---
+{ printf '# a leading comment\n'
+  printf '\n'
+  printf '   \n'                              # whitespace-only line
+  printf '  # an indented comment\n'
+  printf 'ok\tstill fine\ttrue\n'; } > .loop/criteria.tsv
+bash "$RUNNER" 2>.loop/rc-err-clean; assert_eq 0 $? "comments/blank/whitespace-only lines keep a good contract green"
+assert_eq "" "$(grep -c malformed .loop/rc-err-clean 2>/dev/null | grep -v '^0$')" "no malformed warning on comment/blank/whitespace lines"
+rm -f .loop/rc-err-clean
+
 # --- a TAB inside a field (4+ column line / CRLF) must not break JSON validity ---
 printf '1\tgrep tab\tprintf "a\\tb"\ttrue\n' > .loop/criteria.tsv  # 4 columns -> cmd absorbs a raw TAB
 bash "$RUNNER" >/dev/null 2>&1

@@ -43,6 +43,23 @@ if [ -f "$CRIT" ]; then
   if [ "${runnable:-0}" -eq 0 ]; then
     echo "loop-eng arm-contract: WARNING — criteria.tsv has no runnable criteria (need <id>TAB<description>TAB<command> lines). run-contract will FAIL CLOSED on every stop until you add at least one; a contract that verifies nothing can never be 'done'." >&2
   fi
+  # Same classification as run-contract.sh: a line that carries content, is not
+  # a #comment (indent tolerated), and yields no id or no command column is a
+  # criterion its author expects to be checked and that will never run. Warn
+  # HERE, at arm time — run-contract fails closed on the same contract, but by
+  # then the evidence-gate has locked criteria.tsv for the whole loop, so a
+  # first signal delivered at the first blocked stop is one the model cannot act
+  # on. `[ \t]` rather than [[:space:]] to stay portable across awk flavours
+  # (busybox/BSD); \r is listed so CRLF-authored files classify identically.
+  malformed=$(awk -F'\t' '
+    { line = $0; sub(/\r$/, "", line); c = $3; sub(/\r$/, "", c) }
+    line ~ /^[ \t\r]*$/  { next }
+    line ~ /^[ \t]*#/    { next }
+    ($1 == "" || c == "") { m = m " " NR }
+    END { print m }' "$CRIT" 2>/dev/null || echo "")
+  if [ -n "${malformed:-}" ]; then
+    echo "loop-eng arm-contract: WARNING — malformed criteria line(s):$malformed in $CRIT. Each criterion needs THREE TAB-separated columns (<id>TAB<description>TAB<command>); columns separated by SPACES parse as a single field, so that criterion never runs. run-contract FAILS CLOSED on a partly parsed contract, so fix the line(s) NOW — once the loop is armed the evidence-gate locks this file. Comment a line out with a leading # if it was never meant to be a criterion." >&2
+  fi
   hash=$(loop_sha256 "$CRIT")
   if [ -n "$hash" ]; then
     printf '%s\n' "$hash" > "$SHA_LOCK"

@@ -107,21 +107,43 @@ fi
   printf '  "criteria": [\n'
   first=1
   ran=0
+  lineno=0
+  malformed=""
   used_ids="|"
   # `|| [ -n "$id" ]`: read returns non-zero on a final line with no trailing
   # newline but still assigns it; without this the last criterion is silently
   # dropped, and a dropped FAILING criterion yields a false all_green.
   while IFS=$'\t' read -r id desc cmd || [ -n "$id" ]; do
-    [ -z "${id:-}" ] && continue
-    case "$id" in \#*) continue ;; esac
+    lineno=$((lineno + 1))
     # CRLF-authored criteria.tsv: read() leaves the line-ending CR on the LAST
     # field (cmd). Left in, `bash -c "true\r"` runs a command whose name ends in
     # CR -> "command not found" (exit 127), so a PASSING check reports a false RED
-    # and the loop can never reach ALL GREEN. Strip it BEFORE the empty-check so a
-    # CRLF blank-command line collapses to malformed, exactly like its LF form.
+    # and the loop can never reach ALL GREEN. Strip it BEFORE the shape checks so
+    # a CRLF blank-command line classifies exactly like its LF form.
     # (json_str already escapes CR for JSON validity; this fixes the exec path.)
     cmd="${cmd%$'\r'}"
-    [ -z "${cmd:-}" ] && continue # malformed line: fewer than 3 columns
+    # Classify every line ONCE, so no criterion can vanish in silence.
+    # Skipped without comment (none of these is a criterion): blank lines,
+    # whitespace-only lines, and #comments (a leading indent is tolerated —
+    # an indented comment was already skipped before, and must not become an
+    # error now). CR counts as whitespace, so CRLF blanks skip here too.
+    # ANY other line that fails to yield both an id and a command column is
+    # MALFORMED: its author wrote it meaning it to be checked. The classic slip
+    # is spaces where TABs belong, which parses the whole line into $id and
+    # leaves $cmd empty; a leading TAB (empty id) is the mirror image. Both used
+    # to hit a bare `continue`, so the contract ran FEWER criteria than it was
+    # given and still reported all_green — the vacuous guard below only fires at
+    # ZERO runnable criteria, never on a partial parse. Recording the line number
+    # is what lets the ledger fail CLOSED on a contract it only partly parsed.
+    case "$id$desc$cmd" in
+      *[![:space:]]*) : ;;  # carries content — classify it below
+      *) continue ;;        # blank or whitespace-only
+    esac
+    case "${id#"${id%%[![:space:]]*}"}" in \#*) continue ;; esac
+    if [ -z "${id:-}" ] || [ -z "${cmd:-}" ]; then
+      malformed="$malformed $lineno"
+      continue
+    fi
     # Sanitize the id for the evidence FILENAME only — the JSON keeps the real id.
     # A '/' in the id would point the log at a non-existent nested dir, so the
     # redirect fails, the command never runs, and a PASSING criterion reports a
@@ -181,11 +203,21 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
   # malformed) is vacuous — treat it as a FAIL, never a silent all_green. This is
   # the same false-green class the hash-lock guards against: "done" must be a
   # verified fact, and nothing was verified. Fail closed so the stop-gate blocks.
+  # A PARTLY parsed contract is the same false-green class one step in: some
+  # criteria ran, but a line the author wrote never did. Nothing downstream can
+  # tell the difference between "3 criteria, all green" and "4 authored, 1
+  # silently dropped, the other 3 green" — so force the ledger red and name the
+  # lines. Fail closed: "done" must cover the whole contract, not the part of it
+  # that happened to parse.
+  [ -n "$malformed" ] && overall=1
   if [ "$ran" -eq 0 ]; then
     overall=1
     printf '  "all_green": false,\n'
     printf '  "error": "no runnable criteria in %s (empty, all-comment, or malformed) — vacuous contract fails closed"\n' "$(json_str "$CRIT")"
-  elif [ "$overall" -eq 0 ]; then printf '  "all_green": true\n'; else printf '  "all_green": false\n'; fi
+  else
+    [ -n "$malformed" ] && printf '  "malformed_lines": "%s",\n' "$(json_str "${malformed# }")"
+    if [ "$overall" -eq 0 ]; then printf '  "all_green": true\n'; else printf '  "all_green": false\n'; fi
+  fi
   printf '}\n'
 } > "$TMP"
 mv "$TMP" "$RESULTS"
@@ -195,10 +227,16 @@ mv "$TMP" "$RESULTS"
 # channel IS the block reason handed back to the model, so an empty one costs
 # the loop a whole round of rediscovery. Failures only: a green contract stays
 # silent so the summary never becomes noise.
+if [ -n "$malformed" ]; then
+  echo "run-contract: malformed criteria line(s):$malformed in $CRIT — each criterion needs THREE TAB-separated columns (<id>TAB<description>TAB<command>). A line whose columns are separated by SPACES parses as a single field, so that criterion never runs; refusing to report a result for a contract that was only partly parsed (fail closed). Fix the line(s), or comment them out with a leading # if they were never meant to be criteria." >&2
+fi
 if [ "$overall" -ne 0 ]; then
   if [ "$ran" -eq 0 ]; then
     echo "run-contract: no runnable criteria in $CRIT (empty, all-comment, or malformed) — vacuous contract fails closed; a contract that verifies nothing can never be 'done'. Add <id>TAB<description>TAB<command> lines." >&2
-  else
+  elif [ "$nfail" -gt 0 ]; then
+    # Only when a criterion actually ran and failed. A contract that is red
+    # SOLELY because of a malformed line has nfail=0, and "0 of 3 criteria
+    # FAILED" would read as a contradiction of the message just above it.
     printf 'run-contract: %d of %d criteria FAILED (ledger: %s, logs: %s/):%s\n' \
       "$nfail" "$ran" "$RESULTS" "$EVID" "$fail_report" >&2
   fi
@@ -216,9 +254,14 @@ fi
 #     no-sha-tool (exit 77), and the missing-criteria (exit 78) fail-closed paths
 #     all `exit` BEFORE the criteria loop, so they never reach here — their armed
 #     evidence is left untouched, and none of the fail-closed exits are weakened.
+#   - Guarded on malformed too: a partly parsed contract's id set is incomplete
+#     by definition, so a dropped line's still-valid evidence log would look
+#     stale and be deleted — destroying evidence on the one run that is telling
+#     the author their contract is wrong. Same rule as every other fail-closed
+#     path: when the parse is not trustworthy, touch nothing.
 #   - Fail-open on its own errors: a prune miss must never affect the ledger or the
 #     exit code, which are the only things the harness trusts.
-if [ "$ran" -gt 0 ]; then
+if [ "$ran" -gt 0 ] && [ -z "$malformed" ]; then
   for f in "$EVID"/*.log; do
     [ -e "$f" ] || continue           # no-match glob expands to the literal "*.log"
     stem="${f##*/}"; stem="${stem%.log}"

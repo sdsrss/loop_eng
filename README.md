@@ -43,7 +43,10 @@ contract (binary acceptance criteria, verify commands)
   context compaction and session restarts.
 - The contract's checks live in `.loop/criteria.tsv` (written at contract
   time; the evidence-gate hook denies rewrites while the loop is armed).
-  Every stop attempt machine-writes
+  Columns are **TAB-separated** — `id<TAB>description<TAB>command`. A line that
+  uses spaces instead parses as one field and cannot run, so arming warns and
+  the contract fails closed rather than going green over the criteria that
+  happened to parse. Every stop attempt machine-writes
   `.loop/results.json` + `.loop/evidence/<id>.log` — completion is a
   machine-written fact, not a model claim.
 

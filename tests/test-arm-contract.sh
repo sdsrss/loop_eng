@@ -32,6 +32,32 @@ bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on vacuous contract still exits
 assert_file_contains .loop/armwarn 'no runnable criteria' "arm warns about vacuous contract"
 rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
 
+# --- PARTLY malformed criteria.tsv: warn at ARM time, while the file is still
+#     writable. run-contract fails closed on the same contract, but by then the
+#     evidence-gate has locked criteria.tsv for the duration of the loop — so
+#     without this warning the author's first signal is a stop they cannot fix. ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
+{ printf 'lint\tsyntax ok\ttrue\n'
+  printf 'smoke must print world false\n'     # spaces, not TABs
+  printf 'types\ttypecheck\ttrue\n'; } > .loop/criteria.tsv
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on a partly malformed contract still exits 0 (advisory)"
+assert_eq "1" "$([ -f .loop/active ] && echo 1)" "arm still arms despite the malformed-line warning"
+assert_file_contains .loop/armwarn 'malformed' "arm warns that a criterion line will never run"
+assert_file_contains .loop/armwarn 'line(s): 2' "arm names the offending line number"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
+# --- zero false positives: the shapes the parser legitimately skips (comments,
+#     blank, whitespace-only, indented comments) must NOT trip that warning. ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
+{ printf '# a leading comment\n'
+  printf '\n'
+  printf '   \n'
+  printf '  # an indented comment\n'
+  printf 'ok\tstill fine\ttrue\n'; } > .loop/criteria.tsv
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on a clean contract exits 0"
+assert_eq "" "$(grep -c malformed .loop/armwarn 2>/dev/null | grep -v '^0$')" "no malformed warning on comment/blank/whitespace lines"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
 # --- pre-arm red-check: an ALREADY-green criterion warns but arm still succeeds ---
 rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
 printf 'baseline\talready passes\ttrue\n' > .loop/criteria.tsv
