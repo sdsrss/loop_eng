@@ -115,6 +115,34 @@ including the two that must stay silent: a machine with no hashing tool, and
 the documented `touch .loop/active` fallback, which must warn without
 misdiagnosing.
 
+**fix(unattended): the bash ≥ 4.4 floor is checked, not just stated.** Both
+drivers carried "Requires bash >= 4.4" as a header comment and nothing else, so
+on stock macOS bash 3.2 they STARTED, did real work, and only then died on the
+first empty-array expansion under `set -u` — the worst shape for an unattended
+writer, which for `unattended-autoloop.sh` may already have let a session
+commit. They now refuse up front with exit 78 (EX_CONFIG) and a message naming
+the requirement. Verified on real bash 3.2.57 via the docker recipe in
+CLAUDE.md: both exit 78. A separate `BASH_VERSION` check runs first and stays
+its own statement, because a non-bash shell dies on the array subscript in the
+version test with a bare "Bad substitution" — the `:-0` default never applies,
+since the failure is in the subscript syntax rather than the value. Found by
+the pre-ship reviewer, who noticed the README row this batch added claimed a
+guard that did not exist.
+
+**docs: the Requirements table said things that were not so.** Same review. The
+`timeout` row omitted the unattended drivers; `systemctl` omitted
+`uninstall-timer.sh`; there was no row at all for the `claude` CLI, which
+`install-timer.sh` hard-requires — a stronger dependency than three of the rows
+that were listed. The table now also records an asymmetry it surfaced:
+`unattended-polish.sh` probes only `timeout` and never falls back to
+`gtimeout`, unlike its three siblings, so on macOS-with-coreutils a scheduled
+polish runs uncapped while autoloop does not. Pre-existing, documented here,
+not fixed in this release. The "(CI-tested)" claim is narrowed to the four
+scripts `test-bash32` actually covers — `update-notify.sh` is a registered hook
+and is in neither of that job's lists. The table's preamble, which promised
+everything "degrades rather than failing", now says which rows weaken a guard
+and which refuse outright.
+
 **test: `tests/test-manifest.sh`** (new, 20 assertions) turns two RELEASING.md
 checklist lines into failures. "A version bump touches THREE fields across TWO
 files" was a thing a human remembered; now a drifted `metadata.version` or

@@ -23,19 +23,23 @@ After a marketplace install the commands may resolve namespace-prefixed —
 
 ### Requirements
 
-POSIX shell and git are the only hard requirements. Everything else is probed
-at run time and degrades on a documented path rather than failing — but two of
-those paths quietly weaken a guard, so they are listed here rather than left in
-the scripts' comments.
+Bash and git are the baseline. Everything below is probed at run time, and the
+table says which way each probe falls: most degrade on a documented path, but
+four of them quietly **weaken a guard** (rows 1-3 and 5), and two **refuse
+outright** rather than degrade (the `claude` CLI, and bash ≥ 4.4 for the
+unattended drivers). None of this belongs only in a script comment, which is
+where it lived before.
 
 | Tool | Used by | Absent → |
 |---|---|---|
 | `jq` **or** `python3` | `evidence-gate.sh` | the gate goes **inert** — it cannot parse the hook event, so it allows every write and says so on stderr (`no jq or python3 available`). See the note below. |
 | `sha256sum` / `shasum` / `openssl` | `arm-contract.sh`, `run-contract.sh` | the contract arms **without a hash-lock**, so post-arm drift no longer fails closed. `arm-contract.sh` warns at arm time. |
-| `timeout` / `gtimeout` | `stop-gate.sh`, `arm-contract.sh` | the contract runs **unbounded** on each stop attempt; the near-timeout fail-closed guard is inactive and the gate says so. Keep `criteria.tsv` fast. |
+| `timeout` / `gtimeout` | `stop-gate.sh`, `arm-contract.sh`, `unattended-autoloop.sh` | the contract runs **unbounded** on each stop attempt; the near-timeout fail-closed guard is inactive and the gate says so. Keep `criteria.tsv` fast. |
+| `timeout` (only) | `unattended-polish.sh` | its wall-clock budget is **unbounded**. Note the asymmetry: unlike its three siblings this one does not fall back to `gtimeout`, so on macOS-with-coreutils a scheduled polish runs uncapped while autoloop does not. Known, not yet fixed. |
 | `curl` | `update-notify.sh` | no update-available notices. Silent by design. |
-| `systemctl --user` | `install-timer.sh` | scheduling is unavailable; use cron, or `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` to write the unit files only. |
-| bash ≥ 4.4 | `unattended-*.sh` only | the unattended drivers refuse to run. The hooks and their scripts run on stock macOS bash 3.2 (CI-tested). |
+| `systemctl --user` | `install-timer.sh`, `uninstall-timer.sh` | scheduling is unavailable; use cron, or `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` to write (and remove) the unit files only. |
+| `claude` CLI | `install-timer.sh`, `unattended-*.sh` | `install-timer.sh` **refuses outright** — this is the one hard dependency in the table, not a degrade. Point `LOOP_ENG_CLAUDE_BIN` at the binary if it is not on `PATH`. |
+| bash ≥ 4.4 | `unattended-*.sh` only | the drivers **refuse to start** (exit 78) rather than dying partway through — checked at run time, not just stated in a header. The hooks and their contract scripts (`stop-gate.sh`, `evidence-gate.sh`, `arm-contract.sh`, `run-contract.sh`) run on stock macOS bash 3.2; that set is what the `test-bash32` CI job covers, and `update-notify.sh` is not in it. |
 
 An inert evidence-gate does **not** forfeit the completion invariant. The gate
 is defense-in-depth on the write path; the stop-gate is the load-bearing one,

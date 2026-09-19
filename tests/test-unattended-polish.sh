@@ -4,6 +4,26 @@ set -u
 . "$(dirname "$0")/lib.sh"
 
 SCRIPT="$PLUGIN_ROOT/skills/loop-eng/scripts/unattended-polish.sh"
+
+# --- bash floor: the header's "requires bash >= 4.4" is now enforced ---
+# Pre-fix it was a comment, so on stock macOS bash 3.2 this driver STARTED, did
+# real work, and only then died on the first empty-array expansion under set -u
+# — the worst shape for an unattended WRITER. Two arms are runnable anywhere:
+# a non-bash shell (BASH_VERSION empty), and this machine's bash, which the
+# suite itself requires to be >= 4.4 and which must therefore NOT trip it.
+# The genuine old-BASH arm needs a 3.2 interpreter; CLAUDE.md's docker recipe
+# covers it (verified exit 78 on 3.2.57) and the 3.2 CI leg does not run this
+# suite, so it is deliberately not asserted here.
+guard_out=$(sh "$SCRIPT" 2>&1 >/dev/null); guard_rc=$?
+assert_eq 78 "$guard_rc" "bash floor: a non-bash shell is refused with EX_CONFIG"
+case "$guard_out" in
+  *"bash >= 4.4"*) PASS=$((PASS+1)) ;;
+  *) FAIL=$((FAIL+1)); echo "  FAIL: non-bash refusal does not name the requirement: $guard_out" >&2 ;;
+esac
+bash "$SCRIPT" >/dev/null 2>&1; rc=$?
+if [ "$rc" -ne 78 ]; then PASS=$((PASS+1)); else
+  FAIL=$((FAIL+1)); echo "  FAIL: the bash floor fired on this machine's bash ($BASH_VERSION)" >&2; fi
+
 SB=$(mk_sandbox_repo)
 SD=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-stub.XXXXXX")
 trap 'rm -rf "$SB" "$SD"' EXIT

@@ -63,11 +63,19 @@ case "$p_ver" in
   *) FAIL=$((FAIL+1)); echo "  FAIL: version '$p_ver' is not X.Y.Z" >&2 ;;
 esac
 
-# CHANGELOG must carry a section for the version being shipped. An unreleased
-# working tree legitimately has none yet, so only a released version is required
-# to appear — "## <version>" anywhere in the file.
-if grep -q "^## $p_ver" CHANGELOG.md 2>/dev/null; then PASS=$((PASS+1)); else
-  FAIL=$((FAIL+1)); echo "  FAIL: CHANGELOG.md has no '## $p_ver' section" >&2; fi
+# CHANGELOG must carry a DATED section for the version being shipped, which is
+# what RELEASING.md step 0 actually asks for ("a dated section for the version").
+# A bare `grep "^## $p_ver"` was weaker than the line it mechanizes on two counts
+# the pre-ship reviewer drove red: it is a PREFIX match, so `## 0.12.2-rc1`
+# satisfies a 0.12.2 release, and it accepts an undated `## 0.12.2` heading — the
+# exact omission a hurried release makes. Anchor the whole heading instead:
+# "## <version> — <something>", with the version terminated.
+if grep -qE "^## ${p_ver//./\\.}[[:space:]]+[—-][[:space:]]*[0-9]" CHANGELOG.md 2>/dev/null; then
+  PASS=$((PASS+1))
+else
+  FAIL=$((FAIL+1))
+  echo "  FAIL: CHANGELOG.md has no dated '## $p_ver — <date>' section" >&2
+fi
 
 # --- negative cases: the check must actually catch a drifted manifest --------
 # Without these the four assertions above are a tautology on a healthy repo and
