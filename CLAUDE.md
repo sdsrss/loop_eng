@@ -65,13 +65,28 @@ Editing files under `.claude/` directly is a mistake — the next sync overwrite
 them. `.loop/` is this repo's own runtime loop state (gitignored); `.code-graph/`
 and the `.claude/plugin_*.md` + sentinel blocks below are tooling, not source.
 
-There is a THIRD copy that actually enforces: loop-eng is also installed as a
-marketplace plugin (user scope), so the hooks firing in live sessions —
-including sessions in this repo — load from the plugin CACHE under
-`~/.claude/plugins/`, which lags the repo until `/plugin update`. After
-changing `hooks/` or `skills/loop-eng/scripts/`, assume live enforcement is
-still the last released version until you update; `arm-contract.sh` prints
-`armed from <path>` so a loop shows which copy it ran.
+There may be a THIRD copy, and when there is, it is the one that actually
+enforces. If loop-eng is installed as a marketplace plugin (user scope), the
+hooks firing in live sessions — including sessions in this repo — load from the
+plugin CACHE under `~/.claude/plugins/`, which lags the repo until
+`/plugin update`. After changing `hooks/` or `skills/loop-eng/scripts/`, assume
+live enforcement is still the last released version until you update.
+
+**Check, do not assume — this machine may not have it installed at all**
+(verified absent 2026-09-19, which makes the paragraph above a trap in the
+other direction: an agent that assumes a stale cache is enforcing will
+misread which copy it is testing):
+
+```
+claude plugin list | grep -A2 loop-eng    # installed? at what version?
+```
+
+Whatever the answer, `arm-contract.sh` prints `armed from <path>` on every arm,
+so a loop always shows which copy it actually ran — prefer that line over any
+belief about the install state. One more distinction the path makes visible: a
+`directory`-source marketplace runs the plugin straight from the source
+directory and never executes the version-pinned `plugins/cache/` copy, while a
+GitHub source is the opposite (see RELEASING.md §1).
 
 ## Architecture: two loops, enforced by mechanism not trust
 
