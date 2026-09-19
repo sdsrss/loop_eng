@@ -47,6 +47,21 @@ and the model never reaches the write, so the evidence-gate goes untested —
 `results.json`'s protection does not depend on `.loop/active`, so disarm for
 step 4 and re-arm for step 5.
 
+**Add the marketplace by its GitHub source, never by a local path.** This whole
+section — every `plugins/cache/<marketplace>/<plugin>/<version>/…` path in steps
+3 and 4 — assumes a git source. `claude plugin marketplace add <some/local/dir>`
+registers a `directory` source instead, and then the plugin runs **from that
+directory**: `CLAUDE_PLUGIN_ROOT` is the source dir, `plugins/marketplaces/` is
+never populated, and the version-pinned copy under `plugins/cache/` is created
+but **never executed**. Verified 2026-09-19 on 2.1.278: the same smoke run twice,
+once per source type, with a marker appended to `deny()` in both copies — the
+directory install fired the source copy, the GitHub install fired the cache copy.
+Instrumenting the cache under a directory source therefore yields an empty marker
+log, which reads exactly like "the hook never fired" — the fourth instance of
+this family in these two steps. If you need to smoke an unpushed commit, push it
+to a branch and add `owner/repo` anyway, or accept that you are testing the
+source tree and say so in the CHANGELOG note.
+
 1. **Throwaway project**
    ```
    mkdir -p ~/tmp/loop-smoke && cd ~/tmp/loop-smoke
