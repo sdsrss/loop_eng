@@ -185,6 +185,14 @@ in your project's `.claude/settings.json`:
 }
 ```
 
+That is the enforcement layer only. The plugin's third hook — the `SessionStart`
+update notifier — is left out on purpose: it is fail-open and has nothing to do
+with completion enforcement. Timeouts are left out too; a command hook without
+one gets the platform default, which is already above the stop-gate's own
+contract budget (`LOOP_ENG_GATE_TIMEOUT`, 100s). `tests/test-hooks-json.sh`
+holds this snippet's matcher and script names equal to `hooks/hooks.json`, so
+the two registration sites cannot drift apart unnoticed.
+
 ## Unattended runs
 
 ```

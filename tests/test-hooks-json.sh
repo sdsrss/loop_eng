@@ -9,11 +9,13 @@ set -u
 HOOKS_JSON="$PLUGIN_ROOT/hooks/hooks.json"
 
 # Pick a JSON reader: jq or python3 (same tolerance as evidence-gate itself).
-json_get() { # $1 = jq-style path expression -> value or "MISSING"
+# $2 defaults to hooks.json so every existing call site reads unchanged; the
+# README-agreement section at the bottom passes the snippet it extracted.
+json_get() { # $1 = jq-style path expression, $2 = file -> value or "MISSING"
   if command -v jq >/dev/null 2>&1; then
-    jq -r "$1 // \"MISSING\"" "$HOOKS_JSON" 2>/dev/null || echo BROKEN
+    jq -r "$1 // \"MISSING\"" "${2:-$HOOKS_JSON}" 2>/dev/null || echo BROKEN
   elif command -v python3 >/dev/null 2>&1; then
-    python3 - "$1" "$HOOKS_JSON" <<'EOF'
+    python3 - "$1" "${2:-$HOOKS_JSON}" <<'EOF'
 import json, sys
 expr, path = sys.argv[1], sys.argv[2]
 try:
@@ -37,11 +39,11 @@ EOF
   fi
 }
 
-json_len() { # $1 = jq-style path to an array -> element count (0 if absent/not-a-list)
+json_len() { # $1 = jq-style path to an array, $2 = file -> count (0 if absent/not-a-list)
   if command -v jq >/dev/null 2>&1; then
-    jq -r "$1 | length" "$HOOKS_JSON" 2>/dev/null || echo 0
+    jq -r "$1 | length" "${2:-$HOOKS_JSON}" 2>/dev/null || echo 0
   else
-    python3 - "$1" "$HOOKS_JSON" <<'EOF'
+    python3 - "$1" "${2:-$HOOKS_JSON}" <<'EOF'
 import json, sys
 expr, path = sys.argv[1], sys.argv[2]
 try:
@@ -207,6 +209,51 @@ while [ "$i" -lt "$ptu_n" ]; do
     j=$((j+1))
   done
   i=$((i+1))
+done
+
+# --- the README's manual-registration snippet must agree with hooks.json ---
+# README documents a SECOND registration site ("if your Claude Code version
+# does not auto-load plugin hooks, register manually"), and its PreToolUse
+# matcher is a hand-copied duplicate of the one asserted above. Nothing kept
+# the two equal: add a write tool to hooks.json's matcher and the registration
+# the project tells users to paste silently under-matches — a weaker gate on a
+# documented path, which is the same hand-written-roster shape that let
+# update-notify.sh go unsynced by scripts/sync-local.sh. Every expectation
+# below is DERIVED from hooks.json rather than restated here.
+#
+# What this gate deliberately does NOT cover:
+#   (a) that Claude Code honours the snippet at all — that is the platform's
+#       contract, exercised only by the live-install smoke in RELEASING.md;
+#   (b) the SessionStart update-notify hook. The snippet omits it on purpose:
+#       it is a fail-open notifier, not part of the enforcement layer, and the
+#       README says so in prose rather than leaving it a silent gap;
+#   (c) timeouts. Stop/PreToolUse carry explicit ones in hooks.json; the
+#       snippet omits them and inherits the platform default for a command
+#       hook (600s per the hooks docs), which is already above stop-gate's own
+#       LOOP_ENG_GATE_TIMEOUT budget — so the omission is safe, not a second
+#       copy that has to be kept in sync.
+README_MD="$PLUGIN_ROOT/README.md"
+README_JSON=$(mktemp "${TMPDIR:-/tmp}/loop-eng-readme-hooks.XXXXXX")
+trap 'rm -f "$README_JSON"' EXIT
+awk '/^```json$/{n++; if(n==1){f=1; next}} f&&/^```$/{exit} f' "$README_MD" > "$README_JSON"
+
+if [ "$(json_get '.hooks' "$README_JSON")" = "BROKEN" ]; then
+  assert_eq "valid-json" "broken-json" "the README manual-registration snippet parses as JSON"
+else
+  assert_eq 0 0 "the README manual-registration snippet parses as JSON"
+fi
+
+assert_eq "$(json_get '.hooks.PreToolUse[0].matcher')" \
+          "$(json_get '.hooks.PreToolUse[0].matcher' "$README_JSON")" \
+          "README PreToolUse matcher is byte-equal to the one in hooks.json"
+
+for ev in Stop PreToolUse; do
+  want=$(json_get ".hooks.${ev}[0].hooks[0].command" | sed 's|.*/||; s|".*||')
+  got=$(json_get ".hooks.${ev}[0].hooks[0].command" "$README_JSON")
+  case "$got" in
+    *"$want"*) assert_eq 1 1 "README $ev registers $want (script name derived from hooks.json)" ;;
+    *) assert_eq "$want" "$got" "README $ev registers $want (script name derived from hooks.json)" ;;
+  esac
 done
 
 report "test-hooks-json"
