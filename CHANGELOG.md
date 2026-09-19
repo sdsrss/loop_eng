@@ -1,5 +1,98 @@
 # Changelog
 
+## 0.12.0 — 2026-09-19
+
+A convergence pass over the completion mechanism itself. Four defects of one
+family: a place where the machine reported — or was one ordinary refactor away
+from reporting — success over something it had not verified. Each was
+reproduced against the real scripts in a sandbox before a line was changed, and
+every new assertion was confirmed red against the unfixed code. Test suite
+358 → 394 assertions.
+
+**Upgrade note**: after updating run `/reload-plugins` or start a fresh session
+— the hook-side changes take effect only once the plugin cache is on 0.12.0.
+**One behavior change can strand an armed loop.** A `criteria.tsv` line that
+misses the TSV shape used to be skipped in silence; it now fails the contract
+closed. If you update while a loop is armed with such a line, the contract goes
+red while the evidence-gate is holding `criteria.tsv` locked, so the correction
+has to come from outside the loop: `rm .loop/active`, fix the line, re-arm.
+Loops armed *after* the update cannot reach that state — `arm-contract.sh` now
+warns about the same lines before arming, while the file is still writable.
+Revert path: pin v0.11.0.
+
+### Fixed
+- **A partly parsed contract reported `all_green: true`.** The vacuous-contract
+  guard fires only at ZERO runnable criteria, so between 1 and N−1 a line that
+  yielded no id or no command column was skipped in silence — the contract ran
+  fewer checks than its author wrote and still went green, and the dropped line
+  is by construction the one nobody is watching. Reproduced with the slip that
+  makes this likely, a three-line contract whose middle line separates its
+  columns with spaces instead of TABs (the shape an orchestrator writing the
+  file will produce): the only criterion that would have gone RED vanished,
+  `results.json` said green, and the stop-gate allowed the stop.
+  `run-contract.sh` now classifies each line once — blank, whitespace-only and
+  `#comment` lines (a leading indent tolerated) are skipped as before, anything
+  else missing a column is recorded as malformed, forces the ledger red, is
+  named by line number on stderr and in a new `malformed_lines` field, and
+  suppresses evidence pruning, because a partial parse has an incomplete id set
+  and pruning would delete a still-valid log on the very run reporting the
+  fault. `arm-contract.sh` warns about the same lines at arm time, which is the
+  only moment `criteria.tsv` is still writable.
+- **The stop-gate allowed a stop when `criteria.tsv` existed but its runner did
+  not.** The dispatch tested `[ -f criteria.tsv ] && [ -f run-contract.sh ]`,
+  then the legacy `verify.sh` path, then "allowing stop" — so a missing runner
+  landed in the contract-less branch, which exists for an unrelated reason
+  (`arm-contract.sh` arms legacy loops that have no `criteria.tsv`, and blocking
+  those would deadlock them). With a RED contract armed, the gate allowed the
+  stop and explained itself with "no criteria.tsv or verify.sh" about a file
+  sitting right in front of it: armed in appearance, enforcing nothing.
+  Reachable with no adversary — an interrupted `/plugin update` leaves `hooks/`
+  present and `skills/` not yet, and the README documents registering the hooks
+  manually in `settings.json`, where a `<plugin-root>` resolving outside the
+  plugin tree produces exactly this. A contract that exists and cannot be
+  executed is UNVERIFIED, not absent: it now blocks, names the path it looked
+  for, and says how to recover. Handled after the block counter is read, so
+  `MAX_BLOCKS` still bounds it and a broken install cannot deadlock a session
+  either. The genuinely contract-less case is untouched and still allows.
+- **An unrecordable result failed closed only by coincidence.** Neither output
+  write was checked. An unwritable `.loop/` made the `{ … } > "$TMP"` group's
+  redirect fail, so the criteria loop never executed and its counters were never
+  assigned — the script exited non-zero three lines later purely because
+  `set -u` tripped over an unbound variable, printing bash internals where a
+  cause belonged. Hoisting those initialisations out of the group command, an
+  ordinary cleanup, would have turned a full disk into a false ALL GREEN. An
+  unusable evidence directory was quieter still: every criterion's log redirect
+  failed, so PASSING checks reported as failing with nothing saying why. Both
+  now fail closed deliberately with exit 73 (EX_CANTCREAT, matching the sysexits
+  codes these scripts already speak) and a message naming what could not be
+  written, which the stop-gate feeds back in band as the block reason.
+- **`install-timer.sh` accepted a polish scope that is not in the repo.** The
+  installer already refuses a bad `--time`, a non-git repo, a missing runner, an
+  unresolvable `claude` binary, and any path carrying whitespace or a percent
+  sign — each because the unit would otherwise enable cleanly and break at first
+  trigger, with the error visible only in the journal at 03:00. A scope that
+  does not exist is the same family and was the one case left unchecked:
+  verified before the fix, `install-timer.sh polish <repo> lib/` into a repo with
+  no `lib/` wrote and enabled the unit, exit 0, after which every nightly run
+  reviews a path that is not there, finds nothing, and reports success.
+  `unattended-polish.sh`'s own header records this outcome having happened via a
+  flag mistaken for the scope; it rejects that shape already, but a typo'd or
+  since-moved directory still reached the unit file. The check is glob-tolerant,
+  since `/polish` takes scope paths and `src/*.ts` is legitimate input that
+  `test -e` would never match literally.
+
+### Changed
+- Docs follow the code: `CLAUDE.md`'s description of what the stop-gate fails
+  closed on now lists the partly-parsed and missing-runner cases alongside the
+  vacuous and hash-lock ones, with the rule they share — a contract the runner
+  could not fully parse or execute is never reported green. The README states
+  that `criteria.tsv` columns are TAB-separated and what happens when they are
+  not, and that a polish scope is checked at install time.
+- `.converge/` (convergence-round bookkeeping) is gitignored, for the same
+  reason `.loop/` is: both loops and both unattended drivers refuse to run on a
+  dirty tree, so notes living beside the source must not register as an
+  untracked change.
+
 ## 0.11.0 — 2026-09-19
 
 An end-to-end QA pass driven as a real user (drive the loop, not read the code):
