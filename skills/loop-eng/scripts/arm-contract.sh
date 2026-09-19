@@ -60,6 +60,38 @@ if [ -f "$CRIT" ]; then
   if [ -n "${malformed:-}" ]; then
     echo "loop-eng arm-contract: WARNING — malformed criteria line(s):$malformed in $CRIT. Each criterion needs THREE TAB-separated columns (<id>TAB<description>TAB<command>); columns separated by SPACES parse as a single field, so that criterion never runs. run-contract FAILS CLOSED on a partly parsed contract, so fix the line(s) NOW — once the loop is armed the evidence-gate locks this file. Comment a line out with a leading # if it was never meant to be a criterion." >&2
   fi
+  # Static parse check — the other half of "this criterion can never run", and
+  # the same family as the malformed-line warning above: both catch a criterion
+  # the author expects to be checked and that no amount of work can turn green.
+  # run-contract executes each criterion as `bash -c "$cmd"` (run-contract.sh),
+  # so a command string bash cannot PARSE fails on every stop attempt, on any
+  # tree, whatever the builder does — the loop can then only end by hitting a
+  # stop rule. `bash -n -c` is exactly that parse with nothing executed.
+  #
+  # Why the parse and not an exit status: the shape that motivated this (the
+  # 0.12.0 live-install smoke — a printf ate the outer quotes off a git
+  # pathspec, leaving `:(exclude)…` bare) exits 2, which is also what
+  # `grep -q needle a-file-the-work-creates` exits, and that is a legitimate
+  # RED. 126/127 are ambiguous the same way: `bash tests/not-yet-written.sh`
+  # is 127 and a perfectly good criterion. A parse failure is the one verdict
+  # that cannot be a false positive, because it is a property of the string
+  # rather than of the tree.
+  #
+  # Deliberately NOT under LOOP_ENG_ARM_REDCHECK: that knob exists so that
+  # arming executes ZERO criterion commands, and this executes none either way
+  # (bash parses a whole -c string before running any of it, so even a side
+  # effect standing before the syntax error never happens).
+  while IFS=$'\t' read -r pcheck_id pcheck_desc pcheck_cmd || [ -n "$pcheck_id" ]; do
+    [ -z "${pcheck_id:-}" ] && continue
+    case "$pcheck_id" in \#*) continue ;; esac
+    pcheck_cmd="${pcheck_cmd%$'\r'}"
+    [ -z "${pcheck_cmd:-}" ] && continue
+    pcheck_err=$(bash -n -c "$pcheck_cmd" 2>&1 </dev/null) && continue
+    # Fold to one line: bash's diagnosis is multi-line, and a warning that spans
+    # lines is one neither a log reader nor a test assertion can match reliably.
+    pcheck_err=$(printf '%s' "$pcheck_err" | tr '\n' ' ')
+    echo "loop-eng arm-contract: WARNING — criterion '$pcheck_id' can never run: its command is not valid shell — $pcheck_err. run-contract executes it as \`bash -c\`, so it fails on EVERY stop attempt no matter what the builder does, and the loop can only end by hitting a stop rule. Fix it NOW; once the loop is armed the evidence-gate locks $CRIT." >&2
+  done < "$CRIT"
   hash=$(loop_sha256 "$CRIT")
   if [ -n "$hash" ]; then
     printf '%s\n' "$hash" > "$SHA_LOCK"

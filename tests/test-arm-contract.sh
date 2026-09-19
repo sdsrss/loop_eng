@@ -58,6 +58,54 @@ bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on a clean contract exits 0"
 assert_eq "" "$(grep -c malformed .loop/armwarn 2>/dev/null | grep -v '^0$')" "no malformed warning on comment/blank/whitespace lines"
 rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
 
+# --- criterion that can NEVER run: a command bash cannot PARSE. run-contract
+#     executes each criterion as `bash -c "$cmd"`, so a string that does not
+#     parse fails on EVERY stop attempt, on any tree, whatever the builder does
+#     — the loop can then only end by hitting a stop rule. The shape below is
+#     the one that actually happened in the v0.12.0 live-install smoke: the
+#     orchestrator's printf ate the outer quotes off a git pathspec. It exits 2,
+#     the same status as `grep -q needle missing-file` (a legitimate RED), which
+#     is why this keys on the PARSE and not on the exit status. ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
+{ printf 'lint\tsyntax ok\ttrue\n'
+  printf 'scope\tdiff excluding tests\tgit diff --stat -- . :(exclude)tests/*\n'; } > .loop/criteria.tsv
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on an unparseable criterion still exits 0 (advisory)"
+assert_eq "1" "$([ -f .loop/active ] && echo 1)" "arm still arms despite the unparseable-criterion warning"
+assert_file_contains .loop/armwarn 'can never run' "arm warns that an unparseable criterion can never run"
+assert_file_contains .loop/armwarn "criterion 'scope'" "arm names the unparseable criterion by id"
+assert_file_contains .loop/armwarn 'syntax error' "arm forwards bash's own diagnosis, not a generic message"
+assert_eq "1" "$(grep -c 'can never run' .loop/armwarn)" "exactly one criterion is flagged — its parseable neighbour is not"
+assert_eq "" "$(grep -c '^bash: ' .loop/armwarn 2>/dev/null | grep -v '^0$')" "the diagnosis is folded into one line, not spilled as raw bash stderr"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
+# --- the parse check is STATIC: it must survive LOOP_ENG_ARM_REDCHECK=0 (the
+#     knob exists to execute ZERO criterion commands) and must itself execute
+#     none. bash parses a whole -c string before running any of it, so even the
+#     side effect standing BEFORE the syntax error never happens. ---
+#     The side effect sits on its own PARSEABLE line, so swapping the check's
+#     `bash -n -c` for `bash -c` leaves the marker behind and trips this. ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
+{ printf 'effect\ta criterion that would touch a file if executed\ttouch parse-probe.marker\n'
+  printf 'probe\tunparseable\techo "unterminated\n'; } > .loop/criteria.tsv
+LOOP_ENG_ARM_REDCHECK=0 bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm with the red-check disabled still exits 0 on an unparseable criterion"
+assert_file_contains .loop/armwarn 'can never run' "the parse check still warns with LOOP_ENG_ARM_REDCHECK=0"
+assert_eq "" "$([ -f parse-probe.marker ] && echo 1)" "the parse check executes ZERO criterion commands"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn parse-probe.marker
+
+# --- zero false positives: a criterion that is merely RED at arm time — and
+#     goes green once the builder has worked — must NOT be flagged. Each line
+#     is a status the "unrunnable = 126/127/2" reading would have misclaimed:
+#     2 (grep on a file the work creates), 127 (a test script the work writes),
+#     1 (plain false), plus the correctly-quoted form of the pathspec above. ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
+{ printf 'needle\tgrep a file the work creates\tgrep -q needle not-yet-created.txt\n'
+  printf 'suite\trun a test the work writes\tbash tests/not-yet-written.sh\n'
+  printf 'plain\tplain red\tfalse\n'
+  printf 'scope\tquoted pathspec (the fixed form)\tgit diff --stat -- . ":(exclude)tests/*"\n'; } > .loop/criteria.tsv
+LOOP_ENG_ARM_REDCHECK=0 bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on legitimately-red criteria exits 0"
+assert_eq "" "$(grep -F 'can never run' .loop/armwarn)" "no unrunnable warning on criteria that are merely RED"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
 # --- pre-arm red-check: an ALREADY-green criterion warns but arm still succeeds ---
 rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
 printf 'baseline\talready passes\ttrue\n' > .loop/criteria.tsv
