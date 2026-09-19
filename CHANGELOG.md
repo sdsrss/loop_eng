@@ -17,25 +17,38 @@ dependency lived only in a code comment, one quiet corner of the hash-lock, and
 two release-blocking facts that were checklist lines rather than tests. Test
 suite 411 → 456 assertions.
 
-**Release smoke** (RELEASING.md §1, run against this release's content at
-0.12.2): PASS on Claude Code 2.1.278, machine-verified rather than
-model-reported. Step 4 — the model's `Write` to `.loop/evidence/smoke.log` was
-DENIED, the file did not land under `--permission-mode bypassPermissions`, and
-an instrumented `deny()` logged a real `root=` path rather than the
-`<loop-eng plugin root>` placeholder, so `CLAUDE_PLUGIN_ROOT` reaches hook
-processes. Step 5 — a `false` criterion blocked the stop and `run-contract.sh`
-machine-wrote `"all_green": false`. Step 6 — a full `/loop-eng:autoloop` round
-reached `"all_green": true` on two criteria with `.loop/active` and
-`.loop/criteria.sha256` removed by the gate rather than by the model, which is
-reachable only if `${CLAUDE_PLUGIN_ROOT}` expanded inside the command markdown.
+**Release smoke** (RELEASING.md §1, re-run against this release's content at
+0.13.0 after the version bump; the earlier 0.12.2 run is superseded rather than
+carried over, because a smoke that names a version has to have run on it): PASS
+on Claude Code 2.1.278, machine-verified rather than model-reported. Step 4 —
+the model's `Write` to `.loop/evidence/smoke.log` was DENIED, the file did not
+land under `--permission-mode bypassPermissions`, and an instrumented `deny()`
+logged a real `root=` path rather than the `<loop-eng plugin root>` placeholder,
+so `CLAUDE_PLUGIN_ROOT` reaches hook processes. Step 5 — a `false` criterion
+blocked the stop (`BLOCK n=1`) and `run-contract.sh` machine-wrote
+`"all_green": false`. Step 6 — a full `/loop-eng:autoloop` round reached
+`"all_green": true` on two criteria, `hello.txt` held `hi`, and `.loop/active`
+and `.loop/criteria.sha256` were removed by the gate rather than by the model,
+which is reachable only if `${CLAUDE_PLUGIN_ROOT}` expanded inside the command
+markdown.
 
 Source-type disclosure, owed by the rule this release adds to RELEASING.md §1:
-the marketplace was added by local path, because 0.12.2 was not yet pushed and
+the marketplace was added by local path, because 0.13.0 was not yet pushed and
 `marketplace add owner/repo` can only take the default branch. The instrumented
-markers read `SRC-DENY` / `SRC-BLOCK`, confirming the source copy enforced and
-the version-pinned `plugins/cache/` copy did not — exactly what that new rule
-predicts, verified on its first use. The GitHub-source path is re-smoked against
-the released tag per §3 Post-ship.
+markers named the source copy, confirming it enforced while the version-pinned
+`plugins/cache/` copy did not — exactly what that new rule predicts, verified on
+its first two uses. The GitHub-source path, which is the one real users get, is
+re-smoked against the released tag per §3 Post-ship.
+
+**Pre-ship review**: an independent reviewer with no authoring context returned
+SHIP with no BLOCKER, having driven every fail-closed exit in a sandbox (78
+missing criteria, 77 post-arm tamper, 77 locked-with-no-SHA-tool, 73 unwritable
+`.loop` and `.loop/evidence`, plus the stop-gate's block-ceiling, missing-runner,
+timeout-124 and green-disarm paths) and mutation-tested both new suites. It also
+raised one HIGH and six MEDIUM/LOW findings, all fixed above or recorded as
+known. Three of those were absolute claims the author asserted without checking
+what else could produce the state they named — the reason `author ≠ reviewer` is
+a rule here and not a courtesy.
 
 **fix: the two timer scripts shipped non-executable.** `install-timer.sh` and
 `uninstall-timer.sh` were recorded in git as `100644`, while README documents
