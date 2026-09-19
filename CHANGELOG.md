@@ -40,6 +40,19 @@ markers named the source copy, confirming it enforced while the version-pinned
 its first two uses. The GitHub-source path, which is the one real users get, is
 re-smoked against the released tag per §3 Post-ship.
 
+**Post-ship smoke** (RELEASING.md §3, against the RELEASED v0.13.0 via
+`claude plugin marketplace add sdsrss/loop_eng` into a fresh isolated
+`CLAUDE_CONFIG_DIR`): PASS. This is the run that covers the path the §1
+disclosure above could not — with a GitHub source the instrumented marker came
+back `CACHE-DENY` naming `plugins/cache/loop-eng/loop-eng/0.13.0`, so the
+version-pinned copy is what enforces for real users, and the model's `Write`
+to `.loop/evidence/` was denied with no file on disk. The release artifact also
+carries this batch's packaging fix: `install-timer.sh` and `uninstall-timer.sh`
+are `-rwxr-xr-x` in the installed cache, and README's bare-path invocation
+prints usage instead of `Permission denied`. `contract_lock` behaves as
+documented on the released build — absent from the ledger on a locked run,
+present with the warning once the lock is removed.
+
 **Pre-ship review**: an independent reviewer with no authoring context returned
 SHIP with no BLOCKER, having driven every fail-closed exit in a sandbox (78
 missing criteria, 77 post-arm tamper, 77 locked-with-no-SHA-tool, 73 unwritable
