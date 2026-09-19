@@ -9,6 +9,12 @@ LOOP_SKILL_PLAN.md
 tasks/
 .superpowers/
 
+# Convergence-round bookkeeping (round log, backlog, defect patterns).
+# Ignored rather than tracked for the same reason .loop/ is: this repo's own
+# loops and unattended drivers refuse to run on a dirty tree, so bookkeeping
+# that lives beside the source must not show up as an untracked change.
+.converge/
+
 # Loop runtime state and logs
 .loop/
 *.log
