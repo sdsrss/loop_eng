@@ -21,22 +21,29 @@
 # allowlist in .claude/settings.json (preferred for auto-fix), or rely on this
 # script's bypass mode which is capped to report-only unless explicitly opted in.
 
-set -euo pipefail
-
-# The bash >= 4.4 requirement in the header is now checked, not just stated.
-# Pre-fix it was a comment: on stock macOS bash 3.2 this driver STARTED, did
-# real work, and only then died on the first empty-array expansion under
-# `set -u` — the worst shape for an unattended writer, which may already have
-# let a session touch the repo. Refuse up front instead. 78 = EX_CONFIG, the
-# same code these scripts use for every other unrunnable-configuration exit.
-# Guard placement: the 4.4 requirement is a RUNTIME failure, not a parse error,
-# so 3.2 reaches these lines and reports properly.
-# The BASH_VERSION check must come FIRST and stay a separate statement: a
-# non-bash shell (`sh unattended-polish.sh`) dies on the ARRAY SUBSCRIPT in the
-# test below with a bare "Bad substitution" — the `:-0` default never gets a
-# chance, because the failure is in the subscript syntax, not in the value.
-# BASH_VERSION is a plain variable every POSIX shell can expand, so this arm
-# gets the same explicit message the old-bash arm does.
+# The bash >= 4.4 requirement in the header is CHECKED, not just stated, and it
+# is checked HERE — above `set -euo pipefail` — on purpose.
+#
+# Pre-fix the requirement was a comment: on stock macOS bash 3.2 this driver
+# STARTED, did real work, and only then died on the first empty-array expansion
+# under `set -u` — the worst shape for an unattended writer, which may already
+# have let a session touch the repo. 78 = EX_CONFIG, the code these scripts use
+# for every other unrunnable configuration.
+#
+# ORDER IS LOAD-BEARING, and this is the second thing that bit it. `set -o
+# pipefail` is not POSIX: some `sh` implementations accept it, others answer
+# "Illegal option -o pipefail" and exit 2. Debian/Ubuntu both ship dash as
+# /bin/sh and they do NOT agree with each other — a local dash accepted it while
+# the GitHub ubuntu-latest runner's rejected it, which is how a guard that was
+# green on this machine went red in CI. Below `set -euo pipefail` the non-bash
+# arm is unreachable on exactly the shells it exists to catch. Above it, the two
+# ifs are plain POSIX every shell can run, so the refusal is the same everywhere.
+#
+# They run without `-e`, which is fine and deliberate: each is self-contained and
+# exits explicitly. The BASH_VERSION test also has to precede the BASH_VERSINFO
+# one, because a non-bash shell dies on the ARRAY SUBSCRIPT in that test with a
+# bare "Bad substitution" — the `:-0` default never applies, since the failure is
+# in the subscript syntax rather than the value.
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "unattended-polish: needs bash >= 4.4 and is not running under bash at all. Re-run it as \`bash unattended-polish.sh …\` (or let its shebang do it)." >&2
   exit 78
@@ -46,6 +53,8 @@ if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ] \
   echo "unattended-polish: needs bash >= 4.4, got ${BASH_VERSION:-non-bash shell}. Stock macOS ships 3.2; install a newer bash (brew install bash) and run this script with it. Refusing now rather than failing partway through an unattended run." >&2
   exit 78
 fi
+
+set -euo pipefail
 
 USAGE="usage: unattended-polish.sh <repo-dir> [scope] [--auto-fix]"
 REPO="${1:?$USAGE}"

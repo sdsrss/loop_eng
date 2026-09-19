@@ -24,6 +24,21 @@ bash "$SCRIPT" >/dev/null 2>&1; rc=$?
 if [ "$rc" -ne 78 ]; then PASS=$((PASS+1)); else
   FAIL=$((FAIL+1)); echo "  FAIL: the bash floor fired on this machine's bash ($BASH_VERSION)" >&2; fi
 
+# ORDER, asserted structurally — this is the invariant, and the `sh` arm above
+# cannot carry it. `set -o pipefail` is not POSIX: some sh implementations take
+# it, others answer "Illegal option" and exit 2 before any guard below it runs.
+# The two dashes disagreed (local accepted, the CI runner refused), so the arm
+# above passed here and failed there. Whichever sh this machine has, the guard
+# must sit ABOVE the set line or it is unreachable on the shells it exists for.
+guard_ln=$(grep -n 'if \[ -z "${BASH_VERSION:-}" \]' "$SCRIPT" | head -1 | cut -d: -f1)
+setopt_ln=$(grep -n '^set -euo pipefail' "$SCRIPT" | head -1 | cut -d: -f1)
+if [ -n "$guard_ln" ] && [ -n "$setopt_ln" ] && [ "$guard_ln" -lt "$setopt_ln" ]; then
+  PASS=$((PASS+1))
+else
+  FAIL=$((FAIL+1))
+  echo "  FAIL: bash-floor guard (line ${guard_ln:-none}) must precede 'set -euo pipefail' (line ${setopt_ln:-none})" >&2
+fi
+
 SB=$(mk_sandbox_repo)
 SD=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-stub.XXXXXX")
 trap 'rm -rf "$SB" "$SD"' EXIT
