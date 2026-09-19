@@ -342,6 +342,13 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   plugin uninstall nor `uninstall-timer.sh` deletes it — by design, since it
   may hold an in-progress loop's state. If you want it gone, remove it by
   hand: `rm -rf .loop/`.
+- **One file outlives an uninstall.** The update notifier's 24h throttle stamp
+  lives at `${XDG_CACHE_HOME:-~/.cache}/loop-eng/update-check.json` — outside
+  `~/.claude/`, deliberately, so it survives a version bump instead of being
+  orphaned in the version-pinned plugin cache. `/plugin uninstall` does not
+  know about it. It is one line of JSON (a timestamp and a version string, no
+  identifiers); `rm -rf ~/.cache/loop-eng/` if you want a clean slate. Nothing
+  else the plugin writes lives outside your project's `.loop/`.
 
 ## What to loop (and what not to)
 
