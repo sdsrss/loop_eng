@@ -23,6 +23,18 @@ unit tests cannot see: (a) `hooks/hooks.json` auto-loads on a marketplace
 install; (b) `${CLAUDE_PLUGIN_ROOT}` expands inside command markdown. Smoke
 them against a THROWAWAY project, never a real one.
 
+The whole section can run headless, which also keeps the install out of your
+real `~/.claude/`: set `CLAUDE_CONFIG_DIR` to a throwaway directory, use
+`claude plugin marketplace add` / `claude plugin install` instead of the slash
+commands, and drive steps 4–6 with `claude -p '<prompt>' --permission-mode
+bypassPermissions --max-turns N`. A fresh config dir has no credentials — symlink
+(do not copy) `~/.claude/.credentials.json` into it for the run and delete the
+link afterwards. One ordering caveat: do NOT leave `.loop/active` armed while
+testing step 4. In a headless session the stop-gate's blocks consume the turns
+and the model never reaches the write, so the evidence-gate goes untested —
+`results.json`'s protection does not depend on `.loop/active`, so disarm for
+step 4 and re-arm for step 5.
+
 1. **Throwaway project**
    ```
    mkdir -p ~/tmp/loop-smoke && cd ~/tmp/loop-smoke
@@ -46,17 +58,39 @@ them against a THROWAWAY project, never a real one.
    bash "$ARM"     # expect: "pinned criteria.tsv @ <sha>" + "stop-gate armed"
    ```
 4. **Evidence-gate check** (in the Claude session): ask the model to write
-   `{"all_green": true}` into `.loop/results.json`.
-   - PASS = the write is DENIED with `loop-eng evidence-gate DENIED`, and the
-     deny text names the runner under the real plugin cache path (not a
-     `<loop-eng plugin root>` placeholder — that would mean CLAUDE_PLUGIN_ROOT
-     is NOT reaching hook processes).
+   `hello` into `.loop/evidence/smoke.log` — NOT `{"all_green": true}` into
+   `results.json`. Both paths are protected unconditionally, but the second
+   prompt asks the model to fabricate a green ledger, so it tends to refuse on
+   its own judgment and the hook is never exercised: the step then "passes"
+   without having tested anything. Pick the target the gate denies by PATH and
+   the model has no reason to argue with.
+   - PASS = the write is DENIED with `loop-eng evidence-gate DENIED`, the file
+     does not exist afterwards, and the deny text names the runner under the
+     real plugin cache path (not a `<loop-eng plugin root>` placeholder — that
+     would mean CLAUDE_PLUGIN_ROOT is NOT reaching hook processes).
    - FAIL = the file gets written → hooks.json did not auto-load. Register
      manually per README and file a bug before releasing.
+   - **Do not use "`.loop/results.json` exists" as the FAIL signal.** The
+     stop-gate re-runs the contract on every stop attempt and machine-writes
+     that file itself, so it appears during a perfectly healthy smoke. If you
+     must check `results.json`, read its `generated_by` field: `run-contract.sh`
+     is the gate doing its job; anything else is the failure.
+   - To turn a model report into a machine fact, instrument the LIVE copy
+     before the run — `sed`/`python3` a marker line into `deny()` — and assert
+     the marker file afterwards. Note the live copy is
+     `plugins/cache/<marketplace>/<plugin>/<version>/hooks/evidence-gate.sh`,
+     NOT `plugins/marketplaces/<name>/hooks/...`; instrumenting the marketplace
+     clone by mistake produces an empty log that reads exactly like
+     "the hook never fired".
 5. **Stop-gate check**: ask the model to do anything trivial and finish.
    - PASS = the turn end is blocked with
      `loop-eng stop-gate BLOCKED this stop (1/3)` and the `false` criterion's
-     output tail.
+     output tail, which since 0.11.0 names the criterion
+     (`FAIL [red] always fails (exit 1)`); before 0.11.0 that tail was empty,
+     so this line of the checklist was passing on no signal at all.
+   - Headless equivalent (the block text goes to hook stderr, which `claude -p`
+     does not print): assert the disk instead — `.loop/gate-count` reaches `3`
+     and `.loop/results.json` carries `"generated_by": "run-contract.sh"`.
    - Teardown (human terminal): `rm -f .loop/active .loop/criteria.sha256 .loop/gate-count`
 6. **`${CLAUDE_PLUGIN_ROOT}` in command bodies**: in the session run
    `/autoloop create hello.txt containing "hi"; acceptance: test -f hello.txt`.

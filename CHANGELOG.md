@@ -8,6 +8,20 @@ runners, the systemd timer pair, and the update notifier. Six defects, four of
 them in guards that failed quietly, plus the family invariant those four kept
 violating. Test suite 320 → 358 assertions.
 
+**Live-install smoke** (RELEASING.md §1): PASS on Claude Code 2.1.278, against a
+genuine `claude plugin marketplace add sdsrss/loop_eng` + `install` of 0.11.0
+into an isolated `CLAUDE_CONFIG_DIR`. All five checks machine-verified, not
+model-reported: the plugin resolved to `plugins/cache/loop-eng/loop-eng/0.11.0/`;
+`arm-contract` printed `armed from <that cache path>`; an instrumented
+`evidence-gate.sh` logged `DENY-FIRED tool=Write file=.loop/evidence/smoke.log
+root=<real cache path>` and the file did not land under
+`--permission-mode bypassPermissions` (so hooks.json auto-loaded AND
+`CLAUDE_PLUGIN_ROOT` reached the hook process — no placeholder); the stop-gate
+left `.loop/gate-count = 3` with a `generated_by: run-contract.sh` ledger; and
+`/loop-eng:autoloop` reached `all_green: true` with `.loop/active` self-cleared,
+which is only reachable if `${CLAUDE_PLUGIN_ROOT}` expanded inside the command
+markdown.
+
 **Upgrade note**: mostly additive — after updating run `/reload-plugins` or
 start a fresh session; the hook-side changes only take effect once the plugin
 cache is on 0.11.0. **One behavior change can break an existing schedule**:
