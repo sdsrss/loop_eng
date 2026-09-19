@@ -36,6 +36,47 @@ STUB_MODE=fail LOOP_ENG_CLAUDE_BIN="$STUB" bash "$SCRIPT" "$SB" src/ >/dev/null 
 assert_eq 3 "$rc" "failing claude exit passed through"
 assert_file_contains "$SB/.loop/unattended.log" "exit=3" "logs exit=3 on failure"
 
+# --- argument shape is validated, not assumed ---
+# Both traps below produced a clean exit 0 that LOOKS like a working write-mode
+# run: under a nightly timer they stay invisible for weeks.
+#   a) scope omitted -> the flag lands in the scope slot: silently report-only
+#      AND pointed at a scope that does not exist
+#   b) flag typo'd -> silently report-only
+STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SB" --auto-fix >/dev/null 2>"$SD/usage1" && rc=0 || rc=$?
+assert_eq 64 "$rc" "flag in the scope slot is a usage error, not a silent report-only run"
+assert_file_contains "$SD/usage1" "scope" "usage error explains the scope/flag order"
+STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SB" src/ --auto-fixx >/dev/null 2>"$SD/usage2" && rc=0 || rc=$?
+assert_eq 64 "$rc" "typo'd flag is a usage error, not a silent report-only run"
+assert_file_contains "$SD/usage2" "--auto-fixx" "usage error quotes the unknown option"
+STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SB" src/ --auto-fix extra >/dev/null 2>"$SD/usage3" && rc=0 || rc=$?
+assert_eq 64 "$rc" "extra trailing argument is a usage error"
+# the valid shapes must keep working
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" bash "$SCRIPT" "$SB" >/dev/null && rc=0 || rc=$?
+assert_eq 0 "$rc" "repo-only invocation still runs (scope defaults to src/)"
+STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SB" src/ --auto-fix >/dev/null && rc=0 || rc=$?
+assert_eq 0 "$rc" "well-formed --auto-fix invocation still runs"
+
+# --- non-git target: the dirty-tree guard must not fail OPEN ---
+# `git status --porcelain` in a non-repo writes its fatal to stderr and leaves
+# stdout EMPTY, so `grep -vq` found no line, reported "not dirty", and the run
+# proceeded — invoking claude with --permission-mode bypassPermissions against a
+# directory with no version control at all, i.e. unattributable, unrevertable
+# edits. That is exactly what the guard exists to prevent.
+NOGIT="$SD/nogit"
+mkdir -p "$NOGIT"; echo "unversioned work" > "$NOGIT/important.txt"
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" bash "$SCRIPT" "$NOGIT" src/ >/dev/null 2>"$SD/nogit-err" && rc=0 || rc=$?
+assert_eq 1 "$rc" "non-git target refused (the dirty-tree guard cannot fail open)"
+assert_file_contains "$SD/nogit-err" "not a git repository" "refusal says the target is not a git repository"
+if [ -d "$NOGIT/.loop" ]; then
+  assert_eq "no .loop" "created .loop" "refused run does not run far enough to create .loop in the non-repo"
+else
+  assert_eq 0 0 "refused run does not run far enough to create .loop in the non-repo"
+fi
+
 # --- rate-limit path: exit 75 + marker ---
 STUB_MODE=limit LOOP_ENG_CLAUDE_BIN="$STUB" bash "$SCRIPT" "$SB" src/ >/dev/null && rc=0 || rc=$?
 assert_eq 75 "$rc" "rate-limited run exits 75"

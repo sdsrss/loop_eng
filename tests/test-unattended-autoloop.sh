@@ -225,4 +225,16 @@ assert_eq 75 "$rc" "provider limit hit twice exits 75 (EX_TEMPFAIL)"
 assert_file_contains "$SB8/.loop/unattended.log" "provider limit hit twice" "second limit hit is logged and stops the driver"
 assert_eq 2 "$(grep -c 'session .* starting' "$SB8/.loop/unattended.log")" "driver ran exactly 2 sessions before the limit stop"
 
+# --- non-git target: refuse with a named reason, not a raw git fatal ---
+# The driver reached `git rev-parse HEAD` and died under `set -e` with git's own
+# "fatal: not a git repository" (exit 128) — it stopped, but the operator got a
+# stack of raw git noise instead of the one fact that matters, and the
+# dirty-tree guard above it had already silently passed.
+NOGIT_AL="$SD/nogit-autoloop"
+mkdir -p "$NOGIT_AL/.loop"; printf -- '- [ ] one\n' > "$NOGIT_AL/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$NOGIT_AL" 2 >/dev/null 2>"$SD/nogit-al-err" && rc=0 || rc=$?
+assert_eq 1 "$rc" "non-git target refused with the driver's own exit 1, not git's 128"
+assert_file_contains "$SD/nogit-al-err" "not a git repository" "refusal says the target is not a git repository"
+
 report "test-unattended-autoloop"

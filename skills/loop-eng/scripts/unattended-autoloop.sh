@@ -63,6 +63,17 @@ if [ "${LOOP_ENG_ALLOW_AUTOBUILD:-0}" != "1" ]; then
 fi
 
 cd "$REPO"
+
+# Same fail-open as unattended-polish.sh: the in-loop `git status --porcelain`
+# dirty check reads EMPTY in a non-repo (git's fatal goes to stderr), so the
+# guard passed and the driver only stopped further down, when `git rev-parse
+# HEAD` died under `set -e` — exit 128 and a pile of raw git fatals instead of
+# the one fact the operator needs. Establish the work tree up front.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "not a git repository (or no work tree): $REPO — refusing unattended run. Unattended changes must be attributable and revertable." >&2
+  exit 1
+fi
+
 BACKLOG=".loop/backlog.md"
 if [ ! -f "$BACKLOG" ]; then
   echo "no $BACKLOG — write a '- [ ] item' backlog first" >&2

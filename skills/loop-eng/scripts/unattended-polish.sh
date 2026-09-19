@@ -23,9 +23,31 @@
 
 set -euo pipefail
 
-REPO="${1:?usage: unattended-polish.sh <repo-dir> [scope] [--auto-fix]}"
+USAGE="usage: unattended-polish.sh <repo-dir> [scope] [--auto-fix]"
+REPO="${1:?$USAGE}"
 SCOPE="${2:-src/}"
 FLAG="${3:-}"
+
+# Validate the argument SHAPE before anything else. Positional args accepted on
+# faith made two typos indistinguishable from a working write-mode run — and an
+# unattended entry point has nobody watching the first trigger:
+#   unattended-polish.sh <repo> --auto-fix       scope omitted, so the flag became
+#     the SCOPE: the run stayed report-only (looked fine, exit 0) AND reviewed a
+#     scope that does not exist, so it found nothing, nightly, indefinitely.
+#   unattended-polish.sh <repo> src/ --auto-fixx unknown flag silently ignored:
+#     report-only while the operator believed fixes were landing.
+# Exit 64 = EX_USAGE, matching the sysexits codes this runner already speaks
+# (75 EX_TEMPFAIL for provider limits; 78 EX_CONFIG in the autoloop driver).
+case "$SCOPE" in
+  -*) echo "unattended-polish: '$SCOPE' is a flag, not a scope — the scope comes first. $USAGE" >&2; exit 64 ;;
+esac
+case "$FLAG" in
+  ''|--auto-fix) ;;
+  *) echo "unattended-polish: unknown option '$FLAG' — the only flag is --auto-fix. $USAGE" >&2; exit 64 ;;
+esac
+if [ "$#" -gt 3 ]; then
+  echo "unattended-polish: too many arguments (got $#). $USAGE" >&2; exit 64
+fi
 CLAUDE_BIN="${LOOP_ENG_CLAUDE_BIN:-claude}"
 MAX_MINUTES="${LOOP_ENG_MAX_MINUTES:-120}"
 # A non-numeric budget would reach `timeout "${MAX_MINUTES}m"` and fail opaquely
@@ -54,6 +76,19 @@ if [ "$FLAG" = "--auto-fix" ]; then
 fi
 
 cd "$REPO"
+
+# The dirty-tree guard below reads `git status --porcelain`, which in a non-repo
+# prints its fatal to STDERR and leaves stdout EMPTY — so `grep -vq` saw no line,
+# concluded "not dirty", and let the run proceed. That failed the guard OPEN in
+# the one case it matters most: an unattended `--permission-mode bypassPermissions`
+# session editing a directory with no version control, so nothing is attributable
+# and nothing can be reverted. Establish that git can speak for this tree FIRST;
+# only then is an empty porcelain trustworthy as "clean".
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "not a git repository (or no work tree): $REPO — refusing unattended run. Unattended changes must be attributable and revertable." >&2
+  exit 1
+fi
+
 LOG_DIR=".loop"
 mkdir -p "$LOG_DIR"
 
