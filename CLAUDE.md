@@ -103,9 +103,12 @@ machine-written fact, never a model claim. Three layers, all in `hooks/` +
    and blocks exit (exit 2, failure fed back) until the contract passes. It fails
    **closed** on a vacuous/empty contract, on a *partly parsed* one (any criteria
    line that is not blank, not a `#comment`, and yields no id or no command
-   column — the usual slip is spaces where TABs belong), and on a hash-lock
-   mismatch, with a hard ceiling of 3 blocks (Claude Code force-allows after 8,
-   so the gate can't deadlock a session). The rule the three share: a contract
+   column — the usual slip is spaces where TABs belong), on a hash-lock
+   mismatch, and on a `criteria.tsv` whose runner it cannot find (a broken
+   install must not silently disarm the gate — only a loop armed with *no*
+   contract at all still allows the stop), with a hard ceiling of 3 blocks
+   (Claude Code force-allows after 8, so the gate can't deadlock a session).
+   The rule they share: a contract
    the runner could not fully parse is never reported green, because nothing
    downstream can tell "all criteria passed" from "the ones that parsed passed".
 

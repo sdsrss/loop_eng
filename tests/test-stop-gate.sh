@@ -102,4 +102,28 @@ run_gate .loop/errC; assert_eq 0 $? "armed without contract allows stop"
 assert_file_contains .loop/errC 'allowing stop' "contract-less allow notice on stderr"
 rm -f .loop/active
 
+# --- criteria.tsv present but the RUNNER missing must BLOCK, not allow ---
+# Distinct from the contract-less case above: here a contract exists and we
+# simply cannot execute it. Pre-fix both landed in the same branch, so a RED
+# contract was allowed to stop under the notice "no criteria.tsv or verify.sh"
+# — about a file sitting right there. Reachable from an interrupted /plugin
+# update, or the README's manual settings.json registration when <plugin-root>
+# resolves somewhere the skills/ tree isn't.
+rm -f .loop/results.json .loop/gate-count .loop/verify.sh
+mkdir -p lonelyhooks
+cp "$GATE" lonelyhooks/stop-gate.sh   # no sibling ../skills/loop-eng/scripts/
+printf '1\tred\tfalse\n' > .loop/criteria.tsv
+touch .loop/active
+echo '{}' | bash lonelyhooks/stop-gate.sh 2>.loop/errD
+assert_eq 2 $? "criteria present but runner missing BLOCKS the stop"
+assert_file_contains .loop/errD 'BLOCKED' "missing-runner block reason on stderr"
+assert_file_contains .loop/errD 'run-contract.sh' "missing-runner reason names the path it looked for"
+assert_eq "" "$(grep -c 'no criteria.tsv' .loop/errD 2>/dev/null | grep -v '^0$')" "missing-runner reason does not claim criteria.tsv is absent"
+# bounded by the same ceiling, so a broken install cannot deadlock a session
+echo '{}' | bash lonelyhooks/stop-gate.sh 2>/dev/null; assert_eq 2 $? "missing-runner block 2"
+echo '{}' | bash lonelyhooks/stop-gate.sh 2>/dev/null; assert_eq 2 $? "missing-runner block 3"
+echo '{}' | bash lonelyhooks/stop-gate.sh 2>.loop/errE; assert_eq 0 $? "missing-runner respects the block ceiling"
+assert_file_contains .loop/errE 'ceiling' "ceiling notice ends the missing-runner blocks"
+rm -rf lonelyhooks; rm -f .loop/active .loop/gate-count .loop/errD .loop/errE
+
 report "test-stop-gate"

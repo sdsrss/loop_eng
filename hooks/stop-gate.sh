@@ -44,13 +44,23 @@ MAX_BLOCKS=3 # keep < 8: see PLATFORM CEILING above
 
 RUNNER="$(cd "$(dirname "$0")" && pwd)/../skills/loop-eng/scripts/run-contract.sh"
 
+MISSING_RUNNER=0
 if [ -f "$CRIT" ] && [ -f "$RUNNER" ]; then
   CHECK_CMD=(bash "$RUNNER")
   CHECK_DESC="contract criteria ($CRIT via run-contract.sh)"
 elif [ -f "$VERIFY" ]; then
   CHECK_CMD=(bash "$VERIFY")
   CHECK_DESC="verify script ($VERIFY)"
+elif [ -f "$CRIT" ]; then
+  # A contract EXISTS and we have no way to execute it — that is an UNVERIFIED
+  # contract, not an absent one. Handled below, after the block counter is read,
+  # so the MAX_BLOCKS ceiling still bounds it (a broken install must not be able
+  # to deadlock a session either).
+  MISSING_RUNNER=1
 else
+  # Genuinely contract-less: armed with neither criteria.tsv nor verify.sh.
+  # arm-contract.sh arms even without criteria.tsv (legacy verify.sh loops), so
+  # blocking here would deadlock a legitimately armed loop with nothing to run.
   echo "loop-eng stop-gate: .loop/active present but no criteria.tsv or verify.sh; allowing stop." >&2
   exit 0
 fi
@@ -69,6 +79,29 @@ if [ "$COUNT" -ge "$MAX_BLOCKS" ]; then
   # inert (COUNT>=MAX). .loop/active stays until the orchestrator disarms.
   rm -f "$COUNT_FILE"
   exit 0
+fi
+
+# criteria.tsv is right here and its runner is not, so nothing verified this
+# contract. Fail CLOSED: an unverifiable contract is not a satisfied one, and
+# letting it stop is the exact false green this gate is the last defence
+# against. Pre-fix this fell through to the contract-less "allowing stop"
+# branch, which both allowed a RED contract to end the session AND said "no
+# criteria.tsv" about a file sitting in front of it. Reachable from an
+# interrupted /plugin update (hooks/ present, skills/ not yet) or the README's
+# manual settings.json registration when <plugin-root> resolves outside the
+# plugin tree — in both cases the gate LOOKS armed while enforcing nothing.
+if [ "$MISSING_RUNNER" -eq 1 ]; then
+  echo $((COUNT + 1)) > "$COUNT_FILE"
+  {
+    echo "loop-eng stop-gate BLOCKED this stop ($((COUNT + 1))/$MAX_BLOCKS): $CRIT exists but its runner does not, so the contract was never verified (fail closed)."
+    echo "Looked for the runner at:"
+    echo "  $RUNNER"
+    echo "The loop-eng install looks incomplete (skills/loop-eng/scripts/ missing), or"
+    echo "a manually registered Stop hook points outside the plugin root. Re-run"
+    echo "/plugin update loop-eng, or register the hook by the plugin's own path."
+    echo "To end this loop without verifying it: rm $ACTIVE"
+  } >&2
+  exit 2
 fi
 
 # Bound the contract run below the hook's own timeout so WE decide the outcome.
