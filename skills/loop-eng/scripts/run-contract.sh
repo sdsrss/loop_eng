@@ -200,18 +200,47 @@ cp "$CRIT" "$SNAP" 2>/dev/null || cannot_write "$SNAP" "could not snapshot the c
   lineno=0
   malformed=""
   used_ids="|"
-  # `|| [ -n "$id" ]`: read returns non-zero on a final line with no trailing
+  # Read the WHOLE line and split it by hand. `IFS=$'\t' read -r id desc cmd`
+  # looks like the obvious spelling and is wrong in one specific, silent way:
+  # TAB is IFS *whitespace*, so bash COLLAPSES runs of it. A line with an empty
+  # description — `id<TAB><TAB>cmd`, three real TAB-separated columns, the middle
+  # one blank — came back as desc=cmd and cmd="", i.e. malformed. arm-contract's
+  # awk split the same line correctly and raised no warning, so the contract
+  # armed, pinned its hash, and then failed closed on EVERY stop with a message
+  # blaming spaces in a file that contains none. The evidence-gate had locked
+  # criteria.tsv by then, so the loop could only end by hitting a stop rule.
+  #
+  # The rule, stated once and shared verbatim with arm-contract.sh: split on the
+  # FIRST TWO TABs. Everything after the second TAB is the command (so a 4+
+  # column line keeps its extra TABs inside cmd, as before). Fewer than two TABs
+  # is not a criterion. An EMPTY DESCRIPTION is legal; an empty id or an empty
+  # command is not.
+  #
+  # `|| [ -n "$line" ]`: read returns non-zero on a final line with no trailing
   # newline but still assigns it; without this the last criterion is silently
   # dropped, and a dropped FAILING criterion yields a false all_green.
-  while IFS=$'\t' read -r id desc cmd || [ -n "$id" ]; do
+  line=""
+  while IFS= read -r line || [ -n "$line" ]; do
     lineno=$((lineno + 1))
-    # CRLF-authored criteria.tsv: read() leaves the line-ending CR on the LAST
-    # field (cmd). Left in, `bash -c "true\r"` runs a command whose name ends in
-    # CR -> "command not found" (exit 127), so a PASSING check reports a false RED
-    # and the loop can never reach ALL GREEN. Strip it BEFORE the shape checks so
-    # a CRLF blank-command line classifies exactly like its LF form.
+    # CRLF-authored criteria.tsv: the line-ending CR is the last byte of the
+    # line, so it lands on the LAST field (cmd). Left in, `bash -c "true\r"` runs
+    # a command whose name ends in CR -> "command not found" (exit 127), so a
+    # PASSING check reports a false RED and the loop can never reach ALL GREEN.
+    # Strip it from the whole line BEFORE splitting, so a CRLF line classifies
+    # exactly like its LF form whichever column the CR would have landed in.
     # (json_str already escapes CR for JSON validity; this fixes the exec path.)
-    cmd="${cmd%$'\r'}"
+    line="${line%$'\r'}"
+    case "$line" in
+      *$'\t'*$'\t'*)
+        id="${line%%$'\t'*}"
+        rest="${line#*$'\t'}"
+        desc="${rest%%$'\t'*}"
+        cmd="${rest#*$'\t'}" ;;
+      # Fewer than two TABs: keep the whole line as the id so the blank/comment
+      # classification below still sees it, and leave cmd empty so it lands in
+      # `malformed` rather than running. This is the spaces-instead-of-TABs slip.
+      *) id="$line"; desc=""; cmd="" ;;
+    esac
     # Classify every line ONCE, so no criterion can vanish in silence.
     # Skipped without comment (none of these is a criterion): blank lines,
     # whitespace-only lines, and #comments (a leading indent is tolerated —
@@ -344,7 +373,7 @@ mv "$TMP" "$RESULTS"
 # the loop a whole round of rediscovery. Failures only: a green contract stays
 # silent so the summary never becomes noise.
 if [ -n "$malformed" ]; then
-  echo "run-contract: malformed criteria line(s):$malformed in $CRIT — each criterion needs THREE TAB-separated columns (<id>TAB<description>TAB<command>). A line whose columns are separated by SPACES parses as a single field, so that criterion never runs; refusing to report a result for a contract that was only partly parsed (fail closed). Fix the line(s), or comment them out with a leading # if they were never meant to be criteria." >&2
+  echo "run-contract: malformed criteria line(s):$malformed in $CRIT — each criterion is split on its FIRST TWO TABs into <id>TAB<description>TAB<command>, and needs a non-empty id and a non-empty command (an EMPTY description is fine). A line with fewer than two TABs — most often columns separated by SPACES — has no command column, so that criterion never runs; refusing to report a result for a contract that was only partly parsed (fail closed). Fix the line(s), or comment them out with a leading # if they were never meant to be criteria." >&2
 fi
 if [ "$overall" -ne 0 ]; then
   if [ "$ran" -eq 0 ]; then

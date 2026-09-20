@@ -35,63 +35,96 @@ loop_sha256() { # portable SHA-256 of a file -> stdout (empty if no tool)
 }
 
 if [ -f "$CRIT" ]; then
-  # Warn early (fail-fast) if the contract verifies nothing: a criteria.tsv with
-  # zero runnable lines (empty / all-comment / all-malformed) makes run-contract
-  # fail CLOSED on every stop. Catch it at arm time rather than at first block.
-  # Runnable = non-empty id that isn't a #comment, with a non-empty command col.
-  runnable=$(awk -F'\t' '$1 != "" && $1 !~ /^#/ && $3 != "" {n++} END{print n+0}' "$CRIT" 2>/dev/null || echo 0)
-  if [ "${runnable:-0}" -eq 0 ]; then
-    echo "loop-eng arm-contract: WARNING — criteria.tsv has no runnable criteria (need <id>TAB<description>TAB<command> lines). run-contract will FAIL CLOSED on every stop until you add at least one; a contract that verifies nothing can never be 'done'." >&2
-  fi
-  # Same classification as run-contract.sh: a line that carries content, is not
-  # a #comment (indent tolerated), and yields no id or no command column is a
-  # criterion its author expects to be checked and that will never run. Warn
-  # HERE, at arm time — run-contract fails closed on the same contract, but by
-  # then the evidence-gate has locked criteria.tsv for the whole loop, so a
-  # first signal delivered at the first blocked stop is one the model cannot act
-  # on. `[ \t]` rather than [[:space:]] to stay portable across awk flavours
-  # (busybox/BSD); \r is listed so CRLF-authored files classify identically.
-  malformed=$(awk -F'\t' '
-    { line = $0; sub(/\r$/, "", line); c = $3; sub(/\r$/, "", c) }
-    line ~ /^[ \t\r]*$/  { next }
-    line ~ /^[ \t]*#/    { next }
-    ($1 == "" || c == "") { m = m " " NR }
-    END { print m }' "$CRIT" 2>/dev/null || echo "")
-  if [ -n "${malformed:-}" ]; then
-    echo "loop-eng arm-contract: WARNING — malformed criteria line(s):$malformed in $CRIT. Each criterion needs THREE TAB-separated columns (<id>TAB<description>TAB<command>); columns separated by SPACES parse as a single field, so that criterion never runs. run-contract FAILS CLOSED on a partly parsed contract, so fix the line(s) NOW — once the loop is armed the evidence-gate locks this file. Comment a line out with a leading # if it was never meant to be a criterion." >&2
-  fi
-  # Static parse check — the other half of "this criterion can never run", and
-  # the same family as the malformed-line warning above: both catch a criterion
-  # the author expects to be checked and that no amount of work can turn green.
-  # run-contract executes each criterion as `bash -c "$cmd"` (run-contract.sh),
-  # so a command string bash cannot PARSE fails on every stop attempt, on any
-  # tree, whatever the builder does — the loop can then only end by hitting a
-  # stop rule. `bash -n -c` is exactly that parse with nothing executed.
+  # ONE parse, shared by every check in this block and written to match
+  # run-contract.sh line for line. This file used to carry FOUR different
+  # splits — two `awk -F'\t'` (which does not collapse TABs) and two
+  # `IFS=$'\t' read` (which does, because TAB is IFS whitespace) — and they
+  # disagreed on exactly one shape: `id<TAB><TAB>cmd`, a criterion with an empty
+  # description. awk called it runnable, so arming warned about nothing and
+  # pinned the hash; the two read loops saw an empty command and skipped it, so
+  # neither advisory check ever looked at it; and run-contract, reading it the
+  # same collapsing way, called it malformed and failed CLOSED on every stop —
+  # with a message blaming SPACES in a file that contains none. By then the
+  # evidence-gate had locked criteria.tsv, so the loop could only end by hitting
+  # a stop rule. One rule, in one place per script, is the fix.
   #
-  # Why the parse and not an exit status: the shape that motivated this (the
-  # 0.12.0 live-install smoke — a printf ate the outer quotes off a git
-  # pathspec, leaving `:(exclude)…` bare) exits 2, which is also what
-  # `grep -q needle a-file-the-work-creates` exits, and that is a legitimate
-  # RED. 126/127 are ambiguous the same way: `bash tests/not-yet-written.sh`
-  # is 127 and a perfectly good criterion. A parse failure is the one verdict
-  # that cannot be a false positive, because it is a property of the string
-  # rather than of the tree.
-  #
-  # Deliberately NOT under LOOP_ENG_ARM_REDCHECK: that knob exists so that
-  # arming executes ZERO criterion commands, and this executes none either way
-  # (bash parses a whole -c string before running any of it, so even a side
-  # effect standing before the syntax error never happens).
-  while IFS=$'\t' read -r pcheck_id pcheck_desc pcheck_cmd || [ -n "$pcheck_id" ]; do
-    [ -z "${pcheck_id:-}" ] && continue
-    case "$pcheck_id" in \#*) continue ;; esac
-    pcheck_cmd="${pcheck_cmd%$'\r'}"
-    [ -z "${pcheck_cmd:-}" ] && continue
-    pcheck_err=$(bash -n -c "$pcheck_cmd" 2>&1 </dev/null) && continue
+  # The rule: split on the FIRST TWO TABs. Everything after the second TAB is
+  # the command. Blank/whitespace-only lines and #comments (indent tolerated)
+  # are skipped. Fewer than two TABs, an empty id, or an empty command is
+  # malformed. An EMPTY DESCRIPTION is legal — arm does not use the description
+  # column at all, so it is stepped over rather than named.
+  runnable=0
+  malformed=""
+  crit_lineno=0
+  crit_line=""
+  while IFS= read -r crit_line || [ -n "$crit_line" ]; do
+    crit_lineno=$((crit_lineno + 1))
+    crit_line="${crit_line%$'\r'}"
+    case "$crit_line" in
+      *[![:space:]]*) : ;;
+      *) continue ;;
+    esac
+    case "${crit_line#"${crit_line%%[![:space:]]*}"}" in \#*) continue ;; esac
+    case "$crit_line" in
+      *$'\t'*$'\t'*)
+        c_id="${crit_line%%$'\t'*}"
+        c_rest="${crit_line#*$'\t'}"
+        c_cmd="${c_rest#*$'\t'}" ;;
+      *) c_id="$crit_line"; c_cmd="" ;;
+    esac
+    if [ -z "$c_id" ] || [ -z "$c_cmd" ]; then
+      malformed="$malformed $crit_lineno"
+      continue
+    fi
+    runnable=$((runnable + 1))
+
+    # Static parse check — the other half of "this criterion can never run", and
+    # the same family as the malformed-line warning below: both catch a criterion
+    # the author expects to be checked and that no amount of work can turn green.
+    # run-contract executes each criterion as `bash -c "$cmd"`, so a command
+    # string bash cannot PARSE fails on every stop attempt, on any tree, whatever
+    # the builder does — the loop can then only end by hitting a stop rule.
+    # `bash -n -c` is exactly that parse with nothing executed.
+    #
+    # Why the parse and not an exit status: the shape that motivated this (the
+    # 0.12.0 live-install smoke — a printf ate the outer quotes off a git
+    # pathspec, leaving `:(exclude)…` bare) exits 2, which is also what
+    # `grep -q needle a-file-the-work-creates` exits, and that is a legitimate
+    # RED. 126/127 are ambiguous the same way: `bash tests/not-yet-written.sh`
+    # is 127 and a perfectly good criterion. A parse failure is the one verdict
+    # that cannot be a false positive, because it is a property of the string
+    # rather than of the tree.
+    #
+    # Deliberately NOT under LOOP_ENG_ARM_REDCHECK: that knob exists so that
+    # arming executes ZERO criterion commands, and this executes none either way
+    # (bash parses a whole -c string before running any of it, so even a side
+    # effect standing before the syntax error never happens).
+    #
+    # It now runs on exactly the criteria run-contract will execute, which is the
+    # point of folding it into this loop: as its own `IFS=$'\t' read` loop it saw
+    # an empty command for every empty-description criterion and skipped it.
+    pcheck_err=$(bash -n -c "$c_cmd" 2>&1 </dev/null) && continue
     # Fold to one line: bash's diagnosis is multi-line, and a warning that spans
     # lines is one neither a log reader nor a test assertion can match reliably.
     pcheck_err=$(printf '%s' "$pcheck_err" | tr '\n' ' ')
-    echo "loop-eng arm-contract: WARNING — criterion '$pcheck_id' can never run: its command is not valid shell — $pcheck_err. run-contract executes it as \`bash -c\`, so it fails on EVERY stop attempt no matter what the builder does, and the loop can only end by hitting a stop rule. Fix it NOW; once the loop is armed the evidence-gate locks $CRIT." >&2
+    echo "loop-eng arm-contract: WARNING — criterion '$c_id' can never run: its command is not valid shell — $pcheck_err. run-contract executes it as \`bash -c\`, so it fails on EVERY stop attempt no matter what the builder does, and the loop can only end by hitting a stop rule. Fix it NOW; once the loop is armed the evidence-gate locks $CRIT." >&2
   done < "$CRIT"
+
+  # Warn early (fail-fast) if the contract verifies nothing: a criteria.tsv with
+  # zero runnable lines (empty / all-comment / all-malformed) makes run-contract
+  # fail CLOSED on every stop. Catch it at arm time rather than at first block.
+  if [ "$runnable" -eq 0 ]; then
+    echo "loop-eng arm-contract: WARNING — criteria.tsv has no runnable criteria (need <id>TAB<description>TAB<command> lines). run-contract will FAIL CLOSED on every stop until you add at least one; a contract that verifies nothing can never be 'done'." >&2
+  fi
+  # A line that carries content, is not a #comment, and yields no id or no
+  # command is a criterion its author expects to be checked and that will never
+  # run. Warn HERE, at arm time — run-contract fails closed on the same
+  # contract, but by then the evidence-gate has locked criteria.tsv for the
+  # whole loop, so a first signal delivered at the first blocked stop is one the
+  # model cannot act on.
+  if [ -n "$malformed" ]; then
+    echo "loop-eng arm-contract: WARNING — malformed criteria line(s):$malformed in $CRIT. Each criterion is split on its FIRST TWO TABs into <id>TAB<description>TAB<command> and needs a non-empty id and a non-empty command (an EMPTY description is fine). A line with fewer than two TABs — most often columns separated by SPACES — has no command column, so that criterion never runs. run-contract FAILS CLOSED on a partly parsed contract, so fix the line(s) NOW — once the loop is armed the evidence-gate locks this file. Comment a line out with a leading # if it was never meant to be a criterion." >&2
+  fi
   hash=$(loop_sha256 "$CRIT")
   if [ -n "$hash" ]; then
     printf '%s\n' "$hash" > "$SHA_LOCK"
@@ -146,11 +179,28 @@ if [ -f "$CRIT" ] && [ "${LOOP_ENG_ARM_REDCHECK:-1}" != "0" ]; then
   REDCHECK_TIMEOUT_BIN=""
   if command -v timeout >/dev/null 2>&1; then REDCHECK_TIMEOUT_BIN="timeout"
   elif command -v gtimeout >/dev/null 2>&1; then REDCHECK_TIMEOUT_BIN="gtimeout"; fi
-  while IFS=$'\t' read -r id desc cmd || [ -n "$id" ]; do
-    [ -z "${id:-}" ] && continue
-    case "$id" in \#*) continue ;; esac
-    cmd="${cmd%$'\r'}"
-    [ -z "${cmd:-}" ] && continue
+  # Same split as the classification loop above and as run-contract.sh: on the
+  # FIRST TWO TABs, empty description legal. As `IFS=$'\t' read -r id desc cmd`
+  # this loop silently skipped every empty-description criterion (collapsed TABs
+  # left cmd empty), so the one class of criterion most likely to be a hasty
+  # afterthought was also the one that never got red-checked.
+  rc_line=""
+  while IFS= read -r rc_line || [ -n "$rc_line" ]; do
+    rc_line="${rc_line%$'\r'}"
+    case "$rc_line" in
+      *[![:space:]]*) : ;;
+      *) continue ;;
+    esac
+    case "${rc_line#"${rc_line%%[![:space:]]*}"}" in \#*) continue ;; esac
+    case "$rc_line" in
+      *$'\t'*$'\t'*)
+        id="${rc_line%%$'\t'*}"
+        rc_rest="${rc_line#*$'\t'}"
+        cmd="${rc_rest#*$'\t'}" ;;
+      *) id="$rc_line"; cmd="" ;;
+    esac
+    [ -z "$id" ] && continue
+    [ -z "$cmd" ] && continue
     # </dev/null: same guard as run-contract.sh — a stdin-reading criterion
     # command would otherwise consume the remaining criteria lines from this
     # while-read loop (silently skipping their red-check).

@@ -77,6 +77,30 @@ existing, so deleting `criteria.sha256` mid-run is not a bypass.
 `tail`/`sed` it already required; both restricted-PATH fixtures list it. Suite
 504 → 517 assertions; 9 of the 13 new ones fail against the pre-fix runner.
 
+**A criterion with an empty description bricked the loop that armed it.**
+`id<TAB><TAB>cmd` is three real TAB-separated columns with a blank middle one.
+`IFS=$'\t' read -r id desc cmd` looks like the right spelling and is wrong in
+one silent way: TAB is IFS *whitespace*, so bash collapses runs of it — the line
+came back as `desc=cmd`, `cmd=""`, i.e. malformed.
+
+`arm-contract.sh` carried **four** different splits of that same line: two
+`awk -F'\t'` (which does not collapse) and two `IFS=$'\t' read` (which does).
+They disagreed here and only here. The awk pair called the line runnable, so
+arming warned about nothing and pinned the hash; the two read loops saw an empty
+command and skipped it, so neither the static parse check nor the red-check ever
+looked at it; and `run-contract.sh`, reading it the collapsing way, called it
+malformed and failed **closed on every stop** — with a message blaming SPACES in
+a file that contains none. The evidence-gate had locked `criteria.tsv` by then,
+so the loop could only end by hitting a stop rule.
+
+Both scripts now split on the **first two TABs**: everything after the second is
+the command, an empty description is legal, and fewer than two TABs / an empty
+id / an empty command is malformed. Five parse sites became two (one per
+script). Both malformed messages now state that rule instead of asserting a
+cause the runner cannot observe. Verified under real bash 3.2.57 (the CI floor)
+as well as 5.x. Suite 517 → 533 assertions; 7 of the new ones fail against the
+pre-fix scripts.
+
 ## 0.14.0 — 2026-09-20
 
 Two gaps this repo had already written down and left open: a wall-clock budget

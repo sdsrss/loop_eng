@@ -193,6 +193,31 @@ assert_eq 0 "$(grep -c '"id": "smuggled"' .loop/results.json)" "appended criteri
 assert_eq 0 "$(find .loop -maxdepth 1 -name '.criteria.snapshot.*' | wc -l | tr -d ' ')" "the contract snapshot is cleaned up on exit"
 rm -f .loop/results.json
 
+# --- empty DESCRIPTION column: three real TAB-separated columns, blank middle ---
+# `IFS=$'\t' read -r id desc cmd` COLLAPSES runs of TAB (TAB is IFS whitespace),
+# so `id1<TAB><TAB>true` came back as desc="true", cmd="" -> malformed -> fail
+# closed, on every stop, with a message blaming SPACES in a file that contains
+# only TABs. arm-contract's awk read the same line as three columns and warned
+# about nothing, so the contract armed and pinned its hash first; the
+# evidence-gate then locked criteria.tsv, leaving a loop that could only end by
+# hitting a stop rule. The split is now on the FIRST TWO TABs in both scripts.
+rm -f .loop/results.json
+printf 'id1\t\ttrue\n' > .loop/criteria.tsv
+bash "$RUNNER" 2>.loop/emptydesc.err; assert_eq 0 $? "empty description column runs instead of failing closed"
+assert_file_contains .loop/results.json '"id": "id1", "desc": "", "cmd": "true"' "empty description is recorded as empty, and the command is the command"
+assert_eq "" "$(grep -c malformed .loop/emptydesc.err 2>/dev/null | grep -v '^0$')" "empty description is not reported malformed"
+
+# ...while the two shapes that really are malformed still are, and the message
+# no longer asserts SPACES about a file that may be all TABs.
+printf 'smoke must print world true\n' > .loop/criteria.tsv   # spaces, not TABs
+bash "$RUNNER" 2>.loop/spaces.err; assert_eq 1 $? "spaces instead of TABs still fails closed"
+assert_file_contains .loop/spaces.err 'FIRST TWO TABs' "the malformed message states the actual splitting rule"
+assert_file_contains .loop/spaces.err 'EMPTY description is fine' "the malformed message says an empty description is legal"
+printf '\tdesc\ttrue\n' > .loop/criteria.tsv                  # leading TAB: no id
+bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "empty id column still fails closed (mirror image of empty desc)"
+assert_file_contains .loop/results.json '"all_green": false' "empty id: contract is not green"
+rm -f .loop/emptydesc.err .loop/spaces.err .loop/results.json
+
 # --- hash-lock: armed + matching hash runs the contract normally ---
 printf '1\tok\ttrue\n' > .loop/criteria.tsv
 : > .loop/active

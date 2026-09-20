@@ -46,6 +46,37 @@ assert_file_contains .loop/armwarn 'malformed' "arm warns that a criterion line 
 assert_file_contains .loop/armwarn 'line(s): 2' "arm names the offending line number"
 rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
 
+# --- empty DESCRIPTION column: legal, and arm and run must agree that it is ---
+# `id<TAB><TAB>cmd` is three real TAB-separated columns with a blank middle one.
+# This file used to carry FOUR different splits of the same line: two `awk -F'\t'`
+# (which does not collapse TABs) and two `IFS=$'\t' read` (which does, because
+# TAB is IFS whitespace). They disagreed here and only here — awk called it
+# runnable so arm warned about nothing and pinned the hash, both read loops saw
+# an empty command and skipped it, and run-contract called it malformed and
+# failed CLOSED on every stop with a message blaming SPACES in a file that has
+# none. Armed and unfixable: the evidence-gate locks criteria.tsv, so the loop
+# could only end by hitting a stop rule.
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
+printf 'id1\t\ttrue\n' > .loop/criteria.tsv
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on an empty-description criterion exits 0"
+assert_eq "" "$(grep -c malformed .loop/armwarn 2>/dev/null | grep -v '^0$')" "empty description is not malformed"
+assert_eq "" "$(grep -c 'no runnable criteria' .loop/armwarn 2>/dev/null | grep -v '^0$')" "empty description still counts as a runnable criterion"
+# the advisory checks must SEE it too — as its own read loop each one skipped
+# every empty-description criterion without saying so
+assert_file_contains .loop/armwarn 'already green' "the red-check runs on an empty-description criterion"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+printf 'id1\t\tif\n' > .loop/criteria.tsv   # unparseable command, empty description
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on an unparseable empty-description criterion exits 0"
+assert_file_contains .loop/armwarn 'can never run' "the parse check runs on an empty-description criterion"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
+# --- an empty ID column is the mirror image and stays malformed ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
+printf '\tdesc\ttrue\n' > .loop/criteria.tsv   # leading TAB: no id
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm on an empty-id criterion exits 0 (advisory)"
+assert_file_contains .loop/armwarn 'malformed' "an empty id column is still malformed"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
 # --- zero false positives: the shapes the parser legitimately skips (comments,
 #     blank, whitespace-only, indented comments) must NOT trip that warning. ---
 rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active
