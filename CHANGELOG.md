@@ -206,6 +206,37 @@ discipline — the assertion that would have caught it first, then the fix.
   `arm-contract.sh`'s parse loops, so arm and run keep naming the same id — the
   same agreement the empty-description TAB split was fixed to preserve.
 
+**Live-install smoke: PASS** (Claude Code 2.1.278, headless, throwaway
+`CLAUDE_CONFIG_DIR`, GitHub-source marketplace install of this release's own
+content on `main` — so no source-type disclosure is owed). The live **cache**
+copies were instrumented before the run, so every verdict below is a marker on
+disk rather than a model report:
+
+- **evidence-gate**: `deny()` fired twice in one session — once for the `Write`
+  (`EGDENY: raw evidence under .loop/evidence/`) and once for the Bash fallback
+  the model reached for next (`a Bash command writing to the .loop evidence
+  ledger`). `.loop/evidence/smoke.log` never landed. The marker also records
+  `CLAUDE_PLUGIN_ROOT` as seen by the hook process: the real absolute
+  `plugins/cache/loop-eng/loop-eng/0.16.0` path, not the `<loop-eng plugin root>`
+  placeholder — so `hooks.json` auto-loaded and the variable reaches hooks.
+- **arm-contract**: `armed from …/plugins/cache/loop-eng/loop-eng/0.16.0/…`, the
+  version-pinned copy that enforces, not the `plugins/marketplaces/` clone.
+- **stop-gate**: exactly three `SGBLOCK` markers (= `MAX_BLOCKS`) on a red
+  contract, **then `CEILING-RELEASE`** — the first live evidence that the ceiling
+  actually releases the stop, which is the half of the double-registration bug
+  above that nobody had written down. `.loop/results.json` was machine-written by
+  `run-contract.sh` with `"all_green": false`.
+- **`${CLAUDE_PLUGIN_ROOT}` in command bodies**: `/loop-eng:autoloop` armed,
+  reached ALL GREEN in round 1/5, and left a two-criteria ledger with
+  `"all_green": true`.
+
+One thing the last step demonstrated without being asked to: the session's own
+closing report stated that `.loop/active`, `.loop/gate-count` and
+`.loop/criteria.sha256` "remain in place", and all three were already gone —
+the green path had cleared them. The report was a claim, the disk was the fact,
+and they disagreed on the very run that proves the mechanism works. That gap is
+the whole reason the ledger is machine-written.
+
 ## 0.15.0 — 2026-09-20
 
 Everything the 2026-09-20 production-readiness audit rated P0 or P1, fixed with
