@@ -266,9 +266,25 @@ SESSION_PID=$!
 wait "$SESSION_PID" || STATUS=$?
 SESSION_PID=""
 
-# Broad phrases are safe here because the grep only runs on FAILED runs
-# (STATUS != 0), which bounds the false-positive surface.
-if [ "$STATUS" -ne 0 ] && grep -qiE 'usage limit|rate.?limit(ed)?|quota|overloaded|too many requests' "$LOG"; then
+# Provider-limit detection, narrowed twice.
+#
+# "Only runs on FAILED runs" was thought to bound the false-positive surface,
+# and does not: a polish session REVIEWS CODE, so its log is full of the
+# reviewed text. A run that failed for any real reason while reviewing a file
+# that mentions `quota` or a rate limiter was reported as EX_TEMPFAIL 75 — "try
+# again later" — and the actual failure never surfaced. Reproduced: a stub
+# printing `checkQuota() { /* the quota is never reset */ }` and exiting 2 came
+# back as exit 75, `rate-limited`.
+#
+#   - Phrases, not words: the phrases providers actually emit, rather than any
+#     appearance of `quota` or `overloaded` anywhere in a code review.
+#   - The TAIL, not the whole log: a limit ends the run, so it is the last thing
+#     written; matching the body means matching the material under review.
+#   - Not on 124: that is our own wall-clock kill, and the partial log it leaves
+#     may well contain anything. 0.14.0's release notes recorded this exact
+#     misreport as a known consequence of enforcing the cap on macOS.
+if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 124 ] \
+   && tail -n 40 "$LOG" | grep -qiE 'usage limit reached|quota exceeded|rate limit exceeded|rate_limit_error|overloaded_error|too many requests'; then
   echo "$STAMP mode=${MODE:-auto-fix} scope=$SCOPE exit=$STATUS rate-limited log=$LOG" >> "$LOG_DIR/unattended.log"
   tail -40 "$LOG"
   exit 75

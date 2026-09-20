@@ -101,6 +101,26 @@ gate "${B/CMD/tee .loop\/results.json}";              assert_eq 2 $? "tee result
 gate "${B/CMD/rm .loop\/evidence\/1.log}";            assert_eq 2 $? "rm evidence log still denied"
 gate "${B/CMD/mv x .loop\/results.json}";             assert_eq 2 $? "mv into results.json still denied"
 
+# --- three write shapes the first version of the pattern let straight through ---
+# None of them is an evasion; each is how someone normally types the command.
+#   `.loop/evidence` without the trailing slash — the slash was REQUIRED, so the
+#     plain directory name (how anyone writes an rm) matched nothing.
+#   `>|` — the noclobber override, i.e. "overwrite anyway", while the verb group
+#     stopped at `>>?`.
+#   `.loop//results.json` — a doubled slash is the same path to every OS.
+gate "${B/CMD/rm -rf .loop\/evidence}";               assert_eq 2 $? "rm of the evidence DIR without a trailing slash is denied"
+gate "${B/CMD/rm -rf .loop\/evidence; true}";         assert_eq 2 $? "…including when another command follows it"
+gate "${B/CMD/echo x >| .loop\/results.json}";        assert_eq 2 $? "noclobber-override redirect (>|) into results.json is denied"
+gate "${B/CMD/echo x > .loop\/\/results.json}";       assert_eq 2 $? "doubled slash in the ledger path is denied"
+
+# ...and the siblings that share the prefix are NOT the ledger, so widening the
+# pattern must not swallow them. (A `\b` after `evidence` would: it counts `-`
+# and `.` as boundaries, which is why the pattern tests for "not a filename
+# character" instead.)
+gate "${B/CMD/rm .loop\/evidence-notes.md}";          assert_eq 0 $? "a sibling file whose name starts with 'evidence-' is not the ledger"
+gate "${B/CMD/rm .loop\/evidence.bak}";               assert_eq 0 $? "a sibling file whose name starts with 'evidence.' is not the ledger"
+gate "${B/CMD/echo x > .loop\/evidencelog}";          assert_eq 0 $? "a sibling file whose name merely starts with 'evidence' is not the ledger"
+
 # --- deny message names the mention-only false-positive escape ---
 printf '%s' "${W/FILE/.loop/results.json}" | bash "$GATE" 2>.loop/err || true
 assert_file_contains .loop/err 'only NAMES a guarded path' "deny explains the mention-only false positive"

@@ -170,6 +170,45 @@ STUB_MODE=limit STUB_LIMIT_MSG="quota exceeded" LOOP_ENG_CLAUDE_BIN="$STUB" \
   bash "$SCRIPT" "$SB" src/ >/dev/null && rc=0 || rc=$?
 assert_eq 75 "$rc" "quota-exceeded run exits 75 (broadened limit regex)"
 
+# --- a failure whose REVIEW TEXT mentions a quota is not a provider limit ---
+# "The grep only runs on failed runs, which bounds the false-positive surface"
+# was the stated reasoning and it does not hold: a polish session reviews code,
+# so its log is full of the text under review. Any real failure while reviewing
+# a rate limiter came back as EX_TEMPFAIL 75 — "try again later" — and the
+# actual failure never surfaced to whatever watches exit codes. Reproduced: a
+# stub printing `checkQuota() { /* the quota is never reset */ }` and exiting 2
+# was reported exit 75, `rate-limited`.
+FP_STUB="$SD/stub-reviewtext"
+cat > "$FP_STUB" <<'EOF'
+#!/usr/bin/env bash
+cat <<'OUT'
+reviewing src/quota.js ...
+  function checkQuota() { /* the quota is never reset */ }
+finding: the rate-limiter is overloaded on retry
+OUT
+exit 2
+EOF
+chmod +x "$FP_STUB"
+LOOP_ENG_CLAUDE_BIN="$FP_STUB" bash "$SCRIPT" "$SB" src/ >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 2 "$rc" "a real failure is passed through, not relabelled EX_TEMPFAIL, when the reviewed code mentions quotas"
+# The LAST line, not the whole log: the legitimate rate-limit cases above appended
+# real `rate-limited` entries to this same rolling log, so a whole-file grep
+# would report this run as marked no matter what it did.
+if tail -1 "$SB/.loop/unattended.log" | grep -qF 'rate-limited'; then
+  assert_eq "plain failure entry" "rate-limited entry" "no rate-limited marker for a failure that is not one"
+else
+  assert_eq 0 0 "no rate-limited marker for a failure that is not one"
+fi
+
+# --- and a run killed by OUR OWN wall-clock cap is a timeout, not a limit ---
+# 0.14.0's release notes recorded this as a known consequence of enforcing the
+# cap on macOS: a killed run exits 124 and its partial log may carry anything.
+TO_STUB="$SD/stub-124"
+printf '#!/usr/bin/env bash\necho "usage limit reached"\nexit 124\n' > "$TO_STUB"
+chmod +x "$TO_STUB"
+LOOP_ENG_CLAUDE_BIN="$TO_STUB" bash "$SCRIPT" "$SB" src/ >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 124 "$rc" "a 124 run reports the timeout, not a provider limit, whatever its partial log says"
+
 # --- non-numeric MAX_MINUTES warns + falls back to default (was: opaque timeout fail) ---
 STUB_MODE=ok LOOP_ENG_MAX_MINUTES=nope LOOP_ENG_CLAUDE_BIN="$STUB" \
   bash "$SCRIPT" "$SB" src/ >/dev/null 2>"$SD/warn" && rc=0 || rc=$?

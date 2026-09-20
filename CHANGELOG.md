@@ -150,6 +150,38 @@ repo at `03:00` today, re-run the installer for one of them with a different
 `--time`. Two *different* repos at `03:00`, and the same repo at different
 times, are both still allowed — the latter is how you run both.
 
+**Three ordinary ways of typing a write slipped past the evidence-gate's Bash
+pattern.** None is an evasion: `rm -rf .loop/evidence` (the trailing slash was
+*required*, so the plain directory name — how anyone writes an `rm` — matched
+nothing), `echo x >| .loop/results.json` (`>|` is the noclobber override, and
+the verb group stopped at `>>?`), and `echo x > .loop//results.json` (a doubled
+slash is the same path to every OS). All three are denied now, and the
+evidence-directory name matches when followed by `/`, by end of line, or by
+anything that cannot be part of a filename — deliberately *not* `\b`, which
+counts `-` and `.` as boundaries and would newly deny `.loop/evidence-notes.md`
+and `.loop/evidence.bak`, siblings that are not the ledger. Unchanged and still
+stated in the header: indirection that hides the path from the command text
+(`F=.loop/results.json; echo x > $F`) is out of scope for any regex; the
+guarantee for that class is `run-contract`'s hash re-derivation.
+
+**A failure was reported as a provider limit whenever the code under review
+mentioned one.** "The grep only runs on failed runs, which bounds the
+false-positive surface" was the stated reasoning, and it does not hold: a polish
+session *reviews code*, so its log is full of the text under review. A stub
+printing `checkQuota() { /* the quota is never reset */ }` and exiting 2 came
+back as EX_TEMPFAIL **75** — "try again later" — and the real failure never
+reached whatever watches exit codes. In the autoloop driver the same match also
+parks the run in `sleep $((LIMIT_WAIT_MIN * 60))`: at the default, a full hour
+of doing nothing before retrying a failure that will not fix itself.
+
+Both drivers now match provider *phrases* (`usage limit reached`, `quota
+exceeded`, `rate limit exceeded`, `rate_limit_error`, `overloaded_error`, `too
+many requests`) in the last 40 lines of the log — a limit ends the run, so it is
+the last thing written, while the body is the material under review — and never
+on exit 124, which is our own wall-clock kill. 0.14.0's release notes recorded
+that last case as a known consequence of enforcing the cap on macOS; it is fixed
+here.
+
 **A killed session left the gate armed, and that bricked every session after
 it.** `.loop/active` is lifted by the stop-gate only when the contract goes
 green; a session killed by the driver's own timeout, by a TERM, or by the
@@ -191,7 +223,7 @@ stranding a loop over bookkeeping would be the worse trade. `commands/autoloop.m
 Step 0 checks `git ls-files .loop` for the tracked case, and README's loop-state
 bullet now describes the guarantee instead of asserting the outcome.
 
-Suite 542 → 578 assertions. Three pre-existing install-timer fixtures that
+Suite 542 → 591 assertions. Three pre-existing install-timer fixtures that
 happened to stack both modes on one repo at `03:00` now pass `--time 04:00`;
 they were testing uninstall symmetry and unit contents, not collisions.
 

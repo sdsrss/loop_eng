@@ -119,7 +119,29 @@ case "$TOOL" in
     # integrity guarantee is run-contract's hash re-derivation, not this regex.
     SCAN=$(printf '%s' "$CMD" | sed 's/->/ /g')
     # results.json + evidence/ are the machine ledger: always protected.
-    if printf '%s' "$SCAN" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/(results\.json|evidence/)'; then
+    #
+    # Three shapes the first version of this pattern let through, each of them
+    # an ordinary typing habit rather than an evasion:
+    #   `rm -rf .loop/evidence`       — the trailing slash was REQUIRED, so the
+    #                                   plain directory name (how anyone writes
+    #                                   an rm) matched nothing. Now the name
+    #                                   matches when followed by `/`, by end of
+    #                                   line, or by anything that cannot be part
+    #                                   of a filename. NOT `\b`: that counts `-`
+    #                                   and `.` as boundaries, which newly denied
+    #                                   `.loop/evidence-notes.md` and
+    #                                   `.loop/evidence.bak` — sibling files that
+    #                                   are not the ledger.
+    #   `echo x >| .loop/results.json` — `>|` is the noclobber override, i.e.
+    #                                   deliberately "overwrite anyway", and the
+    #                                   verb group stopped at `>>?`.
+    #   `echo x > .loop//results.json` — a doubled slash is the same path to
+    #                                   every OS and matched nothing. `/+`.
+    # Still out of scope, and stated in the header: indirection that hides the
+    # path from the text entirely (`F=.loop/results.json; echo x > $F`). No
+    # regex over a command string can see through a variable; the integrity
+    # guarantee for that class is run-contract's hash re-derivation.
+    if printf '%s' "$SCAN" | grep -qE '(>>?\|?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/+(results\.json|evidence(/|$|[^A-Za-z0-9._-]))'; then
       deny "a Bash command writing to the .loop evidence ledger"
     fi
     # criteria.tsv + its hash-lock are locked only while the loop is armed
@@ -127,7 +149,7 @@ case "$TOOL" in
     # cwd-relative check suffices). This regex is best-effort (see header): the
     # real integrity guarantee is run-contract's hash re-derivation, which no
     # Bash verb can slip past.
-    if [ -e .loop/active ] && printf '%s' "$SCAN" | grep -qE '(>>?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/criteria\.(tsv|sha256)'; then
+    if [ -e .loop/active ] && printf '%s' "$SCAN" | grep -qE '(>>?\|?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/+criteria\.(tsv|sha256)'; then
       # Common legitimate case: a wrap-up that removes .loop/active AND
       # .loop/criteria.sha256 in ONE command is denied because the gate scans the
       # whole command string while active still exists. Advise splitting it.

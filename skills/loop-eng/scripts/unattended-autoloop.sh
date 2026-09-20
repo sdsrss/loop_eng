@@ -309,9 +309,15 @@ while :; do
     note "session $session exit=$STATUS commits=$(git rev-list --count "$head_before..$head_after") log=$SLOG"
   fi
 
-  # Broad phrases are safe here because the grep only runs on FAILED sessions
-  # (STATUS != 0), which bounds the false-positive surface.
-  if [ "$STATUS" -ne 0 ] && grep -qiE 'usage limit|rate.?limit(ed)?|quota|overloaded|too many requests' "$SLOG"; then
+  # Provider-limit detection, narrowed the same way as unattended-polish.sh —
+  # see the note there. "Only runs on FAILED sessions" does not bound the
+  # false-positive surface: a session's log carries the code it read and wrote,
+  # so any failure while working on a rate limiter came back as EX_TEMPFAIL 75.
+  # Phrases providers actually emit, matched in the TAIL (a limit ends the run,
+  # so it is the last thing written), and never on 124 — that is this driver's
+  # own wall-clock kill, which it already reports as TIMED OUT above.
+  if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 124 ] \
+     && tail -n 40 "$SLOG" | grep -qiE 'usage limit reached|quota exceeded|rate limit exceeded|rate_limit_error|overloaded_error|too many requests'; then
     limit_hits=$((limit_hits + 1))
     if [ "$limit_hits" -ge 2 ]; then
       note "provider limit hit twice — stopping"; exit 75; fi

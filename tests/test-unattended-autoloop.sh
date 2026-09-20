@@ -459,6 +459,33 @@ else
   FAIL=$((FAIL+1)); echo "  FAIL: the sleeping stub never recorded a pid — the SIGTERM arm did not run" >&2
 fi
 
+# --- a failed session whose LOG TEXT mentions a quota is not a provider limit ---
+# Same finding as in tests/test-unattended-polish.sh: "only runs on failed
+# sessions" does not bound the false-positive surface, because a session's log
+# carries the code it read and wrote. Here the cost is worse than a mislabelled
+# exit code — a detected limit also parks the driver in
+# `sleep $((LIMIT_WAIT_MIN * 60))`, so at the default this hands an unattended
+# run a full hour of doing nothing before it retries a failure that will not fix
+# itself, then stops with exit 75 ("try again later") after the second one.
+# LIMIT_WAIT_MIN=0 is pinned here for that reason: it keeps a regression in this
+# branch a failing assertion instead of an hour-long hang in the suite.
+SBQ=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SD" "$TD"' EXIT
+mkdir -p "$SBQ/.loop"; printf -- '- [ ] one\n' > "$SBQ/.loop/backlog.md"
+FP_STUB="$SD/stub-reviewtext"
+cat > "$FP_STUB" <<'EOF'
+#!/usr/bin/env bash
+echo "editing src/quota.js — the quota is never reset, and the limiter is overloaded"
+exit 2
+EOF
+chmod +x "$FP_STUB"
+LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_LIMIT_WAIT_MIN=0 LOOP_ENG_CLAUDE_BIN="$FP_STUB" \
+  bash "$DRIVER" "$SBQ" 5 >/dev/null 2>&1 && rc=0 || rc=$?   # 5, not 2: the session
+  # cap is checked before the breaker, so a cap of 2 would stop the run with
+  # "session cap reached" and this block would never see the verdict it is about
+assert_eq 1 "$rc" "sessions failing over quota-shaped CODE stop at the breaker (exit 1), not as a provider limit (75)"
+assert_eq "" "$(grep -c 'provider limit' "$SBQ/.loop/unattended.log" | grep -v '^0$')" "no provider-limit entry for failures that are not one"
+assert_file_contains "$SBQ/.loop/unattended.log" "circuit breaker OPEN" "they are counted as no-progress, which is what they are"
+
 # --- non-git target: refuse with a named reason, not a raw git fatal ---
 # The driver reached `git rev-parse HEAD` and died under `set -e` with git's own
 # "fatal: not a git repository" (exit 128) — it stopped, but the operator got a
