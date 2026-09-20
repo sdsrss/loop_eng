@@ -1,6 +1,41 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 — 2026-09-20
+
+Everything the 2026-09-20 production-readiness audit rated P0 or P1, fixed with
+a reproduction first and a failing assertion before each change. Suite 477 → 600
+assertions across 13 suites (a new `tests/test-harness.sh`); the six
+bash-3.2-floor suites re-verified under a real 3.2.57. Minor, not patch: several
+user-visible defaults change below.
+
+**Upgrade note — read this if you schedule the unattended drivers.**
+
+- **Two timers on one repo at the same minute is now refused at install time.**
+  Both modes default to `--time 03:00`, and the drivers cannot share a working
+  tree. If you run both timers against one repo today, `install-timer.sh` will
+  refuse the next re-install of the second one. Action: re-run it with a
+  different time (`--time 04:00`). Nothing breaks until you re-install; existing
+  units keep running, and from this version the loser simply exits 69 instead of
+  editing the tree underneath the winner.
+- **Two new exit codes.** `69` (`EX_UNAVAILABLE`) = another driver holds the
+  repo lock; `143` = the driver was signalled and terminated its session.
+  Deliberately distinct from the `75` these drivers use for provider limits.
+  Action: if you alert on non-zero exits, decide which of these are noise.
+- **A failure is no longer reported as a provider limit just because the code it
+  was working on mentions one.** Runs that used to exit `75` ("try again later")
+  now surface their real exit code, and `124` is reported as the timeout it is.
+  Action: monitoring that keyed on `75` will start seeing the true failures it
+  was masking.
+- **`unattended-polish.sh` sessions are now actually killed at the budget**
+  (`timeout -k 30`, which its autoloop sibling always had). A session that
+  ignores SIGTERM no longer runs past `LOOP_ENG_MAX_MINUTES`.
+- **Contributors:** `tests/test-manifest.sh` and `tests/test-hooks-json.sh` now
+  FAIL on a host with no `python3`/`jq` instead of reporting `0 passed, 0
+  failed` and exiting 0. Action: install either one. CI has both on all legs.
+
+Revert path: pin `0.14.0` in your marketplace entry. Every new behavior above is
+in the drivers, the installer or the test harness — no `.loop/` on-disk format
+changed, so moving between the two versions needs no migration.
 
 **Test blind spot: a safety default could be deleted and the suite stayed
 green.** Both unattended drivers hand `claude` an argv that *is* their entire
