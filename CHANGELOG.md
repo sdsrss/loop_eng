@@ -150,7 +150,26 @@ repo at `03:00` today, re-run the installer for one of them with a different
 `--time`. Two *different* repos at `03:00`, and the same repo at different
 times, are both still allowed — the latter is how you run both.
 
-Suite 542 → 564 assertions. Three pre-existing install-timer fixtures that
+**`.loop/` had to be gitignored for anything to work, and nothing made it so.**
+README asserted the directory "is gitignored"; this repo's own `.gitignore`,
+`tests/lib.sh` and `RELEASING.md` each hand-write the line, so the assumption
+was known — the Install instructions just never stated it. In a project without
+it, the builder's `git add -A` commits `criteria.tsv`, `criteria.sha256`,
+`results.json` and `evidence/`; the stop-gate then rewrites `results.json` on
+every stop, the tree is permanently ` M .loop/results.json`, and both unattended
+drivers refuse to run ("dirty tree, refusing") from then on. Verified end to
+end: five `.loop` files committed, then a wedged tree.
+
+`arm-contract.sh` now checks at the start of every loop. Not ignored → the
+directory is appended to `.git/info/exclude`, which is local and untracked, so
+arming a loop never turns into a diff in someone's PR (idempotent: a second arm
+appends nothing). Already **tracked** → no ignore rule can undo that, so it
+warns and prints the `git rm -r --cached` command that does, and still arms —
+stranding a loop over bookkeeping would be the worse trade. `commands/autoloop.md`
+Step 0 checks `git ls-files .loop` for the tracked case, and README's loop-state
+bullet now describes the guarantee instead of asserting the outcome.
+
+Suite 542 → 572 assertions. Three pre-existing install-timer fixtures that
 happened to stack both modes on one repo at `03:00` now pass `--time 04:00`;
 they were testing uninstall symmetry and unit contents, not collisions.
 

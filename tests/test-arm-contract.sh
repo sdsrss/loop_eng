@@ -46,6 +46,62 @@ assert_file_contains .loop/armwarn 'malformed' "arm warns that a criterion line 
 assert_file_contains .loop/armwarn 'line(s): 2' "arm names the offending line number"
 rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
 
+# --- .loop/ must be ignored by git, and arming is what guarantees it ---
+# The whole chain assumed this and nothing made it so. In a repo whose
+# .gitignore does not list .loop/, the builder's `git add -A` commits
+# criteria.tsv, criteria.sha256, results.json and evidence/; the stop-gate then
+# rewrites results.json on every stop, the tree is permanently ` M
+# .loop/results.json`, and both unattended drivers refuse to run ("dirty tree")
+# for good. Verified end to end before the fix: five .loop files committed, then
+# a wedged tree. README asserted .loop/ "is gitignored" with nothing making it
+# true. The sandbox helper writes a .gitignore, so this arm needs a repo without
+# one — exactly the shape a new user's project has.
+NOIGN=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-noign.XXXXXX")
+NOIGN=$(cd "$NOIGN" && pwd)
+# Scratch OUTSIDE the repo under test: a capture file written inside it would be
+# staged by the very `git add -A` this block asserts stages nothing — the test
+# would then fail on its own artifact and look like a product bug.
+IGNOUT=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-ignout.XXXXXX")
+trap 'rm -rf "$SB" "$NOIGN" "$IGNOUT"' EXIT
+(
+  cd "$NOIGN"
+  git init -q; git config user.email test@loop-eng.local; git config user.name loop-eng-test
+  echo sandbox > README.md; git add README.md; git commit -qm initial
+) >/dev/null
+mkdir -p "$NOIGN/.loop"
+printf 'ok\tstill fine\ttrue\n' > "$NOIGN/.loop/criteria.tsv"
+( cd "$NOIGN" && bash "$ARM" 2>"$IGNOUT/ignwarn" ) >/dev/null
+assert_file_contains "$IGNOUT/ignwarn" "not ignored by git" "arming an unignored repo says what it is fixing"
+assert_file_contains "$NOIGN/.git/info/exclude" ".loop/" "arming writes the ignore into .git/info/exclude"
+# the user's own .gitignore must stay untouched — arming a loop is not a diff
+if [ -e "$NOIGN/.gitignore" ]; then
+  assert_eq "no .gitignore" "created one" "arming does not create or edit the user's .gitignore"
+else
+  assert_eq 0 0 "arming does not create or edit the user's .gitignore"
+fi
+# the consequence, not just the file: `git add -A` now stages nothing
+( cd "$NOIGN" && git add -A && git status --porcelain ) > "$IGNOUT/after" 2>/dev/null
+assert_eq 0 "$(wc -c < "$IGNOUT/after" | tr -d ' ')" "after arming, git add -A stages no loop bookkeeping"
+# idempotent: a second arm must not append a duplicate line every round
+( cd "$NOIGN" && bash "$ARM" ) >/dev/null 2>&1
+assert_eq 1 "$(grep -c '^\.loop/$' "$NOIGN/.git/info/exclude")" "re-arming does not append a duplicate exclude line"
+
+# ...and the case the exclude file cannot fix: git ignores nothing it already
+# tracks, so arming warns and names the command that undoes it.
+TRACKED=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-tracked.XXXXXX")
+TRACKED=$(cd "$TRACKED" && pwd)
+trap 'rm -rf "$SB" "$NOIGN" "$IGNOUT" "$TRACKED"' EXIT
+(
+  cd "$TRACKED"
+  git init -q; git config user.email test@loop-eng.local; git config user.name loop-eng-test
+  mkdir -p .loop; printf 'ok\tstill fine\ttrue\n' > .loop/criteria.tsv
+  git add -A -f; git commit -qm "loop bookkeeping committed by mistake"
+) >/dev/null
+( cd "$TRACKED" && bash "$ARM" 2>"$IGNOUT/trackwarn" ) >/dev/null
+assert_file_contains "$IGNOUT/trackwarn" "TRACKED by git" "arming a repo with committed .loop/ warns that it is tracked"
+assert_file_contains "$IGNOUT/trackwarn" "git rm -r --cached" "the tracked warning names the command that undoes it"
+assert_eq "1" "$([ -f "$TRACKED/.loop/active" ] && echo 1)" "the tracked warning is advisory — the loop still arms"
+
 # --- empty DESCRIPTION column: legal, and arm and run must agree that it is ---
 # `id<TAB><TAB>cmd` is three real TAB-separated columns with a blank middle one.
 # This file used to carry FOUR different splits of the same line: two `awk -F'\t'`

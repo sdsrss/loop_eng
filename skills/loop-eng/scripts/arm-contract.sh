@@ -27,6 +27,40 @@ COUNT_FILE="$LOOP_DIR/gate-count"
 
 mkdir -p "$LOOP_DIR"
 
+# The whole chain assumes git ignores $LOOP_DIR/, and nothing made it so.
+#
+# The builder commits with `git add -A`. In a repo whose .gitignore does not
+# list it, that commits criteria.tsv, criteria.sha256, results.json and
+# evidence/ — after which the stop-gate rewrites results.json on every stop, the
+# tree is permanently ` M .loop/results.json`, and BOTH unattended drivers
+# refuse to run ("dirty tree, refusing") for good. Verified end to end: five
+# .loop files committed, then a wedged tree. README asserted the directory "is
+# gitignored" without anything making it true; this repo's own .gitignore,
+# tests/lib.sh and RELEASING.md each hand-write the line, so the assumption was
+# known — the Install instructions just never said it.
+#
+# Written into .git/info/exclude, not the user's .gitignore: it is local and
+# untracked, so arming a loop never turns into a diff in someone's PR.
+#
+# Already-tracked is the case the exclude file cannot fix — git ignores nothing
+# it already tracks — so it warns instead, and names the one command that undoes
+# it. Advisory, not fail-closed: the loop still runs, it just cannot promise the
+# tree stays clean, and stranding a loop over bookkeeping would be the worse
+# trade (same reasoning as the missing-hash-lock warning further down).
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [ -n "$(git ls-files -- "$LOOP_DIR" 2>/dev/null)" ]; then
+    echo "loop-eng arm-contract: WARNING — $LOOP_DIR/ is TRACKED by git. Loop bookkeeping (results.json, evidence/) is rewritten on every stop, so the tree will never be clean again and the unattended drivers will refuse to run. Untrack it with: git rm -r --cached $LOOP_DIR && echo '$LOOP_DIR/' >> .gitignore && git commit -m 'untrack loop bookkeeping'" >&2
+  elif ! git check-ignore -q "$LOOP_DIR/results.json" 2>/dev/null; then
+    GIT_EXCLUDE="$(git rev-parse --git-dir 2>/dev/null)/info/exclude"
+    if mkdir -p "$(dirname "$GIT_EXCLUDE")" 2>/dev/null \
+       && printf '%s\n' "$LOOP_DIR/" >> "$GIT_EXCLUDE" 2>/dev/null; then
+      echo "loop-eng arm-contract: $LOOP_DIR/ was not ignored by git; added it to $GIT_EXCLUDE (local only — your .gitignore is untouched). Loop bookkeeping must not be committed: the builder's \`git add -A\` would otherwise commit it and leave the tree permanently dirty." >&2
+    else
+      echo "loop-eng arm-contract: WARNING — $LOOP_DIR/ is not ignored by git and the local exclude file could not be written. The builder's \`git add -A\` will commit loop bookkeeping and the tree will never be clean again. Add '$LOOP_DIR/' to .gitignore before continuing." >&2
+    fi
+  fi
+fi
+
 loop_sha256() { # portable SHA-256 of a file -> stdout (empty if no tool)
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
   elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1

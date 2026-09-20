@@ -367,9 +367,17 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   injects the matching env var into the scheduled unit). Guards on top of
   that opt-in — dirty-tree refusal, a commit-keyed circuit breaker, wall-clock
   and session caps — bound the blast radius; they don't ask permission.
-- **`.loop/` is local state, not auto-removed.** The loop's bookkeeping
-  directory (`.loop/` — contract, criteria, `results.json`, `evidence/`,
-  `state.md`) is gitignored but lives in your working tree. Neither the
+- **`.loop/` must not be committed, and arming makes sure of it.** The loop's
+  bookkeeping directory (`.loop/` — contract, criteria, `results.json`,
+  `evidence/`, `state.md`) is rewritten on every stop, so a tracked `.loop/`
+  leaves the tree permanently dirty and both unattended drivers refuse to run
+  from then on. `arm-contract.sh` checks at the start of every loop: if git
+  does not already ignore it, the directory is added to `.git/info/exclude`
+  (local only — your own `.gitignore` is never edited), and if it is *already
+  tracked* — which no ignore rule can undo — arming says so and prints the
+  `git rm -r --cached` command that fixes it.
+- **`.loop/` is local state, not auto-removed.** That same directory lives in
+  your working tree. Neither the
   plugin uninstall nor `uninstall-timer.sh` deletes it — by design, since it
   may hold an in-progress loop's state. If you want it gone, remove it by
   hand: `rm -rf .loop/`.

@@ -18,6 +18,13 @@ Preconditions first:
   dirty, STOP and tell the user — the final diff must be attributable to the
   loop alone, and a dirty tree makes the wrap-up diff conflate the user's
   uncommitted work with the loop's changes.
+- `.loop/` must not be tracked by git. Run `git ls-files .loop` — if it prints
+  anything, STOP and tell the user to untrack it
+  (`git rm -r --cached .loop && echo '.loop/' >> .gitignore`). `results.json`
+  is rewritten on every stop, so a tracked `.loop/` leaves the tree dirty
+  forever: the wrap-up diff is polluted and every unattended run afterwards
+  refuses with "dirty tree". (An UNtracked `.loop/` needs nothing from you —
+  `arm-contract.sh` adds it to `.git/info/exclude` in Step 2.)
 - Record the baseline ref: run `git rev-parse HEAD` and write it into
   `.loop/state.md` as `Baseline: <hash>`. The final report's diff (Step 3 and
   Wrap-up) is `git diff <baseline>..HEAD` — without a recorded baseline there
