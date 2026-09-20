@@ -251,8 +251,14 @@ Scope notes:
   Resuming note below refers to):
 
   ```
-  backlog	every backlog item is ticked	! grep -q '^- \[ \]' .loop/backlog.md
+  backlog	every backlog item is ticked	! grep -q '^[[:space:]]*[-*+] \[ \]' .loop/backlog.md
   ```
+
+  That pattern is the grammar `run-contract.sh` ticks in — any indent, and `-`,
+  `*` or `+` — not just the canonical `- [ ]` above. A criterion anchored to
+  column 0 with a literal `-` reports PASS over an unfinished `* [ ]` or an
+  indented item, which is the one thing this criterion exists to prevent.
+  Ordered-list markers (`1.`) are outside it: the runner does not tick them.
 
   A backlog with **no** `| verify:` commands is the older shape: nothing runs,
   nothing is locked, and the orchestrator ticks boxes on the checker's report.

@@ -574,4 +574,82 @@ STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
 assert_eq 0 $? "three different items in a row do not trip the same-item arm"
 assert_eq 0 "$(grep -c '^- \[ \]' "$SBW3/.loop/backlog.md")" "all three items consumed"
 
+# --- the driver reads the backlog in the SAME grammar run-contract.sh ticks ---
+#
+# c9e71a6/ee06b87/be4ab56 widened run-contract.sh's tick parser to exactly what
+# the evidence-gate LOCKS: optional leading whitespace, a `-`/`*`/`+` bullet,
+# then ` [ ]`. The two places in this driver that read the backlog — the pending
+# COUNT and the item PICKER — stayed anchored at column 0 with a literal `-`, so
+# an unfinished `* [ ] x | verify: cmd`, or any indented item, was locked by the
+# gate and tickable by the runner yet invisible here: the driver logged "backlog
+# empty — done" and exited 0 over unfinished work. Making a shape legal while
+# the counter refuses to see it is the half-fix these assertions exist to pin;
+# all three call sites must move together or the widening is worse than none.
+SBB=$(mk_sandbox_repo)
+SBB2=$(mk_sandbox_repo)
+trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBW" "$SBW0" "$SBW3" "$SBB" "$SBB2" "$SD" "$TD"' EXIT
+mkdir -p "$SBB/.loop" "$SBB2/.loop"
+
+# max-sessions 0 probes the COUNT alone: the loop head reads it before any
+# session can start, so no stub runs and the verdict is purely the count's —
+# "backlog empty — done" + exit 0, or the session cap + exit 1 with items left.
+count_verdict() { # backlog lines as args -> "<drained|pending>:<exit code>"
+  printf '%s\n' "$@" > "$SBB/.loop/backlog.md"
+  : > "$SBB/.loop/unattended.log"
+  LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+    bash "$DRIVER" "$SBB" 0 >/dev/null 2>&1 && cv_rc=0 || cv_rc=$?
+  if grep -q 'backlog empty' "$SBB/.loop/unattended.log"; then
+    echo "drained:$cv_rc"
+  else
+    echo "pending:$cv_rc"
+  fi
+}
+assert_eq "pending:1" "$(count_verdict '* [ ] star bullet | verify: true')" \
+  "an unfinished * bullet counts as pending"
+assert_eq "pending:1" "$(count_verdict '  - [ ] indented item | verify: true')" \
+  "an unfinished indented item counts as pending"
+assert_eq "pending:1" "$(count_verdict '+ [ ] plus bullet')" \
+  "an unfinished + bullet counts as pending, with or without a verify tail"
+assert_eq "pending:1" "$(count_verdict '- [x] done' '* [ ] star still open')" \
+  "one unfinished line among ticked ones is enough to keep the driver running"
+# Controls: the shapes that already worked must not change meaning.
+assert_eq "pending:1" "$(count_verdict '- [ ] plain item')" \
+  "a plain - [ ] item still counts as pending"
+assert_eq "drained:0" "$(count_verdict '- [x] one' '* [x] two' '  + [x] three')" \
+  "a fully ticked backlog still reports drained"
+# The missing-backlog hardening at count_pending: grep exits 1 AND prints
+# nothing, and `[ "" -eq 0 ]` would error out of the "backlog empty" stop.
+rm -f "$SBB/.loop/backlog.md"
+: > "$SBB/.loop/unattended.log"
+LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SBB" 0 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 78 "$rc" "a backlog that never existed is still refused up front (EX_CONFIG)"
+# Ordered-list markers are run-contract.sh's KNOWN boundary — locked by the
+# gate, never ticked by the runner — so the counter must not count them either.
+# Counting a line nothing can tick would hang the driver on it forever. When
+# that boundary moves, all three call sites move together; this is its anchor.
+assert_eq "drained:0" "$(count_verdict '1. [ ] ordered item | verify: true')" \
+  "an ordered-list marker is not counted, matching run-contract.sh's tick boundary"
+
+# The PICKER, on the real path: a count that sees an item the picker cannot
+# extract is its own bug — `item=$(grep …)` fails under `set -o pipefail`, so
+# the driver dies before the session line is ever logged. One stall session per
+# run (max-sessions 1), and the log must name the item, bullet and indent
+# stripped exactly as the old `- [ ] ` prefix was.
+pick_item() { # backlog lines as args -> the item text handed to the session
+  printf '%s\n' "$@" > "$SBB2/.loop/backlog.md"
+  : > "$SBB2/.loop/unattended.log"
+  STUB_MODE=stall LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+    bash "$DRIVER" "$SBB2" 1 >/dev/null 2>&1 || true
+  sed -n 's/.*starting: //p' "$SBB2/.loop/unattended.log" | head -1
+}
+assert_eq "star item" "$(pick_item '* [ ] star item')" \
+  "the driver hands the session a * item by its text, not an empty string"
+assert_eq "indented item" "$(pick_item '   - [ ] indented item')" \
+  "an indented item is handed over without its indent or bullet"
+assert_eq "plain item" "$(pick_item '- [ ] plain item')" \
+  "a plain - [ ] item is still picked exactly as before"
+assert_eq "second item" "$(pick_item '- [x] first item' '+ [ ] second item')" \
+  "the picker skips ticked lines and takes the first unfinished one, any bullet"
+
 report "test-unattended-autoloop"

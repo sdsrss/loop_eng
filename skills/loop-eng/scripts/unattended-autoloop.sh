@@ -113,6 +113,17 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 BACKLOG=".loop/backlog.md"
+# The ONE grammar this driver reads the backlog with — the pending count and the
+# item picker below must not drift apart, and neither may drift from
+# run-contract.sh's tick parser, which is the reference: optional leading
+# whitespace, a `-`/`*`/`+` bullet, then ` [ ]` (it takes the item text straight
+# off the `]`, so no trailing space is required). That parser was widened to
+# match what the evidence-gate LOCKS; a shape it ticks but this driver cannot
+# see is unfinished work the driver reports as "backlog empty — done" and exits
+# 0 over. Ordered-list markers (`1.`, `1)`) are outside it on purpose: the
+# runner does not tick them, so counting them here would pin the driver on an
+# item nothing can ever check off.
+BACKLOG_PENDING_RE='^[[:space:]]*[-*+] \[ \]'
 if [ ! -f "$BACKLOG" ]; then
   echo "no $BACKLOG — write a '- [ ] item' backlog first" >&2
   exit 78
@@ -218,7 +229,7 @@ count_pending() {
   # swallows it as false, which would SKIP the "backlog empty" stop and keep
   # launching sessions against a backlog that no longer exists.
   local n
-  n=$(grep -c '^- \[ \]' "$BACKLOG" 2>/dev/null) || true
+  n=$(grep -c "$BACKLOG_PENDING_RE" "$BACKLOG" 2>/dev/null) || true
   case "$n" in '' | *[!0-9]*) n=0 ;; esac
   echo "$n"
 }
@@ -272,7 +283,11 @@ while :; do
   if [ "$no_progress" -ge 2 ]; then
     note "circuit breaker OPEN: 2 consecutive sessions with no new commits"; break; fi
 
-  item=$(grep -m1 '^- \[ \]' "$BACKLOG" | sed 's/^- \[ \] //')
+  # Same grammar as the count above, or the two disagree: a count that sees an
+  # item this grep cannot find fails the pipeline under `set -o pipefail`, and
+  # the driver dies on the assignment before it logs which item it was on.
+  # Braced on purpose: `$RE[[:space:]]` reads as an array subscript (SC1087).
+  item=$(grep -m1 "$BACKLOG_PENDING_RE" "$BACKLOG" | sed "s/${BACKLOG_PENDING_RE}[[:space:]]*//")
 
   # Second arm of the circuit breaker: the same item, session after session.
   #
