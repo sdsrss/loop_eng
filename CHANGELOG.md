@@ -1,5 +1,102 @@
 # Changelog
 
+## Unreleased
+
+The backlog half of a loop accepted less than it locked. The evidence-gate has
+always frozen a backlog line on a tolerant pattern, while the runner ticked one
+strict shape — so a line in the gap was untickable by *anyone*: the model's
+write denied, the box unable to move, and an unattended driver re-picking the
+same item until its circuit breaker fired. This round makes the runner accept
+exactly what the gate locks, moves the counters that had to follow it, and
+closes two writes that could publish a partial result over a whole one.
+
+**Minor, not a patch, on purpose.** Nothing here adds a feature. The bump is
+owed because a released artifact now *accepts* input it used to refuse — the
+mirror image of the call 0.17.0 made for a new refusal — and because an
+unattended run's exit code can move as a direct result (see Upgrade). A
+scheduler can observe that; a version string is the only advance signal a user
+on `^0.17` gets before their next nightly behaves differently. To keep the old
+behaviour, pin `0.17.0`.
+
+### Upgrade
+
+- **The runner now ticks backlog shapes it used to walk past.** An optional
+  indent, a `-`, `*` or `+` bullet, and any whitespace — or none — between `|`
+  and `verify:`. That is exactly the pattern `hooks/evidence-gate.sh` already
+  locks, so the set of lines the gate freezes and the set the runner can check
+  off are the same set again. If your backlog has indented or `*`-bulleted
+  items, boxes that never moved before will now move on their own; the tick
+  preserves your indentation and your marker rather than normalizing to
+  `- [x]`, because ticking a box is not reformatting someone's markdown.
+  Ordered-list markers (`1. [ ]`) stay outside the grammar on every side —
+  locked by the gate, never ticked, and deliberately not counted as pending, so
+  a driver is never pinned on an item nothing can check off.
+- **A scheduled `/autoloop` can now exit 1 where it used to exit 0.**
+  `unattended-autoloop.sh` counts pending items and picks the next one in that
+  same widened grammar. A run that met one of those shapes previously logged
+  `backlog empty — done` and exited 0 over unfinished work; it now keeps
+  launching sessions against those items, and if it stops with any still
+  pending it exits 1, as it has always done for a backlog it could not drain.
+  That is the fix rather than a regression — but if you alert on the driver's
+  exit status, expect jobs that were green over an unfinished backlog to start
+  failing honestly. The README's documented `backlog` criterion was widened the
+  same way and for the same reason: anchored at column 0 with a literal `-`, it
+  reported PASS over an unfinished `* [ ]` or indented item.
+
+### Fixed
+
+- **A backlog line could be locked and untickable at the same time.** The gate
+  denies model writes to any `.loop/backlog.md` line matching
+  `|[[:space:]]*verify:`, while the runner required the literal `| verify: `
+  behind a 6-character `- [ ] ` prefix. `|verify:` with no space, a TAB after
+  the pipe, two spaces, an indented item, a `*` or `+` bullet: each was frozen
+  by the gate and invisible to the runner, so the box could never move and the
+  loop could only end at a stop rule or a human disarm. Fixed on the strict
+  side, restoring `locked ⊆ tickable` — narrowing the gate instead would have
+  satisfied the same arithmetic while producing a box a model can type, which
+  is the one thing this plugin exists to prevent.
+- **A TAB-indented `#comment` in `criteria.tsv` forced the contract red on
+  every stop.** `run-contract.sh` probed for a leading `#` *after* splitting the
+  line into TAB columns, while `arm-contract.sh` probes the whole line — so
+  `<TAB># disabled<TAB>…` armed clean and then failed closed as "partly parsed"
+  on every stop attempt, with `criteria.tsv` already locked and only a human
+  disarm able to clear it. `<space><TAB># disabled<TAB>cmd` was worse: the id
+  column was a non-empty space, so the commented-out criterion *ran*. The
+  comment and blank probes now sit above the split in both scripts. Their
+  malformed-line warning was reworded to match: it blamed columns "separated by
+  SPACES" on lines whose indent is a TAB, in a file that contains no spaces
+  between columns at all, which is what made the original incident hard to read.
+- **A ledger that could not be published exited with the contract's verdict
+  anyway.** `mv "$TMP" "$RESULTS"` was the one unchecked write in the runner, so
+  a hygiene criterion that sweeps temp files (`find . -name "*.tmp.*" -delete`,
+  `make clean`) could delete the temp ledger mid-run and leave the *previous*
+  contract's `results.json` on disk as the surviving record — a frozen
+  `all_green: true` that the orchestrator reconciles against and then reads as
+  "no progress" forever. It now fails closed with exit 73 (`EX_CANTCREAT`). The
+  stop-gate was never fooled: it branches on its own re-run, not on this file.
+- **A backlog rewrite that lost a write truncated the live backlog.** The
+  cat-back into `.loop/backlog.md` truncates at redirect setup, so it is safe
+  only if every write to the temp copy landed. Two ways it was not: the `-1`
+  poison sentinel was clobbered by the first ticked item (a 3-item backlog
+  rewritten to 0 bytes, run still exiting 0), and the appends were unchecked, so
+  a write failing mid-rewrite published a prefix and reported `all_green: true`
+  over it. It takes a `.loop/` write failing mid-run to reach — ENOSPC first —
+  and no model action can: the gate denies writes to a backlog carrying verify
+  commands. It is worth hardening because `.loop/` is gitignored and the rewrite
+  is in place, so the user's items are simply gone.
+- **Two enforcement arms were held in place by nothing.** Deleting the
+  `systemctl --user enable --now` half of `install-timer.sh`'s install — which
+  ships exactly the trap that script exists to kill, "installed but never
+  enabled, so they silently never run" — survived the whole suite; the evidence
+  was already being recorded and then truncated before anything read it.
+  Dropping either redirect on the backlog's verify command survived too: without
+  `</dev/null` a stdin-reading command eats the remaining backlog items out of
+  the enclosing loop, and without `>/dev/null` a *printing* command (the
+  README's own `npx vitest run` example) writes its output into the middle of
+  `results.json`, which still exits 0 and still allows the stop — only the JSON
+  stops parsing. Each mutation now turns the suite red. Suite: **865 → 942
+  assertions**, 13 suites, shellcheck `-S warning` 0 findings.
+
 ## 0.17.0 — 2026-09-20
 
 The completion invariant had one input a model could still write, and one branch
