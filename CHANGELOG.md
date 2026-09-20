@@ -5,9 +5,10 @@
 Two gaps this repo had already written down and left open: a wall-clock budget
 that silently did not apply on macOS, and a bash-3.2 compatibility claim that
 lived only in a code comment. Test suite 468 → 477 assertions (counted by
-summing `bash tests/run-all.sh`, at the previous release commit and at this one
-— the 0.13.0 entry's "456" does not match a fresh count of that tree, which is
-why these two numbers were measured rather than carried forward).
+summing `bash tests/run-all.sh`, at the previous release commit and at this one).
+The 0.13.0 entry's "456" is not wrong so much as early: `tests/test-packaging.sh`
+landed later in that same cycle carrying exactly the missing 12, so a fresh count
+of the v0.13.0 tree is 468. Both numbers here were measured, not carried forward.
 
 **Behavior change, macOS only — read this if you schedule `/polish`.**
 `unattended-polish.sh` probed only `timeout`, so on a mac with Homebrew
@@ -22,6 +23,15 @@ opposite of what a budget knob's lowest value should do), or pin 0.13.0. A host
 with neither binary still runs uncapped, but now says so on stderr, where the
 scheduler's own log keeps it, instead of dropping the budget in silence. Linux
 is unaffected: `timeout` was always found there.
+
+One known consequence of the cap being live on macOS, surfaced by the pre-ship
+review and deliberately left as-is: a polish run the cap kills exits 124, and if
+its partial log happens to carry a provider-limit word (`quota`, `overloaded`),
+this runner's rate-limit branch reports EX_TEMPFAIL 75 — "try again later" —
+rather than a timeout. The autoloop driver distinguishes 124 explicitly; this one
+does not yet. Pre-existing logic with a bounded false-positive surface (the grep
+runs only on failed runs), newly reachable here, and a fix would be its own
+change rather than a line in a release.
 
 **`update-notify.sh` joins the bash-3.2 CI leg.** It is a SessionStart hook, so
 on a stock macOS box it is bash 3.2 that runs it in every real session — and the

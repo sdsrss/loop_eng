@@ -29,8 +29,8 @@ of them **weaken a guard** (rows 1-4, and each says so on the stream it has —
 the difference between a degrade and a silent one; the one exception is
 `arm-contract.sh`'s advisory per-criterion red-check in row 3, which simply runs
 unbounded), and two **refuse outright** rather than degrade (the `claude` CLI,
-and bash ≥ 4.4 for the unattended drivers). None of this belongs only in a script comment, which is
-where it lived before.
+and bash ≥ 4.4 for the unattended drivers). None of this belongs only in a
+script comment, which is where it lived before.
 
 | Tool | Used by | Absent → |
 |---|---|---|
