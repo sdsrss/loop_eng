@@ -698,6 +698,66 @@ else
 fi
 rm -f .loop/rc-backlog-noise
 
+# --- the rewrite must never truncate the backlog it could not rebuild --------
+# `cat "$BACK_TMP" > "$BACKLOG"` truncates the live backlog at redirect setup,
+# BEFORE cat can fail — so the cat-back is safe only while every write to
+# $BACK_TMP actually landed. Two independent ways they do not, and the guard has
+# to hold for both: the create can fail (which the `bchanged=-1` sentinel was
+# written for) and an append can fail (which it never covered). The first ticked
+# item then set `bchanged=1` unconditionally, so the sentinel never survived to
+# the cat-back and a rewrite that produced nothing emptied the file instead.
+#
+# Reachability, stated plainly: an ordinary user on a normal disk never gets
+# here. It takes a write to .loop/ failing MID-RUN — ENOSPC/EDQUOT first (the
+# runner writes unbounded evidence logs itself, so it can author its own full
+# disk after the startup probes passed), then EROFS/EIO, then a root-owned file
+# left behind by a `docker run -v` criterion. No model action reaches it: the
+# evidence-gate denies model writes to a backlog carrying verify commands. But
+# the cost when it does fire is total and unrecoverable — .loop/ is gitignored,
+# the rewrite is in place, and there is no backup of the user's items.
+#
+# Both faults are staged by occupying $BACK_TMP with a DIRECTORY rather than by
+# chmod, so these assertions run under ANY uid — including the root-run bash 3.2
+# container, where this file's chmod-based half is skipped. $BACK_TMP is
+# "$LOOP_DIR/.backlog.rewrite.$$", and a criterion's own $PPID is that $$.
+rm -rf .loop/evidence; rm -f .loop/results.json .loop/backlog.md
+printf 'occupy\toccupies the rewrite temp path\tmkdir .loop/.backlog.rewrite.$PPID\n' > .loop/criteria.tsv
+{
+  printf -- '- [ ] first | verify: true\n'
+  printf -- '- [ ] second | verify: false\n'
+  printf -- '- [ ] third | verify: true\n'
+} > .loop/backlog.md
+bsize=$(wc -c < .loop/backlog.md | tr -d ' ')
+bash "$RUNNER" >/dev/null 2>.loop/rc-err-btmp; assert_eq 0 $? "a rewrite that could not start does not change the contract's own verdict (fail-open, as documented)"
+assert_eq "$bsize" "$(wc -c < .loop/backlog.md | tr -d ' ')" "an unbuildable rewrite leaves the backlog byte-for-byte intact (was: truncated to 0 bytes)"
+assert_eq 3 "$(grep -c '| verify:' .loop/backlog.md)" "no backlog item is lost when the rewrite temp file cannot be created"
+assert_file_contains .loop/backlog.md '- [ ] first | verify: true' "a passing item stays unticked rather than vanishing with the file it was never written to"
+assert_file_contains .loop/results.json '"all_green": true' "a failed rewrite does not turn a green contract red"
+assert_eq 0 "$(grep -c 'run-contract.sh: line' .loop/rc-err-btmp)" "a failed rewrite leaks no raw bash redirect error into the runner's stderr (which is the stop-gate's block reason)"
+rm -rf .loop/.backlog.rewrite.*
+rm -f .loop/rc-err-btmp
+
+# ...and the append half, which the sentinel never even reached: the create
+# succeeds, the first item ticks legitimately (bchanged=1), and only then does a
+# write fail. Unchecked, that gave a PARTIAL rewrite — the worse shape, because
+# `cat` then exits 0 over a file holding a prefix of the backlog, silently
+# deleting the items after the fault while the ledger reports all_green.
+rm -f .loop/results.json .loop/backlog.md
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+{
+  printf -- '- [ ] first | verify: true\n'
+  printf -- '- [ ] occupies the rewrite file | verify: rm -f .loop/.backlog.rewrite.$PPID && mkdir .loop/.backlog.rewrite.$PPID\n'
+  printf -- '- [ ] third | verify: true\n'
+} > .loop/backlog.md
+bsize=$(wc -c < .loop/backlog.md | tr -d ' ')
+bash "$RUNNER" >/dev/null 2>.loop/rc-err-bappend; assert_eq 0 $? "a rewrite whose appends failed does not change the contract's own verdict"
+assert_eq "$bsize" "$(wc -c < .loop/backlog.md | tr -d ' ')" "a rewrite that lost an append leaves the backlog byte-for-byte intact (was: the tail of the file silently deleted)"
+assert_eq 3 "$(grep -c '| verify:' .loop/backlog.md)" "no backlog item is lost when an append fails mid-rewrite"
+assert_file_contains .loop/backlog.md '- [ ] third | verify: true' "the item after the failing append survives, unticked, to be re-verified next run"
+assert_eq 0 "$(grep -c 'run-contract.sh: line' .loop/rc-err-bappend)" "a failed append leaks no raw bash redirect error either — one per backlog line would bury the failing criteria"
+rm -rf .loop/.backlog.rewrite.*
+rm -f .loop/rc-err-bappend .loop/backlog.md
+
 # No backlog, or a backlog nobody opted in: no backlog block at all, and the
 # old model-ticked contract is untouched.
 rm -f .loop/backlog.md

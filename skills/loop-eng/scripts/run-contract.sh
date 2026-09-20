@@ -374,8 +374,21 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
   if [ -f "$BACKLOG" ] && grep -q '|[[:space:]]*verify:' "$BACKLOG" 2>/dev/null; then
     printf '  "backlog": [\n'
     bfirst=1
+    # bchanged is a three-state sentinel, and -1 is a LATCH: 0 = nothing to
+    # write back, 1 = a complete rewrite is ready, -1 = a write to $BACK_TMP
+    # failed, so what is in it is NOT the backlog and must never be catted back
+    # over the live file. Every write below either succeeds or sets -1, and
+    # nothing may raise -1 back to 1 — the cat-back truncates $BACKLOG at
+    # redirect setup, so publishing an incomplete rewrite deletes the user's
+    # items with no backup (.loop/ is gitignored).
+    # NB the redirect ORDER here and on the three appends: `2>/dev/null` comes
+    # FIRST so bash's own "Is a directory" / "No space left on device" lands in
+    # /dev/null rather than on the still-open stderr — same rule, and the same
+    # reason, as the writability probes at the top of this file. That stderr is
+    # the stop-gate's block reason, and one leaked line per backlog line would
+    # bury the criteria that actually failed.
     bchanged=0
-    : > "$BACK_TMP" 2>/dev/null || bchanged=-1
+    : 2>/dev/null > "$BACK_TMP" || bchanged=-1
     bline=""
     while IFS= read -r bline || [ -n "$bline" ]; do
       bline="${bline%$'\r'}"
@@ -421,7 +434,7 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
         done
       fi
       if [ -z "$bcmd" ]; then
-        printf '%s\n' "$bline" >> "$BACK_TMP"
+        printf '%s\n' "$bline" 2>/dev/null >> "$BACK_TMP" || bchanged=-1
         continue
       fi
       # strip the whitespace around the item without touching inner spacing
@@ -434,11 +447,17 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
         # nested on purpose, and re-emitting it at column 0 — or as a `-` when
         # its author wrote `*` — would reparent it in the rendered list. Ticking
         # a box is not reformatting someone's markdown.
-        printf -- '%s%s [x] %s | verify: %s\n' "$bindent" "$bmark" "$bitem" "$bcmd" >> "$BACK_TMP"
-        bchanged=1
+        printf -- '%s%s [x] %s | verify: %s\n' "$bindent" "$bmark" "$bitem" "$bcmd" 2>/dev/null >> "$BACK_TMP" || bchanged=-1
+        # Only 0 -> 1. A plain `bchanged=1` here clobbered the -1 latch, so the
+        # first item that ticked re-authorised the cat-back over a $BACK_TMP
+        # that had never been created — a 3-item backlog emptied to 0 bytes with
+        # the run still exiting 0. The sentinel itself worked: on the same fault
+        # with no item ticking, the file survived whole (both pinned in
+        # tests/test-run-contract.sh).
+        [ "$bchanged" -eq 0 ] && bchanged=1
         bdone=true
       else
-        printf '%s\n' "$bline" >> "$BACK_TMP"
+        printf '%s\n' "$bline" 2>/dev/null >> "$BACK_TMP" || bchanged=-1
         bdone=false
       fi
       [ "$bfirst" -eq 0 ] && printf ',\n'
@@ -451,6 +470,9 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
     # human may have open, and only the lines this pass ticked have changed.
     # Fail-open on its own errors — a backlog that could not be rewritten must
     # not affect the ledger or the exit code, which are what the harness trusts.
+    # Fail-open means LEAVING THE FILE ALONE, hence `-eq 1` and not `-ne 0`: an
+    # incompletely written $BACK_TMP (the -1 latch above) is not a backlog, and
+    # the ticks it lost are re-verified and re-ticked on the next run anyway.
     if [ "$bchanged" -eq 1 ]; then
       cat "$BACK_TMP" > "$BACKLOG" 2>/dev/null || :
     fi
