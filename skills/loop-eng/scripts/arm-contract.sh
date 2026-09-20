@@ -164,7 +164,7 @@ if [ -f "$CRIT" ]; then
   # whole loop, so a first signal delivered at the first blocked stop is one the
   # model cannot act on.
   if [ -n "$malformed" ]; then
-    echo "loop-eng arm-contract: WARNING — malformed criteria line(s):$malformed in $CRIT. Each criterion is split on its FIRST TWO TABs into <id>TAB<description>TAB<command> and needs a non-empty id and a non-empty command (an EMPTY description is fine). A line with fewer than two TABs — most often columns separated by SPACES — has no command column, so that criterion never runs. run-contract FAILS CLOSED on a partly parsed contract, so fix the line(s) NOW — once the loop is armed the evidence-gate locks this file. Comment a line out with a leading # if it was never meant to be a criterion." >&2
+    echo "loop-eng arm-contract: WARNING — malformed criteria line(s):$malformed in $CRIT. Each criterion is split on its FIRST TWO TABs into <id>TAB<description>TAB<command> and needs a non-empty id and a non-empty command (an EMPTY description is fine). A line with fewer than two TABs — most often columns separated by SPACES — has no command column, and a line whose indent starts with a TAB has no id column; either way that criterion never runs. run-contract FAILS CLOSED on a partly parsed contract, so fix the line(s) NOW — once the loop is armed the evidence-gate locks this file. Comment a line out with a leading # if it was never meant to be a criterion." >&2
   fi
   hash=$(loop_sha256 "$CRIT")
   if [ -n "$hash" ]; then
