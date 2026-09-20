@@ -232,6 +232,50 @@ bash "$RUNNER" 2>/dev/null; assert_eq 1 $? "empty id column still fails closed (
 assert_file_contains .loop/results.json '"all_green": false' "empty id: contract is not green"
 rm -f .loop/emptydesc.err .loop/spaces.err .loop/results.json
 
+# --- the #comment probe runs on the WHOLE line, BEFORE the TAB split ---
+# run-contract used to probe for '#' on $id, i.e. after splitting, while
+# arm-contract probes the whole line in both of its parse loops. They therefore
+# disagreed on exactly the lines whose INDENT contains a TAB — the same
+# arm-says-fine / run-says-malformed divergence the shared parse rule exists to
+# end. A TAB-indented comment armed and pinned its hash without a warning, then
+# made run-contract call the contract partly parsed: every real criterion green,
+# all_green false, exit 1 on EVERY stop attempt, with criteria.tsv already locked
+# by the evidence-gate — only a human disarm could clear it.
+rm -f .loop/results.json
+{ printf 'ok\tstill fine\ttrue\n'
+  printf '\t# disabled for now\tsuite passes\tfalse\n'; } > .loop/criteria.tsv
+bash "$RUNNER" 2>.loop/tabcomment.err; assert_eq 0 $? "TAB-indented comment is skipped, not malformed"
+assert_file_contains .loop/results.json '"all_green": true' "TAB-indented comment: the contract can still go green"
+assert_eq "" "$(grep -c malformed .loop/tabcomment.err 2>/dev/null | grep -v '^0$')" "TAB-indented comment raises no malformed warning"
+assert_eq 0 "$(grep -c '"id": ""' .loop/results.json)" "TAB-indented comment is not a ledger entry"
+# ...and the worse half of the same misplaced probe: a <space><TAB> indent left
+# id=" ", which is non-empty, so the line cleared the empty-column guard and the
+# commented-out criterion was EXECUTED (its own text as argv[0] of `bash -c`).
+rm -f .loop/results.json I-RAN-A-COMMENT
+{ printf 'ok\tstill fine\ttrue\n'
+  printf ' \t# disabled\ttouch I-RAN-A-COMMENT\n'; } > .loop/criteria.tsv
+bash "$RUNNER" 2>.loop/sptab.err; assert_eq 0 $? "space+TAB-indented comment keeps a good contract green"
+assert_eq "" "$([ -e I-RAN-A-COMMENT ] && echo ran)" "a commented-out criterion is NEVER executed"
+assert_eq 0 "$(grep -c '# disabled' .loop/results.json)" "space+TAB-indented comment is not a ledger entry"
+rm -f I-RAN-A-COMMENT
+# controls — the comment shapes that already worked must not move, including an
+# id that legitimately begins with '#' (already read as a comment today)
+rm -f .loop/results.json
+{ printf '# unindented\tlooks like\ta criterion\n'
+  printf '  # space-indented\tlooks like\ta criterion\n'
+  printf 'ok\tstill fine\ttrue\n'; } > .loop/criteria.tsv
+bash "$RUNNER" 2>.loop/ctl.err; assert_eq 0 $? "unindented / space-indented comments are still skipped"
+assert_eq "" "$(grep -c malformed .loop/ctl.err 2>/dev/null | grep -v '^0$')" "control comments raise no malformed warning"
+# ...and a TAB-indented line that is NOT a comment is still the malformed mirror
+# image of the spaces slip — the hoist must not turn every indent into a skip
+rm -f .loop/results.json
+{ printf 'ok\tstill fine\ttrue\n'
+  printf '\tsuite passes\tbash tests/run-all.sh\n'; } > .loop/criteria.tsv
+bash "$RUNNER" 2>.loop/tabreal.err; assert_eq 1 $? "TAB-indented non-comment still fails closed"
+assert_file_contains .loop/tabreal.err 'line(s): 2' "malformed message names the TAB-indented line"
+assert_file_contains .loop/tabreal.err 'whose indent starts with a TAB' "malformed message names the indent cause, not only SPACES"
+rm -f .loop/tabcomment.err .loop/sptab.err .loop/ctl.err .loop/tabreal.err .loop/results.json
+
 # --- hash-lock: armed + matching hash runs the contract normally ---
 printf '1\tok\ttrue\n' > .loop/criteria.tsv
 : > .loop/active

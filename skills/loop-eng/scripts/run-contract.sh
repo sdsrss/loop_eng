@@ -241,35 +241,47 @@ cp "$CRIT" "$SNAP" 2>/dev/null || cannot_write "$SNAP" "could not snapshot the c
     # name finds it missing. arm-contract.sh strips it in the same place, so the
     # two agree on the id the way they already agree on the TAB split.
     [ "$lineno" -eq 1 ] && line="${line#$'\xef\xbb\xbf'}"
+    # Classify every line ONCE, so no criterion can vanish in silence — on the
+    # WHOLE line and BEFORE the split, which is where arm-contract.sh classifies
+    # it (both of its parse loops). Skipped without comment (none of these is a
+    # criterion): blank lines, whitespace-only lines, and #comments (a leading
+    # indent is tolerated — an indented comment was already skipped before, and
+    # must not become an error now). CR counts as whitespace, so CRLF blanks skip
+    # here too.
+    # Probing $id instead — i.e. after the split — asks the question of a
+    # DIFFERENT string, and whenever the indent itself contains a TAB the two
+    # answers differ: `<TAB># off<TAB>desc<TAB>cmd` has an EMPTY id, so this
+    # runner called the contract partly parsed and failed CLOSED on every stop
+    # while arm skipped the line, pinned the hash and warned about nothing —
+    # verbatim the arm/run divergence the shared rule exists to end, and by then
+    # the evidence-gate had locked criteria.tsv. A `<space><TAB>` indent was
+    # worse: id=" " is non-empty, so it cleared the guard below and a
+    # commented-out criterion RAN, its own text as argv[0] of `bash -c`.
+    case "$line" in
+      *[![:space:]]*) : ;;  # carries content — classify it below
+      *) continue ;;        # blank or whitespace-only
+    esac
+    case "${line#"${line%%[![:space:]]*}"}" in \#*) continue ;; esac
     case "$line" in
       *$'\t'*$'\t'*)
         id="${line%%$'\t'*}"
         rest="${line#*$'\t'}"
         desc="${rest%%$'\t'*}"
         cmd="${rest#*$'\t'}" ;;
-      # Fewer than two TABs: keep the whole line as the id so the blank/comment
-      # classification below still sees it, and leave cmd empty so it lands in
+      # Fewer than two TABs: keep the whole line as the id so the malformed
+      # report below has something to name, and leave cmd empty so it lands in
       # `malformed` rather than running. This is the spaces-instead-of-TABs slip.
       *) id="$line"; desc=""; cmd="" ;;
     esac
-    # Classify every line ONCE, so no criterion can vanish in silence.
-    # Skipped without comment (none of these is a criterion): blank lines,
-    # whitespace-only lines, and #comments (a leading indent is tolerated —
-    # an indented comment was already skipped before, and must not become an
-    # error now). CR counts as whitespace, so CRLF blanks skip here too.
-    # ANY other line that fails to yield both an id and a command column is
-    # MALFORMED: its author wrote it meaning it to be checked. The classic slip
-    # is spaces where TABs belong, which parses the whole line into $id and
-    # leaves $cmd empty; a leading TAB (empty id) is the mirror image. Both used
-    # to hit a bare `continue`, so the contract ran FEWER criteria than it was
-    # given and still reported all_green — the vacuous guard below only fires at
-    # ZERO runnable criteria, never on a partial parse. Recording the line number
-    # is what lets the ledger fail CLOSED on a contract it only partly parsed.
-    case "$id$desc$cmd" in
-      *[![:space:]]*) : ;;  # carries content — classify it below
-      *) continue ;;        # blank or whitespace-only
-    esac
-    case "${id#"${id%%[![:space:]]*}"}" in \#*) continue ;; esac
+    # ANY line that survives the skips above and still fails to yield both an id
+    # and a command column is MALFORMED: its author wrote it meaning it to be
+    # checked. The classic slip is spaces where TABs belong, which parses the
+    # whole line into $id and leaves $cmd empty; a leading TAB (empty id) is the
+    # mirror image. Both used to hit a bare `continue`, so the contract ran FEWER
+    # criteria than it was given and still reported all_green — the vacuous guard
+    # below only fires at ZERO runnable criteria, never on a partial parse.
+    # Recording the line number is what lets the ledger fail CLOSED on a contract
+    # it only partly parsed.
     if [ -z "${id:-}" ] || [ -z "${cmd:-}" ]; then
       malformed="$malformed $lineno"
       continue
@@ -499,7 +511,7 @@ mv "$TMP" "$RESULTS"
 # the loop a whole round of rediscovery. Failures only: a green contract stays
 # silent so the summary never becomes noise.
 if [ -n "$malformed" ]; then
-  echo "run-contract: malformed criteria line(s):$malformed in $CRIT — each criterion is split on its FIRST TWO TABs into <id>TAB<description>TAB<command>, and needs a non-empty id and a non-empty command (an EMPTY description is fine). A line with fewer than two TABs — most often columns separated by SPACES — has no command column, so that criterion never runs; refusing to report a result for a contract that was only partly parsed (fail closed). Fix the line(s), or comment them out with a leading # if they were never meant to be criteria." >&2
+  echo "run-contract: malformed criteria line(s):$malformed in $CRIT — each criterion is split on its FIRST TWO TABs into <id>TAB<description>TAB<command>, and needs a non-empty id and a non-empty command (an EMPTY description is fine). A line with fewer than two TABs — most often columns separated by SPACES — has no command column, and a line whose indent starts with a TAB has no id column; either way that criterion never runs. Refusing to report a result for a contract that was only partly parsed (fail closed). Fix the line(s), or comment them out with a leading # if they were never meant to be criteria." >&2
 fi
 if [ "$overall" -ne 0 ]; then
   if [ "$ran" -eq 0 ]; then
