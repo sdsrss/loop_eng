@@ -64,6 +64,18 @@ table that measurement produced.
   Deliberately no assertion count: the README cites none anywhere, and a
   hard-coded one goes stale the next time a suite grows.
 
+**Live-install smoke: PASS** (Claude Code 2.1.278, headless, throwaway
+`CLAUDE_CONFIG_DIR`, GitHub-source install of this release's own content on
+`main` — no source-type disclosure owed). Live cache copies instrumented, so
+each verdict is a marker on disk: the evidence-gate's `deny()` fired with
+`CLAUDE_PLUGIN_ROOT` resolved to the real
+`plugins/cache/loop-eng/loop-eng/0.16.1` path and the file never landed;
+`armed from …/0.16.1/…`; exactly three `SGBLOCK` markers then
+`CEILING-RELEASE` on a red contract, with the ledger machine-written
+`"all_green": false`; and `/loop-eng:autoloop` reached ALL GREEN, left a
+two-criteria ledger, and cleared `active`, `gate-count` and `criteria.sha256`
+with zero blocks.
+
 ## 0.16.0 — 2026-09-20
 
 Closing out the 2026-09-20 production-readiness audit: 0.15.0 took every P0 and
