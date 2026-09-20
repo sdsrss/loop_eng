@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.16.1 — 2026-09-20
+
+One fix, found by measuring the loops rather than reading them, plus the cost
+table that measurement produced.
+
+### Upgrade
+
+- **A scheduled run will now take as long as you told it to.** Until this
+  release both drivers were cut off after ten minutes by a CLI ceiling neither
+  of them set (see Fixed below), so a nightly job has been finishing far inside
+  its budget and reporting success. It will now run up to `LOOP_ENG_MAX_MINUTES`
+  — **120 minutes for polish, 240 for autoloop** — and consume tokens for that
+  whole time. Nothing to do if those defaults are what you want; lower them, or
+  export `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` yourself to keep the old
+  behaviour, if they are not. The measured shape of a run is now in the
+  README's "What a run costs".
 
 ### Fixed
 
