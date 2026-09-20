@@ -297,6 +297,12 @@ chmod +x "$FAKEBIN/systemctl"
 : > "$SYSTEMCTL_LOG"
 XDG_CONFIG_HOME="$XDG" PATH="$FAKEBIN:$PATH" SYSTEMCTL_LOG="$SYSTEMCTL_LOG" \
   LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" bash "$INSTALL" polish "$SB" >/dev/null 2>&1
+# That install ran without LOOP_ENG_TIMER_NO_SYSTEMCTL, so this is the one place
+# the installer's sole side effect is observable: writing the unit files is not
+# installing. A timer that is written but never `enable`d silently never runs —
+# the exact trap install-timer.sh exists to kill. Assert it before the log is
+# truncated for the uninstall half below.
+assert_file_contains "$SYSTEMCTL_LOG" "--user enable --now loop-eng-polish.timer" "install actually enables the timer, not just writes the unit files"
 : > "$SYSTEMCTL_LOG"
 XDG_CONFIG_HOME="$XDG" PATH="$FAKEBIN:$PATH" SYSTEMCTL_LOG="$SYSTEMCTL_LOG" \
   bash "$UNINSTALL" polish >/dev/null 2>&1
