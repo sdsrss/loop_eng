@@ -508,6 +508,38 @@ else
 fi
 rm -rf .loop/evidence; rm -f .loop/results.json
 
+# --- the ledger PUBLISH is checked too, not only the up-front probes ---------
+# Those probes prove .loop/ was writable when the run STARTED. The final
+# `mv "$TMP" "$RESULTS"` was unchecked, so a run whose temp ledger vanished
+# mid-flight exited with its own verdict while results.json still held the
+# PREVIOUS contract's ledger — a green one, and now the surviving record.
+# Nothing self-heals it: an ordinary hygiene criterion (`find . -name "*.tmp.*"
+# -delete`, a `make clean` / `git clean` step) deletes the temp ledger while
+# .loop/ stays fully writable, so the probes fire on neither this run nor any
+# later one, and `mv: cannot stat` was the only signal.
+# The enforcement path was never fooled — hooks/stop-gate.sh branches on its own
+# re-run's exit status and never parses this file, so "passes": true still
+# cannot be typed — but the ORCHESTRATION path reads the ledger as
+# authoritative: commands/autoloop.md reconciles each round against it ("when
+# they disagree the ledger wins"), cites its all_green in the wrap-up, and
+# counts its red criteria for stop rule 5. A frozen green ledger ticks a FAILED
+# round and reads as "no progress" forever.
+rm -rf .loop/evidence; rm -f .loop/results.json .loop/backlog.md
+printf 'old-weak\tok\ttrue\n' > .loop/criteria.tsv
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "ledger publish: a prior green contract leaves its ledger on disk"
+printf 'clean\tsweeps tmp files\tfind .loop -name "*.tmp.*" -delete\nred\tfails\tfalse\n' > .loop/criteria.tsv
+bash "$RUNNER" >/dev/null 2>.loop/rc-err-publish; rc=$?
+assert_eq 73 "$rc" "a ledger that could not be published fails closed, exit 73 (was 1 — the contract's own verdict, over an unwritten ledger)"
+assert_file_contains .loop/rc-err-publish 'cannot write .loop/results.json' "the unpublished-ledger refusal names the ledger it could not write"
+assert_file_contains .loop/rc-err-publish 'ledger publish failed' "the refusal says which step failed, not just that something did"
+# The stale ledger is deliberately left where it is — deleting a human's
+# completion record on the way out is not this script's call — so the EXIT CODE
+# is the whole protection: 73 is fail-closed and the stop-gate blocks on any
+# non-zero. Pinned so the residual is a known, tested state rather than a
+# silence someone rediscovers.
+assert_file_contains .loop/results.json '"id": "old-weak"' "the stale ledger is left untouched; the refusal, not a silent verdict, is what protects the caller"
+rm -rf .loop/evidence; rm -f .loop/results.json .loop/rc-err-publish
+
 # --- missing criteria.tsv ---
 rm .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 78 $? "missing criteria exit 78"

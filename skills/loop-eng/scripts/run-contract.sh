@@ -503,7 +503,17 @@ if [ "$LOCK_CHECKED" -eq 1 ]; then
   fi
 fi
 
-mv "$TMP" "$RESULTS"
+# Checked, like every other write to $LOOP_DIR: an unchecked publish let a run
+# finish and exit with its verdict while results.json was never written, leaving
+# the PREVIOUS contract's ledger on disk as the surviving record. The probes at
+# the top only prove .loop/ was writable when the run STARTED — a hygiene
+# criterion that sweeps temp files (`find . -name "*.tmp.*" -delete`, `make
+# clean`) deletes $TMP mid-run with .loop/ fully writable, so they never fire on
+# this run or any later one and `mv: cannot stat` is the only signal. The
+# stop-gate is not fooled (it branches on its own re-run's exit status and never
+# parses this file), but the orchestrator reconciles each round AGAINST the
+# ledger and the ledger wins, so a frozen green one ticks a failed round.
+mv "$TMP" "$RESULTS" || cannot_write "$RESULTS" "ledger publish failed"
 
 # Say what failed, on stderr. The ledger stays the machine record; this is the
 # only channel a caller sees without opening files — and for the stop-gate that
