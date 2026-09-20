@@ -6,6 +6,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 mkdir -p .claude/commands .claude/agents .claude/hooks .claude/skills
+
+# Prune before copying, so a file REMOVED or RENAMED at the root disappears from
+# the dogfood copy too. `cp` alone only ever adds: a command deleted upstream
+# kept its stale copy in .claude/, which is the tree that actually loads while
+# working in this repo — so the dogfood session went on registering a command or
+# hook the plugin no longer ships. A mirror that disagrees with its source is
+# worse than no mirror. skills/ has always done this (`rm -rf` below); these
+# three had not. settings.json is untouched by all of it: it is the one thing in
+# .claude/ that is not a copy of anything.
+rm -f .claude/commands/*.md .claude/agents/*.md .claude/hooks/*.sh
 cp commands/*.md .claude/commands/
 cp agents/*.md .claude/agents/
 # Derived from hooks/, never a hand-written list: the previous form named

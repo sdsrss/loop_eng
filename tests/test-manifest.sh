@@ -14,7 +14,7 @@
 set -u
 . "$(dirname "$0")/lib.sh"
 
-cd "$PLUGIN_ROOT"
+cd "$PLUGIN_ROOT" || exit 1
 
 if ! command -v python3 >/dev/null 2>&1; then
   # Not a benign skip: with no parser this suite checks nothing about the two
@@ -98,7 +98,11 @@ fi
 # --- negative cases: the check must actually catch a drifted manifest --------
 # Without these the four assertions above are a tautology on a healthy repo and
 # would keep passing if manifest_fields silently started returning blanks.
-SB=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-manifest.XXXXXX"); trap 'rm -rf "$SB"' EXIT
+SB=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-manifest.XXXXXX")
+# VCFG is declared here rather than beside its use so the one EXIT trap covers
+# it: an inline `rm` is never reached by a killed suite.
+VCFG=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-vcfg.XXXXXX")
+trap 'rm -rf "$SB" "$VCFG"' EXIT
 mkdir -p "$SB/.claude-plugin"
 cp .claude-plugin/plugin.json .claude-plugin/marketplace.json "$SB/.claude-plugin/"
 
@@ -160,9 +164,7 @@ done
 # anywhere, and that one known warning as the ONLY warning. A second warning
 # fails the build, which is the signal a release wants.
 if command -v claude >/dev/null 2>&1; then
-  VCFG=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-vcfg.XXXXXX")
   vout=$(CLAUDE_CONFIG_DIR="$VCFG" claude plugin validate .claude-plugin/plugin.json --json 2>/dev/null)
-  rm -rf "$VCFG"
   verdict=$(printf '%s' "$vout" | python3 -c '
 import json, sys
 try:

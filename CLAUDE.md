@@ -13,7 +13,7 @@ expansion under `set -u`).
 ## Testing
 
 ```
-bash tests/run-all.sh          # bash -n syntax + shellcheck -S error + every tests/test-*.sh
+bash tests/run-all.sh          # bash -n syntax + shellcheck -S warning + every tests/test-*.sh
 bash tests/test-run-contract.sh   # run ONE suite directly
 ```
 

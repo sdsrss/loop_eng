@@ -480,7 +480,7 @@ fi
 # itself, then stops with exit 75 ("try again later") after the second one.
 # LIMIT_WAIT_MIN=0 is pinned here for that reason: it keeps a regression in this
 # branch a failing assertion instead of an hour-long hang in the suite.
-SBQ=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SD" "$TD"' EXIT
+SBQ=$(mk_sandbox_repo)
 mkdir -p "$SBQ/.loop"; printf -- '- [ ] one\n' > "$SBQ/.loop/backlog.md"
 FP_STUB="$SD/stub-reviewtext"
 cat > "$FP_STUB" <<'EOF'
@@ -509,6 +509,16 @@ STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
 assert_eq 1 "$rc" "non-git target refused with the driver's own exit 1, not git's 128"
 assert_file_contains "$SD/nogit-al-err" "not a git repository" "refusal says the target is not a git repository"
 
+SBW=$(mk_sandbox_repo)
+SBW0=$(mk_sandbox_repo)
+SBW3=$(mk_sandbox_repo)
+# Every sandbox this suite creates, named once, in the trap that actually
+# runs. The previous shape re-installed a longer trap beside each new
+# sandbox — a hand-maintained list that had already dropped $SBG/$SBG2 once
+# and $SB9 again, so a killed suite leaked exactly the dirs the growing
+# trap was supposed to be collecting.
+trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBW" "$SBW0" "$SBW3" "$SD" "$TD"' EXIT
+
 # --- P2-5: a session that COMMITS but never ticks its box must still stop the
 #     driver. ---
 # The circuit breaker is keyed to commits, which is the right signal for "did
@@ -517,7 +527,6 @@ assert_file_contains "$SD/nogit-al-err" "not a git repository" "refusal says the
 # 0 — so the next session gets the SAME item, commits again, resets again, and
 # the driver spends its entire cap on one backlog entry. Reproduced pre-fix at 8
 # sessions on "only item" with `grep -c 'starting: only item'`.
-SBW=$(mk_sandbox_repo)
 mkdir -p "$SBW/.loop"
 printf -- '- [ ] item A\n- [ ] item B\n' > "$SBW/.loop/backlog.md"
 STUB_MODE=commit-no-tick LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
@@ -526,29 +535,24 @@ assert_eq 1 "$rc" "commits without a tick end in a give-up exit 1"
 assert_eq 2 "$(grep -c 'session .* starting' "$SBW/.loop/unattended.log")" "the same item gets 2 sessions, not the whole 8-session cap"
 assert_file_contains "$SBW/.loop/unattended.log" "same backlog item" "the stop reason names what actually stalled"
 assert_file_contains "$SBW/.loop/unattended.log" "item A" "the stop reason quotes the item"
-rm -rf "$SBW"
 
 # An item that legitimately needs more than one session is the reason the arm
 # has an off switch; 0 restores the pre-fix behavior exactly.
-SBW0=$(mk_sandbox_repo)
 mkdir -p "$SBW0/.loop"
 printf -- '- [ ] only item\n' > "$SBW0/.loop/backlog.md"
 STUB_MODE=commit-no-tick LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
   LOOP_ENG_MAX_ITEM_SESSIONS=0 bash "$DRIVER" "$SBW0" 3 >/dev/null 2>&1 && rc=0 || rc=$?
 assert_eq 1 "$rc" "MAX_ITEM_SESSIONS=0 still gives up with the item pending"
 assert_eq 3 "$(grep -c 'session .* starting' "$SBW0/.loop/unattended.log")" "MAX_ITEM_SESSIONS=0 disables the same-item arm (runs to the cap)"
-rm -rf "$SBW0"
 
 # Ticking the box resets the counter — the healthy path must not trip the arm.
 # Three items, three sessions, default MAX_ITEM_SESSIONS=2: with a counter that
 # never reset, session 3 would be "the third on the same item" and break early.
-SBW3=$(mk_sandbox_repo)
 mkdir -p "$SBW3/.loop"
 printf -- '- [ ] one\n- [ ] two\n- [ ] three\n' > "$SBW3/.loop/backlog.md"
 STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
   bash "$DRIVER" "$SBW3" 5 >/dev/null 2>&1
 assert_eq 0 $? "three different items in a row do not trip the same-item arm"
 assert_eq 0 "$(grep -c '^- \[ \]' "$SBW3/.loop/backlog.md")" "all three items consumed"
-rm -rf "$SBW3"
 
 report "test-unattended-autoloop"

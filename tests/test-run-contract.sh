@@ -5,7 +5,7 @@ set -u
 
 RUNNER="$PLUGIN_ROOT/skills/loop-eng/scripts/run-contract.sh"
 SB=$(mk_sandbox_repo); trap 'rm -rf "$SB"' EXIT
-cd "$SB"
+cd "$SB" || exit 1
 mkdir -p .loop
 
 # --- all green ---

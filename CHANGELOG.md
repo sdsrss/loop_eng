@@ -100,6 +100,31 @@ discipline — the assertion that would have caught it first, then the fix.
   README's safety table gains the orchestrator row it was missing: it runs in
   your session with `Write` and `Bash`, and what is mechanical about it is that
   the evidence ledger is denied to it by the same hook as to everyone else.
+- **The shellcheck gate moves from `-S error` to `-S warning`.** Thirteen
+  warnings sat unchecked behind it and they were not cosmetic: nine were SC2164,
+  a `cd` with no `|| exit` — in a *test* suite, where a failed `cd` into the
+  sandbox means the remaining assertions run in the real working tree and start
+  deleting `.loop/` files there. The rest were `$?` read from a condition
+  instead of a command (SC2319, a live trap once the gate rises) and two
+  unused-looking variables. All thirteen are fixed; the two deliberate
+  exceptions carry an inline `# shellcheck disable=` with a reason. `-S style`
+  stays out — SC1091 alone is 12 hits with nothing to fix.
+- **Every scratch directory a test suite creates is now in its EXIT trap, and
+  `test-harness.sh` checks that statically.** Two suites cleaned theirs with an
+  inline `rm` a killed run never reaches, and one of those used a bare
+  `mktemp -d` with no name pattern, so it did not even appear in a
+  `loop-eng-*` scan of `$TMPDIR`. The scan found more than the audit did: the
+  two unattended suites re-install a longer trap beside each new sandbox, a
+  hand-maintained list that had already dropped `$SBG`/`$SBG2` once and `$SB9`
+  again — and only the last trap installed is the one that runs. The check has
+  two halves for that reason: every scratch variable must appear in *some* trap,
+  and in the *final* one.
+- **`sync-local.sh` prunes before it copies.** `commands/`, `agents/` and
+  `hooks/` were copied over and never cleaned, so a file deleted or renamed at
+  the root kept its stale copy in `.claude/` — the tree that actually loads
+  while working in this repo, which then went on registering a command or hook
+  the plugin no longer ships. `skills/` already did this; the other three did
+  not. `.claude/settings.json` is still never touched.
 - **Three README sections that restate repo facts now derive from them.** The
   env-var table was missing `LOOP_ENG_PLUGIN_CACHE_DIR`; the layout block named
   two of four `hooks/` files and called six `skills/loop-eng/scripts/` entries

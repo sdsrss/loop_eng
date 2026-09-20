@@ -13,7 +13,7 @@
 set -u
 . "$(dirname "$0")/lib.sh"
 
-cd "$PLUGIN_ROOT"
+cd "$PLUGIN_ROOT" || exit 1
 
 # Bare-path invocations in README code fences: an optional ./ then a repo-relative
 # *.sh at the start of a line. A line that starts with `bash ` is NOT a bare-path
@@ -149,6 +149,7 @@ has commands/autoloop.md "the ledger wins" "step 3 has a branch for a green repo
 
 # Every LOOP_ENG_* a shipped script reads must be in the README table, and every
 # row in the table must name a variable some script reads.
+# shellcheck disable=SC2046  # the file list must word-split; same as run-all.sh
 CODE_VARS=$(grep -ohE 'LOOP_ENG_[A-Z_]+' $(git ls-files '*.sh') | sort -u)
 DOC_VARS=$(grep -oE '^\| `LOOP_ENG_[A-Z_]+`' README.md | tr -d '|` ' | sort -u)
 undocumented=$(comm -23 <(printf '%s\n' "$CODE_VARS") <(printf '%s\n' "$DOC_VARS") | tr '\n' ' ')

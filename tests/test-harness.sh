@@ -32,6 +32,7 @@ assert_eq 1 "$rc" "report() still fails when an assertion failed"
 
 # PASS=0 with failures is the ordinary all-red case, not the unrun case: it must
 # fail for the normal reason, and the guard above must not be what catches it.
+# shellcheck disable=SC2034  # PASS is read by report(), which lives in lib.sh
 ( PASS=0; FAIL=2; report "probe-allred" >"$TD/allred-out" 2>"$TD/allred-err" ) && rc=0 || rc=$?
 assert_eq 1 "$rc" "report() fails when every assertion failed"
 if grep -qF "no assertions" "$TD/allred-err"; then
@@ -63,6 +64,48 @@ for suite in test-manifest test-hooks-json; do
   PATH="$TD/bin" bash "$PLUGIN_ROOT/tests/$suite.sh" >"$TD/$suite.out" 2>"$TD/$suite.err" && rc=0 || rc=$?
   assert_eq 1 "$rc" "$suite exits non-zero on a host with no JSON parser (was: 0 passed, 0 failed, exit 0)"
   assert_file_contains "$TD/$suite.err" "no assertions" "$suite says it checked nothing rather than reporting green"
+done
+
+# --- P3-6: every scratch dir a suite creates must be in its EXIT trap --------
+# CLAUDE.md's rule is "builds a throwaway repo, cleans it on a `trap ... EXIT`",
+# and two suites had grown scratch dirs cleaned by an inline `rm` instead — which
+# a killed suite (CI cancel, Ctrl-C, a hung assertion) never reaches. One of
+# them used a bare `mktemp -d` with no name pattern, so it did not even show up
+# in a `loop-eng-*` leak scan of $TMPDIR. Checked statically rather than by
+# leak-scanning a run: a leak only appears on the abnormal exits, which is
+# exactly when no test is watching.
+for f in "$PLUGIN_ROOT"/tests/test-*.sh; do
+  base=$(basename "$f")
+  # A trap INSTALLATION: comment lines dropped first, then `trap` at the start
+  # of a statement — so the one-line `X=$(mktemp -d); trap ... EXIT` form counts
+  # while the same words quoted in prose do not. Both halves are load-bearing:
+  # without the anchor this file failed against its own scan's pattern string,
+  # and without the comment filter it failed against the sentence describing the
+  # anchor.
+  traps=$(grep -vE '^[[:space:]]*#' "$f" | grep -E '(^|;[[:space:]]*)trap .+EXIT' || true)
+  vars=$(grep -oE '^[[:space:]]*[A-Z_][A-Za-z0-9_]*=\$\((mktemp -d|mk_sandbox_repo)' "$f" \
+           | sed -E 's/^[[:space:]]*//; s/=\$\(.*//' | sort -u)
+  for v in $vars; do
+    case "$traps" in
+      *"\$$v"*|*"\${$v}"*) PASS=$((PASS+1)) ;;
+      *) FAIL=$((FAIL+1))
+         echo "  FAIL: $base creates \$$v (mktemp -d / mk_sandbox_repo) but no EXIT trap removes it" >&2 ;;
+    esac
+  done
+  # ...and the LAST trap must name them all. Two suites re-install a longer trap
+  # beside each new sandbox, a hand-maintained list that grows by one name per
+  # sandbox — and it had already dropped names twice, so a sandbox registered
+  # early was silently unregistered again by a later line. Only the last trap
+  # installed is the one that runs.
+  last_trap=$(printf '%s\n' "$traps" | tail -1)
+  [ -n "$last_trap" ] || continue
+  for v in $vars; do
+    case "$last_trap" in
+      *"\$$v"*|*"\${$v}"*) PASS=$((PASS+1)) ;;
+      *) FAIL=$((FAIL+1))
+         echo "  FAIL: $base's FINAL EXIT trap drops \$$v — a later trap re-install removed it from the list" >&2 ;;
+    esac
+  done
 done
 
 report "test-harness"

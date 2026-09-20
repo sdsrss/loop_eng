@@ -6,7 +6,7 @@ set -u
 ARM="$PLUGIN_ROOT/skills/loop-eng/scripts/arm-contract.sh"
 RUNNER="$PLUGIN_ROOT/skills/loop-eng/scripts/run-contract.sh"
 SB=$(mk_sandbox_repo); trap 'rm -rf "$SB"' EXIT
-cd "$SB"
+cd "$SB" || exit 1
 mkdir -p .loop
 
 # --- arm pins the hash, creates active, clears a stale gate-count ---
@@ -66,7 +66,7 @@ NOIGN=$(cd "$NOIGN" && pwd)
 IGNOUT=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-ignout.XXXXXX")
 trap 'rm -rf "$SB" "$NOIGN" "$IGNOUT"' EXIT
 (
-  cd "$NOIGN"
+  cd "$NOIGN" || exit 1
   git init -q; git config user.email test@loop-eng.local; git config user.name loop-eng-test
   echo sandbox > README.md; git add README.md; git commit -qm initial
 ) >/dev/null
@@ -94,7 +94,7 @@ TRACKED=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-tracked.XXXXXX")
 TRACKED=$(cd "$TRACKED" && pwd)
 trap 'rm -rf "$SB" "$NOIGN" "$IGNOUT" "$TRACKED"' EXIT
 (
-  cd "$TRACKED"
+  cd "$TRACKED" || exit 1
   git init -q; git config user.email test@loop-eng.local; git config user.name loop-eng-test
   mkdir -p .loop; printf 'ok\tstill fine\ttrue\n' > .loop/criteria.tsv
   git add -A -f; git commit -qm "loop bookkeeping committed by mistake"

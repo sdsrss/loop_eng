@@ -18,7 +18,7 @@ mk_sandbox_repo() {
   # comparing the two then fail on paths that are the same directory.
   sb=$(cd "$sb" && pwd)
   (
-    cd "$sb"
+    cd "$sb" || exit 1
     git init -q
     git config user.email test@loop-eng.local
     git config user.name loop-eng-test

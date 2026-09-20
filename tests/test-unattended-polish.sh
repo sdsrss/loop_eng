@@ -384,7 +384,11 @@ fi
 # no symlink can cover is /usr/bin/env, which the stub's and the fake wrapper's
 # shebangs reach by absolute path — outside PATH, so outside this list.
 TD=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-polishto.XXXXXX")
-trap 'rm -rf "$SB" "$SD" "$TD"' EXIT
+SBF=$(mk_sandbox_repo)
+# One trap naming every sandbox this suite creates. Growing the list beside each
+# new sandbox is how the autoloop suite ended up dropping names from its own
+# final trap — only the last trap installed runs.
+trap 'rm -rf "$SB" "$SBF" "$SD" "$TD"' EXIT
 mkdir -p "$TD/bin"
 for b in bash git grep mkdir rm find wc tail cat date tee; do
   bp=$(command -v "$b" 2>/dev/null) || bp=""
@@ -444,7 +448,6 @@ assert_eq 0 "$(wc -c < "$TD/record" | tr -d ' ')" "nothing wrapped the session w
 # -p`'s, which is 0 in all three cases. An operator watching exit codes could
 # not tell a completed nightly fix run from one that abandoned the tree
 # mid-edit, and the abandoned one poisons every later run (dirty tree, refusing).
-SBF=$(mk_sandbox_repo)
 mkdir -p "$SBF/src"; printf '#!/usr/bin/env bash\ntrue\n' > "$SBF/src/a.sh"
 (cd "$SBF" && git add -A >/dev/null && git commit -qm "src")
 STUB_MODE=dirty LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
@@ -482,6 +485,5 @@ assert_eq 0 $? "a passing LOOP_ENG_POST_CHECK leaves the run green"
 STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" LOOP_ENG_POST_CHECK='exit 4' \
   bash "$SCRIPT" "$SBF" src/ >/dev/null 2>&1
 assert_eq 0 $? "LOOP_ENG_POST_CHECK does not run in report-only mode"
-rm -rf "$SBF"
 
 report "test-unattended-polish"

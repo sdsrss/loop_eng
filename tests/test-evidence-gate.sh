@@ -4,8 +4,15 @@ set -u
 . "$(dirname "$0")/lib.sh"
 
 GATE="$PLUGIN_ROOT/hooks/evidence-gate.sh"
-SB=$(mk_sandbox_repo); trap 'rm -rf "$SB"' EXIT
-cd "$SB"
+SB=$(mk_sandbox_repo)
+# Both fake-PATH dirs are declared HERE and covered by the one EXIT trap. As
+# inline `FAKE=$(mktemp -d)` further down they were cleaned by an inline `rm`,
+# which a killed suite (CI cancel, Ctrl-C) never reaches — and being unnamed,
+# they did not even match the suite's own `loop-eng-*` leak scan.
+FAKE_PY=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-nojq.XXXXXX")
+FAKE_NONE=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-noparser.XXXXXX")
+trap 'rm -rf "$SB" "$FAKE_PY" "$FAKE_NONE"' EXIT
+cd "$SB" || exit 1
 mkdir -p .loop/evidence
 
 gate() { # json -> exit code of gate
@@ -191,7 +198,7 @@ assert_file_contains .loop/err '<loop-eng plugin root>' "deny falls back to a pl
 # parser is untested and could regress silently. Force it by hiding jq behind a
 # minimal PATH that has only the tools the gate needs.
 if command -v python3 >/dev/null 2>&1; then
-  FAKE=$(mktemp -d)
+  FAKE="$FAKE_PY"
   # Mirror the tools the gate uses (bash for its own subshells, cat for stdin,
   # python3 for the fallback parser, plus the coreutils the path checks call) —
   # everything EXCEPT jq, so `command -v jq` fails and the python3 branch runs.
@@ -206,7 +213,7 @@ if command -v python3 >/dev/null 2>&1; then
   else
     echo "  SKIP: could not hide jq from PATH — python3 branch not forced" >&2
   fi
-  rm -rf "$FAKE"
+  # cleanup is the EXIT trap's, not an inline rm a killed suite would skip
 fi
 
 # --- NEITHER parser present: the gate fails OPEN, loudly ---
@@ -216,7 +223,7 @@ fi
 # honest; the warning on stderr is the only signal a human gets that the layer
 # is inert, and a silent version of this path is indistinguishable from a
 # working gate. README's "Requirements" section documents it for users.
-FAKE=$(mktemp -d)
+FAKE="$FAKE_NONE"
 # Only what the gate itself needs to reach its own parser check — no jq, no
 # python3. `cat` is required: the gate reads stdin before deciding anything.
 for t in bash cat grep dirname sed; do
@@ -230,6 +237,6 @@ if ! PATH="$FAKE" bash -c 'command -v jq || command -v python3' >/dev/null 2>&1;
 else
   echo "  SKIP: could not hide both jq and python3 from PATH" >&2
 fi
-rm -rf "$FAKE"
+# cleanup is the EXIT trap's (see the top of this file)
 
 report "test-evidence-gate"

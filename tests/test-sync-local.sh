@@ -126,4 +126,29 @@ LOOP_ENG_PLUGIN_CACHE_DIR="$NO_CACHE" bash "$SB/scripts/sync-local.sh" >/dev/nul
 diff -q "$SB/hooks/evidence-gate.sh" "$SB/.claude/hooks/evidence-gate.sh" >/dev/null 2>&1
 assert_eq 0 $? "re-sync clears the drift"
 
+# --- P3-4: a file removed from the root must disappear from .claude/ too -----
+# commands/ agents/ hooks/ were copied over, never cleaned, so a command deleted
+# or renamed at the root left its old copy in the dogfood tree — and .claude/ is
+# what actually loads while working in this repo. The stale copy keeps
+# registering a command or hook that the plugin no longer ships, which is the
+# one thing a dogfood copy must never do: disagree with the source it exists to
+# mirror. skills/ was already handled (`rm -rf` before `cp -r`); the other three
+# were not. `diff -r` reports zero difference today, which is exactly why this
+# needed a test rather than an inspection.
+printf -- '---\nname: ghost\ndescription: removed from the root after a sync\n---\nghost\n' \
+  > "$SB/commands/ghost.md"
+printf -- '---\nname: ghost-agent\ndescription: likewise\ntools: Read\n---\nghost\n' \
+  > "$SB/agents/ghost-agent.md"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SB/hooks/ghost-hook.sh"
+LOOP_ENG_PLUGIN_CACHE_DIR="$NO_CACHE" bash "$SB/scripts/sync-local.sh" >/dev/null 2>&1
+assert_eq yes "$([ -f "$SB/.claude/commands/ghost.md" ] && echo yes || echo no)" "the ghost files were synced in the first place"
+rm -f "$SB/commands/ghost.md" "$SB/agents/ghost-agent.md" "$SB/hooks/ghost-hook.sh"
+LOOP_ENG_PLUGIN_CACHE_DIR="$NO_CACHE" bash "$SB/scripts/sync-local.sh" >/dev/null 2>&1
+assert_eq no "$([ -e "$SB/.claude/commands/ghost.md" ] && echo yes || echo no)" "a command deleted at the root is removed from .claude/"
+assert_eq no "$([ -e "$SB/.claude/agents/ghost-agent.md" ] && echo yes || echo no)" "an agent deleted at the root is removed from .claude/"
+assert_eq no "$([ -e "$SB/.claude/hooks/ghost-hook.sh" ] && echo yes || echo no)" "a hook deleted at the root is removed from .claude/"
+# ...and the sync still leaves settings.json alone, which is the one file in
+# .claude/ that is NOT a copy of anything.
+assert_eq "$SETTINGS_BEFORE" "$(cat "$SB/.claude/settings.json")" "pruning does not touch .claude/settings.json"
+
 report "test-sync-local"

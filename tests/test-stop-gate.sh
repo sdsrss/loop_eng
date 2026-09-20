@@ -5,7 +5,7 @@ set -u
 
 GATE="$PLUGIN_ROOT/hooks/stop-gate.sh"
 SB=$(mk_sandbox_repo); trap 'rm -rf "$SB"' EXIT
-cd "$SB"
+cd "$SB" || exit 1
 mkdir -p .loop
 
 # LOOP_ENG_GATE_DEDUP_WINDOW=0 turns OFF the same-stop-attempt replay (P2-19) for
@@ -15,6 +15,11 @@ mkdir -p .loop
 # registrations of one stop attempt and never counted. The replay has its own
 # section at the end of this file, where it runs at the default window.
 run_gate() { echo '{}' | LOOP_ENG_GATE_DEDUP_WINDOW=0 bash "$GATE" 2>"$1"; }
+
+# File-presence assertions read `"$([ -f x ] && echo 1)"` rather than
+# `[ -f x ]; assert_eq 0 $?`. The second form reads $? from a CONDITION, which
+# any assertion helper between the two statements would overwrite — shellcheck
+# SC2319, and a live trap once the gate is at `-S warning`.
 
 # --- no active marker -> allow ---
 run_gate /dev/null; assert_eq 0 $? "no marker allows stop"
@@ -71,10 +76,10 @@ else
   echo "  SKIP: no SHA-256 tool — the hash-lock half of the green path is not exercised" >&2
 fi
 run_gate /dev/null; assert_eq 0 $? "green criteria allows"
-[ ! -f .loop/active ]; assert_eq 0 $? "gate lifted (.loop/active removed)"
-[ ! -f .loop/gate-count ]; assert_eq 0 $? "green path clears the block counter (next loop starts at 0, not at 2/3)"
+assert_eq "" "$([ -f .loop/active ] && echo 1)" "gate lifted (.loop/active removed)"
+assert_eq "" "$([ -f .loop/gate-count ] && echo 1)" "green path clears the block counter (next loop starts at 0, not at 2/3)"
 if [ -n "$GREEN_SHA" ]; then
-  [ ! -f .loop/criteria.sha256 ]; assert_eq 0 $? "green path clears the hash-lock (next loop's arm is not 'tampered')"
+  assert_eq "" "$([ -f .loop/criteria.sha256 ] && echo 1)" "green path clears the hash-lock (next loop's arm is not 'tampered')"
 fi
 
 # --- timeout: a contract slower than the budget fails CLOSED (blocks) ---
@@ -84,7 +89,7 @@ if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; th
   touch .loop/active
   echo '{}' | LOOP_ENG_GATE_DEDUP_WINDOW=0 LOOP_ENG_GATE_TIMEOUT=1 bash "$GATE" 2>.loop/errT; assert_eq 2 $? "slow contract fails closed (blocks)"
   assert_file_contains .loop/errT 'did not finish within' "timeout block names the budget overrun"
-  [ -f .loop/active ]; assert_eq 0 $? "timeout block does NOT lift the gate"
+  assert_eq 1 "$([ -f .loop/active ] && echo 1)" "timeout block does NOT lift the gate"
   rm -f .loop/active .loop/gate-count
 else
   echo "  SKIP: no timeout(1)/gtimeout — cannot exercise fail-closed timeout" >&2
@@ -179,7 +184,7 @@ assert_eq "1" "$(cat .loop/gate-count 2>/dev/null)" "twin registration: first in
 echo '{}' | bash "$GATE" 2>.loop/errDup; assert_eq 2 $? "twin registration: second invocation still blocks"
 assert_eq "1" "$(cat .loop/gate-count 2>/dev/null)" "twin registration: second invocation does not double-count"
 assert_file_contains .loop/errDup 'same stop attempt' "twin registration: the replay says what it is"
-[ -f .loop/active ]; assert_eq 0 $? "twin registration: the replayed block does not lift the gate"
+assert_eq 1 "$([ -f .loop/active ] && echo 1)" "twin registration: the replayed block does not lift the gate"
 
 # An EXPIRED marker is not a stop attempt's twin — the next genuine attempt must
 # count. Written by hand rather than slept for: the window is the unit under
