@@ -53,6 +53,11 @@ cat > "$STUB" <<'EOF'
 # it nothing downstream could see WHICH prompt and WHICH permission flags the
 # driver handed claude — see the argv block below for what that hid.
 [ -n "${STUB_ARGV_LOG:-}" ] && printf '%s\n' "$@" > "$STUB_ARGV_LOG"
+# STUB_ENV_LOG captures the ENV bounds. argv is not the whole contract a driver
+# hands a session: the CLI's print-mode background ceiling is an environment
+# knob, and a bound the driver never sets is still a bound it runs under.
+[ -n "${STUB_ENV_LOG:-}" ] && printf 'CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=%s\n' \
+  "${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS-<unset>}" > "$STUB_ENV_LOG"
 case "${STUB_MODE:-ok}" in
   ok)    echo "polish report: 0 findings"; exit 0 ;;
   fail)  echo "boom"; exit 3 ;;
@@ -125,6 +130,20 @@ assert_eq "bypassPermissions" "$(argv_after "$SD/argv-report" --permission-mode)
   "session runs under --permission-mode bypassPermissions"
 assert_eq "120" "$(argv_after "$SD/argv-report" --max-turns)" \
   "session is capped at --max-turns 120"
+
+# ...and the bound that is NOT in argv. `claude -p` terminates still-running
+# background subagents after CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS and exits 0;
+# the CLI default is 600000 (10 minutes), against this driver's MAX_MINUTES
+# default of 120. A loop whose subagents the harness runs in the background is
+# therefore cut off by a bound the driver never set, twelve times sooner than
+# the one it did, and the truncated run is indistinguishable from a finished one
+# — report-only is even exempt from the post-run check. Measured 2026-09-20 on
+# CLI 2.1.278: a headless `/polish hooks/` reported subagent_stats
+# killed.system=1 with 4 of 5 dispatches completed, and exited 0.
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ENV_LOG="$SD/env-report" \
+  bash "$SCRIPT" "$SB" src/ >/dev/null
+assert_file_contains "$SD/env-report" "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0" \
+  "session gets an unbounded background ceiling, leaving timeout the only budget"
 
 # ...and the opted-in write mode is the ONLY way report-only comes off.
 STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ARGV_LOG="$SD/argv-fix" \

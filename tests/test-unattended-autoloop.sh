@@ -52,6 +52,11 @@ mk_stub() { # $1 = stub dir OUTSIDE any sandbox repo (untracked stub inside
 # only way a test can see WHICH command and WHICH permission flags the driver
 # handed claude. See the argv block below for what that hid.
 [ -n "${STUB_ARGV_LOG:-}" ] && printf '%s\n' "$@" > "$STUB_ARGV_LOG"
+# STUB_ENV_LOG captures the ENV bounds. argv is not the whole contract a driver
+# hands a session: the CLI's print-mode background ceiling is an environment
+# knob, and a bound the driver never sets is still a bound it runs under.
+[ -n "${STUB_ENV_LOG:-}" ] && printf 'CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=%s\n' \
+  "${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS-<unset>}" > "$STUB_ENV_LOG"
 case "${STUB_MODE:-progress}" in
   progress)
     # awk, not sed: GNU's first-match-only address `0,/re/` does not exist in
@@ -146,6 +151,20 @@ assert_eq "bypassPermissions" "$(argv_after "$SD/argv" --permission-mode)" \
   "session runs under --permission-mode bypassPermissions"
 assert_eq "150" "$(argv_after "$SD/argv" --max-turns)" \
   "session is capped at --max-turns 150"
+
+# ...and the bound that is NOT in argv. `claude -p` terminates still-running
+# background subagents after CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS and exits 0;
+# the CLI default is 600000 (10 minutes), against this driver's MAX_MINUTES
+# default of 240. Every round of this loop dispatches a builder and a checker,
+# and autoloop.md:253 already records that the harness may run those in the
+# background — so the cap the driver never set fires twenty-four times sooner
+# than the one it did, and the session still exits 0 for the driver to read as
+# a finished round.
+printf -- '- [ ] env probe item\n' > "$SB/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  STUB_ENV_LOG="$SD/env" bash "$DRIVER" "$SB" 1 >/dev/null 2>&1
+assert_file_contains "$SD/env" "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0" \
+  "session gets an unbounded background ceiling, leaving timeout the only budget"
 
 # The write-mode opt-in must gate the session itself, not just the exit code:
 # without LOOP_ENG_ALLOW_AUTOBUILD=1 no claude may be invoked at all.

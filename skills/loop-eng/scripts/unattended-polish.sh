@@ -257,7 +257,21 @@ _terminate() {
 }
 trap _terminate TERM INT HUP
 
+# The budget that is not in argv. In print mode the CLI waits for still-running
+# background tasks, then TERMINATES them and exits 0 — after
+# CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, default 600000 (10 minutes). /polish
+# dispatches four reviewers and a verifier per finding, and the harness may run
+# those in the background, so that default is the real bound on an unattended
+# run: twelve times shorter than MAX_MINUTES, set by nobody here, and invisible
+# afterwards because the truncated session still exits 0 (report-only is exempt
+# from the post-run check, so nothing downstream notices either). Hand the
+# session no ceiling and let the `timeout` above be the single budget, which is
+# what it was written to be. An operator who wants the CLI's own behaviour back
+# can still export the variable.
+BG_CEILING="${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-0}"
+
 STATUS=0
+CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="$BG_CEILING" \
 "${TIMEOUT_CMD[@]}" "$CLAUDE_BIN" -p "/polish $SCOPE $MODE" \
   --permission-mode bypassPermissions \
   --max-turns 120 \

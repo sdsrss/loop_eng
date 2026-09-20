@@ -316,7 +316,21 @@ while :; do
   SESSION_WRAP=()
   [ -n "$TIMEOUT_BIN" ] && SESSION_WRAP=("$TIMEOUT_BIN" -k 30 "$budget_left")
 
+  # The budget that is not in argv. In print mode the CLI waits for
+  # still-running background tasks, then TERMINATES them and exits 0 — after
+  # CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, default 600000 (10 minutes). Every
+  # round dispatches a builder and a checker, and the command's own dispatch
+  # note already records that the harness may run them in the background, so
+  # that default is the real bound on a session: twenty-four times shorter than
+  # MAX_MINUTES, set by nobody here, and invisible afterwards because the
+  # truncated session still exits 0 — which this driver reads as a finished
+  # round. Hand the session no ceiling and let the per-session `timeout` above
+  # be the single budget. An operator wanting the CLI's own behaviour back can
+  # still export the variable.
+  BG_CEILING="${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-0}"
+
   STATUS=0
+  CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS="$BG_CEILING" \
   "${SESSION_WRAP[@]}" "$CLAUDE_BIN" -p "/autoloop Take exactly ONE backlog item — the first unchecked '- [ ]' line in .loop/backlog.md: \"$item\". Before writing the contract, read .loop/state.md (if present) and run 'git log --oneline -10' for handoff context from previous sessions. If that line carries a '| verify:' command, run-contract.sh ticks it from the command's exit status and the evidence-gate denies you writing to the file — do not tick it yourself; if it carries none, tick it '- [x]' only after the checker reports ALL GREEN. Do not start any other backlog item." \
     --permission-mode bypassPermissions \
     --max-turns 150 \

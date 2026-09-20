@@ -2,8 +2,42 @@
 
 ## Unreleased
 
+### Fixed
+
+- **An unattended run was bounded by a ceiling neither driver set, twelve to
+  twenty-four times shorter than the one it did.** In print mode the CLI waits
+  for still-running background tasks, then **terminates them and exits 0** —
+  after `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, whose default is 600000 (10
+  minutes). Both loops dispatch subagents the harness may run in the
+  background, so that default, not `LOOP_ENG_MAX_MINUTES` (120 for polish, 240
+  for autoloop), was the real bound on every scheduled run. Nothing downstream
+  could notice: the truncated session exits 0 with `is_error: false`, a
+  report-only polish is exempt from the post-run check, and the autoloop driver
+  reads that exit as a finished round. Found by measurement rather than by
+  reading — a headless `/polish hooks/` reported `subagent_stats`
+  `killed.system: 1` with 4 of 5 dispatches completed, and still exited 0; the
+  same scope with the ceiling lifted completed **18** dispatches (4 reviewers,
+  12 verifiers, 2 workers) in 25 minutes. Both drivers now hand the session
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, leaving the `timeout` wrapper as
+  the single budget it was written to be; exporting the variable yourself still
+  wins. The suites gained the piece that made this invisible — the stub
+  recorded argv but not the environment, so a bound the driver never set was
+  one no assertion could see.
+
 ### Changed
 
+- **The README says what a run costs, from two measured runs rather than an
+  estimate.** A plugin whose pitch is "leave it running" owed a number and had
+  none. An `/autoloop` round fixing a failing assertion: 3 dispatches, 25,293
+  output tokens, 5.7 minutes. A `/polish` macro round over four files: 18
+  dispatches, 354,188 output tokens, 24.9 minutes. The four token classes are
+  listed apart on purpose — cache reads are 89% of the polish traffic and the
+  cheapest class, so one summed figure would overstate the load about 9× — and
+  the dollar column is labelled as the list-price computation it is, which is
+  not what a subscription pays. The note that makes the table reproducible is
+  the one that cost the most to learn: read `modelUsage`, not the top-level
+  `usage` block, which covers the main thread's last turn and counts no
+  subagent at all.
 - **The unattended section says how far to trust itself.** Closing the audit's
   six `--allow-write` blockers moved that path from "not production-grade" to
   usable, and every guard is now documented mechanism by mechanism — but the

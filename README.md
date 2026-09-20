@@ -293,6 +293,43 @@ contract budget (`LOOP_ENG_GATE_TIMEOUT`, 100s). `tests/test-hooks-json.sh`
 holds this snippet's matcher and script names equal to `hooks/hooks.json`, so
 the two registration sites cannot drift apart unnoticed.
 
+## What a run costs
+
+Measured, not estimated. Two real runs on 2026-09-20, Claude Code 2.1.278 on
+Opus, captured with `--output-format json`.
+
+|  | `/autoloop` | `/polish` |
+|---|---|---|
+| what ran | one round, fixing a failing assertion | one macro round, report-only |
+| scope | 2 files, 1 of 5 assertions red | 4 files (`hooks/`) |
+| **subagent dispatches** | **3** — builder, checker, worker | **18** — 4 reviewers, 12 verifiers, 2 workers |
+| output tokens | 25,293 | 354,188 |
+| cache writes | 91,155 | 1,172,891 |
+| cache reads | 755,861 | 12,149,033 |
+| uncached input | 78 | 496 |
+| wall clock | 5.7 min | 24.9 min |
+| list-price equivalent | $1.69 | $22.77 |
+
+Read the shape rather than the absolute numbers:
+
+- **Cost tracks dispatches, and for `/polish` dispatches track findings.** The
+  four review lenses are fixed; the one adversarial verifier per finding is not.
+  Four files produced twelve findings and therefore twelve verifiers — two
+  thirds of the run. A scope with nothing wrong in it is cheap.
+- **Cache reads are 89% of the polish traffic and are the cheapest class of
+  token.** Adding the four rows into one "13.7M tokens" figure would overstate
+  the real load by roughly 9×, which is why they are listed apart. Counting only
+  output plus cache writes puts a polish macro round at 1.53M and an autoloop
+  round at 0.12M.
+- **The dollar column is computed from list prices** — the JSON says
+  `"costBasis": "list"`. On a subscription it is not what you pay; use it to
+  compare the two loops against each other, not to budget.
+
+To measure your own, add `--output-format json` and read **`modelUsage`**, not
+the top-level `usage` block: `usage` is the main thread's last turn only and
+counts no subagent at all, which is where nearly all of the work happens. A run
+that dispatches a Sonnet subagent shows up in `modelUsage` as a second model.
+
 ## Unattended runs
 
 **How far to trust this.** Report-only is what this is built for and what to
