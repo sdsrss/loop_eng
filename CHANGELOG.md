@@ -62,6 +62,32 @@ and its intro names the guard-weakening rows correctly — rows 1-4, not "1-3 an
 5", which counted `curl` (a missing notice, not a guard) and skipped the polish
 timeout row.
 
+**Live-install smoke** (RELEASING.md §1, against this release's content): PASS on
+Claude Code 2.1.278, via a genuine `claude plugin marketplace add sdsrss/loop_eng`
++ `claude plugin install` into an isolated `CLAUDE_CONFIG_DIR`. A GitHub source,
+so the copy that enforced is the version-pinned
+`plugins/cache/loop-eng/loop-eng/0.14.0/` one and not the marketplace clone —
+both existed, and `arm-contract` printed `armed from` that cache path. No
+source-type disclosure is owed this time: 0.14.0 was on `main` before the smoke
+ran, which is what makes `marketplace add owner/repo` install the release's own
+content.
+
+Machine-verified rather than model-reported, by instrumenting the live cached
+hooks. Step 4: `DENY-FIRED … root=<the real cache path>` — not the
+`<loop-eng plugin root>` placeholder, so `CLAUDE_PLUGIN_ROOT` reaches hook
+processes — and `.loop/evidence/smoke.log` did not land under
+`--permission-mode bypassPermissions`. Step 5: `BLOCK-exit n=0..2` then
+`CEILING-RELEASE count=3` over a `generated_by: run-contract.sh` ledger reading
+`all_green: false` with the `red` criterion false, while `.loop/evidence/red.log`
+was written by the runner — the same directory the model had been denied a moment
+earlier, which is the whole invariant in two steps. Step 6: a full
+`/loop-eng:autoloop` round reached `all_green: true` on both criteria, `hello.txt`
+held `hi`, and `.loop/active` + `.loop/criteria.sha256` were removed by the gate
+rather than by the model. Reachable only if `${CLAUDE_PLUGIN_ROOT}` expanded
+inside the command markdown. That session's own closing summary asserted
+`.loop/active` was "still armed"; the disk said it was gone. The disk is the
+authority here, which is the point of the plugin.
+
 **Pre-ship review** (independent reviewer, fresh context, over `dcf2745..9b9f62f`):
 every numeric claim above re-measured, including under a real 3.2.57; no blocking
 finding; six accepted repairs. Two were load-bearing. The new UNBOUNDED warning
