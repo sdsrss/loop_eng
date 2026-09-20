@@ -430,13 +430,16 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   however innocently it was typed. The gate names the two-step form in its
   refusal: `rm .loop/active` first, then `rm -rf .loop/`. Once the loop is over
   (no `.loop/active`) the single command goes through unchanged.
-- **One file outlives an uninstall.** The update notifier's 24h throttle stamp
+- **One file outlives an uninstall.** The update notifier's throttle stamp
   lives at `${XDG_CACHE_HOME:-~/.cache}/loop-eng/update-check.json` — outside
   `~/.claude/`, deliberately, so it survives a version bump instead of being
   orphaned in the version-pinned plugin cache. `/plugin uninstall` does not
-  know about it. It is one line of JSON (a timestamp and a version string, no
-  identifiers); `rm -rf ~/.cache/loop-eng/` if you want a clean slate. Nothing
-  else the plugin writes lives outside your project's `.loop/`.
+  know about it. It is one line of JSON (two timestamps and a version string,
+  no identifiers); `rm -rf ~/.cache/loop-eng/` if you want a clean slate.
+  A successful check silences the network for 24h; a **failed** one — offline,
+  a 403, an uncomparable tag — silences it for 1h, so a machine with no
+  connectivity pays one 3-second `curl` an hour rather than one per session.
+  Nothing else the plugin writes lives outside your project's `.loop/`.
 
 ## What to loop (and what not to)
 

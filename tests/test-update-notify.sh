@@ -22,13 +22,24 @@ printf '{\n  "name": "loop-eng",\n  "version": "1.2.3",\n  "license": "MIT"\n}\n
 # --- fake curl on PATH: emits {"tag_name":"v$STUB_TAG"} + bumps a counter -----
 BIN="$WORK/bin"
 mkdir -p "$BIN"
-cat > "$BIN/curl" <<'EOF'
+# STUB_CURL_MODE drives the failure paths the hook documents but nothing
+# exercised: every run before this suite grew the modes below got a successful
+# body, so `curl` failing, returning nothing, or returning a tag the hook cannot
+# compare were three branches asserted only by reading them.
+mk_curl() {
+  cat > "$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
-# ignore all args; record the call, emit a canned GitHub releases body
+# ignore all args; record the call, then behave per STUB_CURL_MODE
 printf 'x' >> "$STUB_COUNT"
-printf '{"url":"x","tag_name":"v%s","name":"loop-eng %s"}\n' "$STUB_TAG" "$STUB_TAG"
+case "${STUB_CURL_MODE:-ok}" in
+  fail)  exit 7 ;;                       # curl(1)'s "failed to connect to host"
+  empty) exit 0 ;;                       # 200 with nothing in the body
+  *)     printf '{"url":"x","tag_name":"v%s","name":"loop-eng %s"}\n' "$STUB_TAG" "$STUB_TAG" ;;
+esac
 EOF
-chmod +x "$BIN/curl"
+  chmod +x "$BIN/curl"
+}
+mk_curl
 
 # --- a PATH with the real coreutils but NO curl (for the "curl missing" case) -
 NOBIN="$WORK/nocurl"
@@ -47,6 +58,12 @@ SUITE_BASH="${BASH:-$(command -v bash)}"
 ln -sf "$SUITE_BASH" "$NOBIN/bash"
 
 STUB_COUNT="$WORK/curl-count"
+# Set once here and flipped by the failure cases below. Deliberately a plain
+# variable and not a `VAR=x out=$(...)` prefix: in `A=1 B=$(cmd)` both halves
+# are assignments, so A persists for the whole suite instead of scoping to the
+# command — which is how an `empty` stub mode leaked forward and turned three
+# later, unrelated assertions red.
+STUB_CURL_MODE=ok
 
 # A sandbox HOME so the "never writes into ~/.claude" guarantee is checkable
 # without depending on where the test's TMPDIR happens to live (in some hosts
@@ -60,6 +77,16 @@ run_hook() {
   if [ "$nocurl" = "1" ]; then path="$NOBIN"; else path="$BIN:$PATH"; fi
   CLAUDE_PLUGIN_ROOT="$PROOT" XDG_CACHE_HOME="$cache" HOME="$FHOME" \
     STUB_TAG="$tag" STUB_COUNT="$STUB_COUNT" PATH="$path" \
+    STUB_CURL_MODE="${STUB_CURL_MODE:-ok}" \
+    "$SUITE_BASH" "$HOOK" </dev/null 2>"$WORK/err"
+}
+
+# Same, with CLAUDE_PLUGIN_ROOT under the caller's control (the "no manifest"
+# arms) — the hook's very first guard, and one nothing reached.
+run_hook_root() {
+  local root="$1" cache="$2"
+  CLAUDE_PLUGIN_ROOT="$root" XDG_CACHE_HOME="$cache" HOME="$FHOME" \
+    STUB_TAG=9.9.9 STUB_COUNT="$STUB_COUNT" PATH="$BIN:$PATH" \
     "$SUITE_BASH" "$HOOK" </dev/null 2>"$WORK/err"
 }
 
@@ -153,5 +180,99 @@ rm -f "$BIN/curl"
 out3=$(run_hook "$C5" 1.3.0 0); rc=$?
 assert_eq 0 "$rc" "case5: throttled run with stub removed exits 0"
 assert_file_contains <(printf '%s' "$out3") 'update available: v1.3.0' "case5: cached notice survives with no curl reachable (network truly skipped)"
+
+# ============================================================================
+# 6. P2-3: a FAILED check must back off, not retry on every SessionStart.
+#    `|| exit 0` sat above the state write, so an offline machine paid a 3s
+#    curl at the start of every session, forever, and nothing recorded that it
+#    had tried. The backoff window is 1h — short enough that a transient blip
+#    does not cost a day of notices, long enough that a plane ride costs one
+#    call rather than one per session.
+# ============================================================================
+mk_curl
+C6="$WORK/cache6"; : > "$STUB_COUNT"
+STUB_CURL_MODE=fail; out=$(run_hook "$C6" 1.3.0 0); rc=$?
+assert_eq 0 "$rc" "case6: a failed curl still exits 0 (fail-open)"
+assert_eq "" "$out" "case6: a failed curl emits no notice"
+assert_eq 1 "$(count_calls)" "case6: the failed run made its one call"
+STATE6="$C6/loop-eng/update-check.json"
+assert_eq yes "$([ -f "$STATE6" ] && echo yes || echo no)" "case6: a failed check is RECORDED, not forgotten"
+STUB_CURL_MODE=fail; out=$(run_hook "$C6" 1.3.0 0); rc=$?
+assert_eq 0 "$rc" "case6: the next session exits 0"
+assert_eq 1 "$(count_calls)" "case6: BACKOFF — the next session did not call the network again"
+
+# An empty 200 body is the same class and took the same silent path.
+C7="$WORK/cache7"; : > "$STUB_COUNT"
+STUB_CURL_MODE=empty; out=$(run_hook "$C7" 1.3.0 0)
+assert_eq "" "$out" "case7: an empty body emits no notice"
+assert_eq 1 "$(count_calls)" "case7: the empty-body run made its one call"
+STUB_CURL_MODE=empty; out=$(run_hook "$C7" 1.3.0 0)
+assert_eq 1 "$(count_calls)" "case7: an empty body backs off like any other failed check"
+STUB_CURL_MODE=ok
+
+# ============================================================================
+# 7. P3-2: a tag with a suffix (v1.3.0-rc1) is not comparable, and was dropped
+#    without recording the attempt — so a mis-published pre-release meant a 3s
+#    curl every session until someone noticed. Still no notice (telling anyone
+#    "1.3.0 is available" when the release is 1.3.0-rc1 would be wrong), but the
+#    attempt is now recorded.
+# ============================================================================
+C8="$WORK/cache8"; : > "$STUB_COUNT"
+out=$(run_hook "$C8" 1.3.0-rc1 0); rc=$?
+assert_eq 0 "$rc" "case8: a suffixed tag exits 0"
+assert_eq "" "$out" "case8: a suffixed tag emits no notice"
+assert_eq 1 "$(count_calls)" "case8: the suffixed-tag run made its one call"
+out=$(run_hook "$C8" 1.3.0-rc1 0)
+assert_eq 1 "$(count_calls)" "case8: BACKOFF — a suffixed tag is not re-fetched every session"
+
+# ...and the backoff expires: an old failure stamp must not silence the check
+# forever. Rewritten by hand rather than slept for — the window is the unit
+# under test, not the clock.
+printf '{"last_check":0,"latest":"","last_fail":%s}\n' "$(( $(date +%s) - 7200 ))" > "$C8/loop-eng/update-check.json"
+out=$(run_hook "$C8" 1.4.0 0)
+assert_eq 2 "$(count_calls)" "case8: an EXPIRED backoff lets the next session check again"
+assert_file_contains <(printf '%s' "$out") 'update available: v1.4.0' "case8: and the recovered check notifies"
+
+# ============================================================================
+# 8. P3-7: the remaining unreached branches.
+# ============================================================================
+# A corrupt state file must not wedge the hook into permanent silence: every
+# field is unreadable, so the run is treated as un-throttled and checks.
+C9="$WORK/cache9"; : > "$STUB_COUNT"
+mkdir -p "$C9/loop-eng"
+printf 'not json at all {{{\n' > "$C9/loop-eng/update-check.json"
+out=$(run_hook "$C9" 1.3.0 0); rc=$?
+assert_eq 0 "$rc" "case9: a corrupt state file does not break the hook"
+assert_eq 1 "$(count_calls)" "case9: a corrupt state file is treated as no state — the check runs"
+assert_file_contains <(printf '%s' "$out") 'update available: v1.3.0' "case9: and the notice still appears"
+
+# No CLAUDE_PLUGIN_ROOT (the hook's first guard) and a root with no manifest:
+# silent, exit 0, and above all no network call.
+: > "$STUB_COUNT"
+out=$(run_hook_root "" "$WORK/cache10"); rc=$?
+assert_eq 0 "$rc" "case10: unset CLAUDE_PLUGIN_ROOT exits 0"
+assert_eq "" "$out" "case10: unset CLAUDE_PLUGIN_ROOT is silent"
+assert_eq 0 "$(count_calls)" "case10: unset CLAUDE_PLUGIN_ROOT never reaches the network"
+mkdir -p "$WORK/emptyroot"
+out=$(run_hook_root "$WORK/emptyroot" "$WORK/cache11"); rc=$?
+assert_eq 0 "$rc" "case11: a plugin root with no manifest exits 0"
+assert_eq 0 "$(count_calls)" "case11: a missing manifest never reaches the network"
+
+# A manifest whose version is unreadable is the same class one level in.
+BADROOT="$WORK/badroot"; mkdir -p "$BADROOT/.claude-plugin"
+printf '{"name":"loop-eng","version":"not-a-version"}\n' > "$BADROOT/.claude-plugin/plugin.json"
+: > "$STUB_COUNT"
+out=$(run_hook_root "$BADROOT" "$WORK/cache12"); rc=$?
+assert_eq 0 "$rc" "case12: an unreadable installed version exits 0"
+assert_eq 0 "$(count_calls)" "case12: nothing to compare against means no network call"
+
+# Two-segment versions: ver_field defaults the missing patch to 0, so 1.3 must
+# compare as 1.3.0 and beat the installed 1.2.3.
+C13="$WORK/cache13"; : > "$STUB_COUNT"
+out=$(run_hook "$C13" 1.3 0)
+assert_file_contains <(printf '%s' "$out") 'update available: v1.3' "case13: a two-segment tag compares as <major>.<minor>.0"
+C14="$WORK/cache14"; : > "$STUB_COUNT"
+out=$(run_hook "$C14" 1.2 0)
+assert_eq "" "$out" "case14: a two-segment tag BELOW the installed version stays silent"
 
 report "test-update-notify"

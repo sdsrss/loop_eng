@@ -20,9 +20,11 @@
 # envelope is built by plain string interpolation — no jq dependency.
 #
 # THROTTLE: a state file under ${XDG_CACHE_HOME:-$HOME/.cache}/loop-eng/ records
-# the last successful check's epoch + latest version. Within 24h the network is
-# NOT touched — the cached latest is reused. The state file NEVER lives under
-# ~/.claude/ or the version-specific plugin cache.
+# the last successful check's epoch + latest version, and the epoch of the last
+# FAILED one. Within 24h of a success the network is NOT touched — the cached
+# latest is reused; within 1h of a failure it is not touched either, so an
+# offline machine pays one curl an hour instead of one per session. The state
+# file NEVER lives under ~/.claude/ or the version-specific plugin cache.
 #
 # bash 3.2-safe: no associative arrays, no ${var,,}, no mapfile.
 set -u
@@ -53,33 +55,73 @@ state="$cache_dir/update-check.json"
 now=$(date +%s 2>/dev/null || echo 0)
 [ -n "$now" ] || now=0
 
+read_num() { # $1 key -> non-negative integer from $state, 0 when absent/garbage
+  n=$(grep -o "\"$1\"[[:space:]]*:[[:space:]]*[0-9]*" "$state" \
+        | head -1 | sed -e 's/.*[^0-9]\([0-9][0-9]*\)$/\1/')
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  printf '%s' "$n"
+}
+
+write_state() { # $1 last_check  $2 latest  $3 last_fail
+  mkdir -p "$cache_dir" 2>/dev/null || return 0
+  printf '{"last_check":%s,"latest":"%s","last_fail":%s}\n' "$1" "$2" "$3" \
+    >"$state" 2>/dev/null || true
+  return 0
+}
+
 cached_latest=""
 last_check=0
+last_fail=0
 if [ -f "$state" ]; then
-  last_check=$(grep -o '"last_check"[[:space:]]*:[[:space:]]*[0-9]*' "$state" \
-                 | head -1 | sed -e 's/.*[^0-9]\([0-9][0-9]*\)$/\1/')
-  case "$last_check" in ''|*[!0-9]*) last_check=0 ;; esac
+  last_check=$(read_num last_check)
+  last_fail=$(read_num last_fail)
   cached_latest=$(extract_version latest <"$state")
 fi
 
 age=$(( now - last_check ))
+fail_age=$(( now - last_fail ))
 latest=""
 if [ "$last_check" -gt 0 ] && [ "$age" -ge 0 ] && [ "$age" -lt 86400 ]; then
   # Throttled: within 24h of a successful check — DO NOT touch the network.
   latest="$cached_latest"
+elif [ "$last_fail" -gt 0 ] && [ "$fail_age" -ge 0 ] && [ "$fail_age" -lt 3600 ]; then
+  # Backed off: the last attempt FAILED less than an hour ago.
+  #
+  # Every failure path below used to `exit 0` before reaching the state write,
+  # so nothing recorded that an attempt had been made. On a machine that is
+  # simply offline — a plane, a locked-down network, a GitHub 403 — that meant
+  # a 3-second curl at the start of every single session, forever, with no
+  # trace of why. An hour is the deliberate middle: long enough that a flight
+  # costs one call rather than one per session, short enough that a transient
+  # blip does not cost a day of notices the way reusing the 24h window would.
+  latest="$cached_latest"
 else
-  # Not throttled: one guarded network call. Any failure -> fail-open, no write.
+  # Not throttled: one guarded network call. Every failure is fail-open AND
+  # recorded, so the next session backs off instead of repeating it.
   command -v curl >/dev/null 2>&1 || exit 0
   body=$(curl --max-time 3 -fsSL -H "Accept: application/vnd.github+json" \
            "https://api.github.com/repos/sdsrss/loop_eng/releases/latest" \
-           2>/dev/null) || exit 0
-  [ -n "$body" ] || exit 0
+           2>/dev/null) || body=""
+  if [ -z "$body" ]; then
+    write_state "$last_check" "$cached_latest" "$now"
+    exit 0
+  fi
   latest=$(printf '%s' "$body" | extract_version tag_name)
-  case "$latest" in ''|*[!0-9.]*) exit 0 ;; esac
-  # Persist the successful check for the next 24h. Never under ~/.claude/.
-  mkdir -p "$cache_dir" 2>/dev/null || exit 0
-  printf '{"last_check":%s,"latest":"%s"}\n' "$now" "$latest" \
-    >"$state" 2>/dev/null || true
+  # A tag this cannot compare — empty, garbage, or carrying a pre-release
+  # suffix like v1.3.0-rc1 (extract_version keeps the suffix, which fails the
+  # digits-and-dots test). Still no notice: announcing "1.3.0 is available"
+  # when the release is 1.3.0-rc1 would be wrong. But it IS an attempt, and
+  # before this it was discarded without one being recorded — so a single
+  # mis-published pre-release meant a curl every session until someone noticed.
+  # `releases/latest` does not return pre-releases, so that is the only route.
+  case "$latest" in
+    ''|*[!0-9.]*)
+      write_state "$last_check" "$cached_latest" "$now"
+      exit 0 ;;
+  esac
+  # Persist the successful check for the next 24h, clearing the failure stamp.
+  # Never under ~/.claude/.
+  write_state "$now" "$latest" 0
 fi
 
 # Nothing usable to compare against -> stay silent.

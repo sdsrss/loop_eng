@@ -45,6 +45,17 @@ discipline — the assertion that would have caught it first, then the fix.
 
 ### Fixed
 
+- **A failed update check now backs off for an hour instead of retrying every
+  session.** Every failure path in the notifier — no connectivity, a 403, an
+  empty body, a tag it cannot compare — exited above the state write, so
+  nothing recorded that an attempt had been made and an offline machine paid a
+  3-second `curl` at the start of every session, forever, with no trace of why.
+  The state file gains a `last_fail` stamp; a success still silences the
+  network for 24h, a failure for 1h. One hour rather than reusing the 24h
+  window: a flight should cost one call, a transient blip should not cost a day
+  of notices. A pre-release tag (`v1.3.0-rc1`) still produces no notice —
+  announcing "1.3.0 is available" for a release that is not 1.3.0 would be
+  wrong — but is now recorded as an attempt rather than silently discarded.
 - **`uninstall-timer.sh` now stops the `.service`, not only the `.timer`.**
   systemd's `--now` applies to the unit it is given, so uninstalling at 03:05
   removed the schedule and left that night's `bypassPermissions` session running
