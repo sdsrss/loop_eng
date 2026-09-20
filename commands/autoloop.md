@@ -67,9 +67,19 @@ ordered. Each loop round takes exactly ONE backlog item.
 Backlog lines use checkbox syntax: `- [ ] <item> | verify: <command>`
 pending, `- [x] <item> | verify: <command>` done — each line carries its
 verify command so per-item machine-verifiable criteria survive into the
-backlog, same format as roadmap triage below. When a backlog item's round
-ends ALL GREEN, mark its line `- [x]` — the unattended cross-session driver
-consumes this file and stops when no `- [ ]` lines remain.
+backlog, same format as roadmap triage below. The unattended cross-session
+driver consumes this file and stops when no `- [ ]` lines remain.
+
+**You do not tick these boxes.** `run-contract.sh` runs each pending line's
+verify command on every stop attempt and ticks the line when it exits 0 — the
+box is a machine-written fact, exactly like `"passes": true` in the ledger, and
+the tick lands in `.loop/results.json` under `"backlog"`. While the loop is
+armed the evidence-gate DENIES writes to a backlog carrying `| verify:` lines,
+so an attempt to tick one yourself is refused. If a box will not tick, the
+verify command is failing — fix the code, or the command, before the loop is
+armed. (A backlog with no `| verify:` commands at all is the older
+model-ticked shape: nothing runs and nothing is locked. Prefer verify
+commands — a box you can type is a claim, not a result.)
 
 ### Roadmap input (a document instead of a task)
 
@@ -190,7 +200,14 @@ falls back to it when criteria.tsv is absent.)
        only partly parsed or could not run at all. That is never a green round:
        fix `.loop/criteria.tsv` — which needs a human, since the evidence-gate
        locks it while armed (`LOOP_ENG_DISABLE_EVIDENCE_GATE=1`) — and say so.
-   - tick the current item's backlog line `- [x]`;
+   - the current item's backlog line is ticked by the run-contract call you just
+     made, from its `| verify:` command's exit status — do not tick it yourself
+     (the evidence-gate denies it). Read the refreshed `.loop/backlog.md`: if
+     the line is still `- [ ]`, its verify command did not pass, so the item is
+     NOT done whatever the checker said — treat the round as FAILED and go to 1
+     with that command's failure. A backlog line carrying no `| verify:`
+     command is the older model-ticked shape; tick that one yourself, and say in
+     the wrap-up that it was ticked on a report rather than a run;
    - if any `- [ ]` line remains and the round budget is not exhausted, go to 1
      with the next item;
    - only when no `- [ ]` line remains (or there was no backlog at all) is the

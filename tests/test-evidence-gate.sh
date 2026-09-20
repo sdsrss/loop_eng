@@ -72,12 +72,33 @@ gate "${B/CMD/rm .loop/state.md}";                assert_eq 0 $? "Bash rm .loop/
 gate "${B/CMD/rm -rf .loopback}";                 assert_eq 0 $? "Bash rm of a same-prefix sibling dir allowed when armed"
 gate "${B/CMD/echo see .loop for the logs}";      assert_eq 0 $? "naming .loop with no write verb allowed when armed"
 
+# --- P3-12: a MACHINE-TICKED backlog joins the protected set while armed -----
+# A backlog whose lines carry `| verify: <cmd>` is ticked by run-contract from
+# the command's exit status, so a model write to it is a completion claim typed
+# into the file the ledger exists to produce. A backlog with no verify commands
+# keeps the old model-ticked contract and stays writable — opting in is what
+# locks it, so nobody's existing loop changes under them.
+printf -- '- [ ] plain item\n' > .loop/backlog.md
+gate "${W/FILE/.loop/backlog.md}";                assert_eq 0 $? "an opt-out backlog stays writable when armed"
+gate "${B/CMD/sed -i s/x/y/ .loop/backlog.md}";   assert_eq 0 $? "Bash write to an opt-out backlog allowed when armed"
+printf -- '- [ ] machine item | verify: true\n' > .loop/backlog.md
+gate "${W/FILE/.loop/backlog.md}";                assert_eq 2 $? "Write to a machine-ticked backlog denied when armed"
+gate "${E/FILE/.loop/backlog.md}";                assert_eq 2 $? "Edit to a machine-ticked backlog denied when armed"
+gate "${W/FILE/$SB/.loop/backlog.md}";            assert_eq 2 $? "abs-path machine-ticked backlog denied when armed"
+gate "${B/CMD/sed -i s/x/y/ .loop/backlog.md}";   assert_eq 2 $? "Bash sed -i on a machine-ticked backlog denied when armed"
+gate "${B/CMD/echo x > .loop/backlog.md}";        assert_eq 2 $? "Bash redirect into a machine-ticked backlog denied when armed"
+printf '%s' "${W/FILE/.loop/backlog.md}" | bash "$GATE" 2>.loop/err3 || true
+assert_file_contains .loop/err3 'verify:' "the backlog deny names what made the file machine-ticked"
+
 # --- results.json/evidence: always denied, armed or not ---
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied while armed"
 rm -f .loop/active
 # The whole-dir deny is armed-scoped like the contract lock: once the loop has
 # ended, `rm -rf .loop` is the documented cleanup and must go through.
 gate "${B/CMD/rm -rf .loop}";                     assert_eq 0 $? "Bash rm -rf .loop allowed when not armed"
+# So is the backlog lock — between loops the next backlog has to be writable.
+gate "${W/FILE/.loop/backlog.md}";                assert_eq 0 $? "machine-ticked backlog writable when not armed"
+rm -f .loop/backlog.md
 gate "${W/FILE/.loop/criteria.sha256}";           assert_eq 0 $? "criteria.sha256 rewrite allowed when not armed"
 rm -f .loop/criteria.sha256
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied with no active (explicit)"

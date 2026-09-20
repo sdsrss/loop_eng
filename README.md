@@ -216,11 +216,34 @@ Scope notes:
   a reason to double-register: the contract still runs twice per stop on any
   event the window does not cover, and every other hook fires twice regardless.
   Pick one registration site, not both.
-- **The `backlog` criterion is a trust boundary, not a mechanism.** The
-  all-boxes-ticked completion check reads `.loop/backlog.md`, which the
-  orchestrator can write; so "tick a box only after a checker reports ALL GREEN"
-  is a red line the orchestrator honors, not something the hooks enforce — the
-  same residual class as the documented "adversarial disarm is out of scope."
+- **A backlog box is ticked by a command, not by a claim.** `.loop/backlog.md`
+  holds one line per item; a line written
+
+  ```
+  - [ ] Cart totals include tax | verify: npx vitest run src/cart/tax.test.ts
+  ```
+
+  is ticked by `run-contract.sh` when that command exits 0 — on every stop
+  attempt, from the exit status, with the outcome recorded in
+  `.loop/results.json` under `"backlog"`. While the loop is armed the
+  evidence-gate denies model writes to a backlog carrying any `| verify:` line,
+  so a tick cannot be typed. Only **pending** lines are re-verified: cost is
+  proportional to work remaining, and a ticked item going red is already the
+  checker's regression case.
+
+  To make "every box ticked" a contract criterion rather than a reading of the
+  file, add one line to `criteria.tsv` (this is the `backlog` criterion the
+  Resuming note below refers to):
+
+  ```
+  backlog	every backlog item is ticked	! grep -q '^- \[ \]' .loop/backlog.md
+  ```
+
+  A backlog with **no** `| verify:` commands is the older shape: nothing runs,
+  nothing is locked, and the orchestrator ticks boxes on the checker's report.
+  That is a trust boundary — the same residual class as "adversarial disarm is
+  out of scope" — so prefer verify commands. Opting in is what locks the file,
+  which is why no existing loop changes under anyone.
 - **Resuming an interrupted loop: reconcile before continuing.** After a context
   switch or crash, reconcile `git log` against the backlog ticks FIRST — a box
   may be ticked while its commit is missing, or a commit may have landed with its

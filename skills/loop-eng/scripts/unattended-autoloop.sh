@@ -317,7 +317,7 @@ while :; do
   [ -n "$TIMEOUT_BIN" ] && SESSION_WRAP=("$TIMEOUT_BIN" -k 30 "$budget_left")
 
   STATUS=0
-  "${SESSION_WRAP[@]}" "$CLAUDE_BIN" -p "/autoloop Take exactly ONE backlog item — the first unchecked '- [ ]' line in .loop/backlog.md: \"$item\". Before writing the contract, read .loop/state.md (if present) and run 'git log --oneline -10' for handoff context from previous sessions. On ALL GREEN, mark that backlog line '- [x]'. Do not start any other backlog item." \
+  "${SESSION_WRAP[@]}" "$CLAUDE_BIN" -p "/autoloop Take exactly ONE backlog item — the first unchecked '- [ ]' line in .loop/backlog.md: \"$item\". Before writing the contract, read .loop/state.md (if present) and run 'git log --oneline -10' for handoff context from previous sessions. If that line carries a '| verify:' command, run-contract.sh ticks it from the command's exit status and the evidence-gate denies you writing to the file — do not tick it yourself; if it carries none, tick it '- [x]' only after the checker reports ALL GREEN. Do not start any other backlog item." \
     --permission-mode bypassPermissions \
     --max-turns 150 \
     > "$SLOG" 2>&1 &

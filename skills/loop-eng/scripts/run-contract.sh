@@ -21,6 +21,7 @@ RESULTS="$LOOP_DIR/results.json"
 EVID="$LOOP_DIR/evidence"
 ACTIVE="$LOOP_DIR/active"
 SHA_LOCK="$LOOP_DIR/criteria.sha256"
+BACKLOG="$LOOP_DIR/backlog.md"
 
 [ -f "$CRIT" ] || { echo "run-contract: $CRIT not found — write the contract first" >&2; exit 78; }
 
@@ -77,7 +78,8 @@ TMP="$RESULTS.tmp.$$"
 # file — see the cp below for why. Declared here so the trap covers it from the
 # start; under `set -u` a trap naming an unset variable is its own failure.
 SNAP="$LOOP_DIR/.criteria.snapshot.$$"
-trap 'rm -f "$TMP" "$SNAP"' EXIT
+BACK_TMP="$LOOP_DIR/.backlog.rewrite.$$"
+trap 'rm -f "$TMP" "$SNAP" "$BACK_TMP"' EXIT
 
 # Prove BOTH output paths are writable before a single criterion runs. Without
 # this the failures were safe only by accident: an unwritable .loop/ made the
@@ -327,6 +329,85 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
       "$status" "$pass" "$(json_str "$log")"
   done < "$SNAP"
   printf '\n  ],\n'
+
+  # --- machine-ticked backlog --------------------------------------------
+  #
+  # `.loop/backlog.md` was the last claim in the completion chain that a model
+  # could simply type. The all-boxes-ticked check reads it, and "tick a box only
+  # after the checker reports ALL GREEN" was a red line honoured rather than a
+  # fact produced — the one residual the rest of this runner exists to eliminate.
+  #
+  # A line written `- [ ] <item> | verify: <cmd>` opts into the same rule as
+  # every criterion above: the box moves when the command exits 0, and never
+  # because someone typed it. While the loop is armed the evidence-gate denies
+  # model writes to a backlog carrying any such line, so the tick can only come
+  # from here. A backlog with no verify commands is left completely alone —
+  # existing loops keep the model-ticked contract they were written for, and
+  # opting in is what locks the file.
+  #
+  # Only UNTICKED lines are verified. Re-verifying ticked ones would cost one
+  # command per finished item on every stop attempt, inside the stop-gate's
+  # 100s budget, to re-answer a question the contract's own criteria already
+  # cover (the checker treats a previously ticked item going red as a
+  # regression). Cost here is proportional to work REMAINING, which shrinks.
+  #
+  # The backlog is progress, not the contract: `overall` is untouched below. A
+  # red backlog item must not make a green contract red, or no loop could ever
+  # stop until its whole backlog was drained — which is the orchestrator's job
+  # across rounds, not one stop attempt's.
+  #
+  # NB the redirects on the verify command. This whole block's stdout IS
+  # results.json (the enclosing `{ … } > "$TMP"` group), so a verify command
+  # that prints would write its output into the middle of the ledger.
+  if [ -f "$BACKLOG" ] && grep -q '|[[:space:]]*verify:' "$BACKLOG" 2>/dev/null; then
+    printf '  "backlog": [\n'
+    bfirst=1
+    bchanged=0
+    : > "$BACK_TMP" 2>/dev/null || bchanged=-1
+    bline=""
+    while IFS= read -r bline || [ -n "$bline" ]; do
+      bline="${bline%$'\r'}"
+      bcmd=""
+      # Substring compare, not a case pattern: `- [ ] ` read as a glob makes
+      # `[ ]` a bracket expression matching one space, which silently matches
+      # the wrong prefix. The `| verify: ` probe is quoted so its pipe is a
+      # literal rather than a pattern alternation.
+      if [ "${bline:0:6}" = "- [ ] " ]; then
+        case "$bline" in *"| verify: "*) bcmd="${bline#*| verify: }" ;; esac
+      fi
+      if [ -z "$bcmd" ]; then
+        printf '%s\n' "$bline" >> "$BACK_TMP"
+        continue
+      fi
+      bitem="${bline#- \[ \] }"
+      bitem="${bitem%%|*}"
+      # strip the single space before the pipe without touching inner spacing
+      bitem="${bitem%"${bitem##*[![:space:]]}"}"
+      bstatus=0
+      bash -c "$bcmd" >/dev/null 2>&1 </dev/null || bstatus=$?
+      if [ "$bstatus" -eq 0 ]; then
+        printf -- '- [x] %s | verify: %s\n' "$bitem" "$bcmd" >> "$BACK_TMP"
+        bchanged=1
+        bdone=true
+      else
+        printf '%s\n' "$bline" >> "$BACK_TMP"
+        bdone=false
+      fi
+      [ "$bfirst" -eq 0 ] && printf ',\n'
+      bfirst=0
+      printf '    {"item": "%s", "verify": "%s", "exit": %d, "done": %s}' \
+        "$(json_str "$bitem")" "$(json_str "$bcmd")" "$bstatus" "$bdone"
+    done < "$BACKLOG"
+    printf '\n  ],\n'
+    # cat-back into the same inode rather than mv: the backlog is a file a
+    # human may have open, and only the lines this pass ticked have changed.
+    # Fail-open on its own errors — a backlog that could not be rewritten must
+    # not affect the ledger or the exit code, which are what the harness trusts.
+    if [ "$bchanged" -eq 1 ]; then
+      cat "$BACK_TMP" > "$BACKLOG" 2>/dev/null || :
+    fi
+    rm -f "$BACK_TMP" 2>/dev/null || :
+  fi
   # A contract with ZERO runnable criteria (empty, all-comment, or every line
   # malformed) is vacuous — treat it as a FAIL, never a silent all_green. This is
   # the same false-green class the hash-lock guards against: "done" must be a

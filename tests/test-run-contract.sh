@@ -468,4 +468,59 @@ rm -rf .loop/evidence; rm -f .loop/results.json
 rm .loop/criteria.tsv
 bash "$RUNNER" 2>/dev/null; assert_eq 78 $? "missing criteria exit 78"
 
+# --- P3-12: a backlog box is ticked by a verify command, not by a claim ------
+# `.loop/backlog.md` was the last trust boundary left in the completion chain:
+# the all-boxes-ticked check read a file the orchestrator writes, so "tick a box
+# only after the checker reports ALL GREEN" was a red line honoured rather than
+# a fact produced. A line carrying `| verify: <cmd>` opts into the same rule as
+# everything else in this runner — the box moves when the command exits 0, and
+# never because someone typed it.
+rm -f .loop/criteria.tsv .loop/results.json .loop/backlog.md
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+{
+  printf -- '- [ ] green item | verify: true\n'
+  printf -- '- [ ] red item | verify: false\n'
+  printf -- '- [ ] plain item with no verify command\n'
+  printf -- '- [x] already done | verify: touch should-not-rerun.marker\n'
+} > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "backlog verification does not change the contract's own verdict"
+assert_file_contains .loop/backlog.md '- [x] green item | verify: true' "a passing verify command ticks its box"
+assert_file_contains .loop/backlog.md '- [ ] red item | verify: false' "a failing verify command leaves its box unticked"
+assert_file_contains .loop/backlog.md '- [ ] plain item with no verify command' "a line with no verify command is left exactly as written"
+assert_eq "" "$([ -f should-not-rerun.marker ] && echo 1)" "an already-ticked line's command is not re-run"
+assert_file_contains .loop/results.json '"item": "green item", "verify": "true", "exit": 0, "done": true' "the ledger records the tick and what produced it"
+assert_file_contains .loop/results.json '"item": "red item", "verify": "false", "exit": 1, "done": false' "the ledger records the unticked item too"
+assert_eq 0 "$(grep -c 'plain item' .loop/results.json)" "a line with no verify command is not in the backlog ledger"
+# The backlog is progress, not the contract: a red backlog item must not make a
+# green contract red, or every loop would be blocked until its whole backlog
+# was drained — which is the orchestrator's job across rounds, not one stop's.
+assert_file_contains .loop/results.json '"all_green": true' "an unticked backlog item does not turn a green contract red"
+
+# Idempotent: a second run re-verifies the unticked line and leaves the rest.
+bash "$RUNNER" >/dev/null 2>&1
+assert_eq 1 "$(grep -c '^- \[x\] green item' .loop/backlog.md)" "a re-run does not duplicate or re-write a ticked line"
+assert_eq 1 "$(grep -c '^- \[ \] red item' .loop/backlog.md)" "a re-run re-checks the still-red line"
+
+# JSON validity with hostile item text — the same guarantee the criteria have.
+printf -- '- [ ] say "hi" \\ and\ttab | verify: true\n' > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1
+if command -v jq >/dev/null 2>&1; then
+  jq . .loop/results.json >/dev/null 2>&1; assert_eq 0 $? "results.json stays valid JSON with quotes/backslash/TAB in an item"
+elif command -v python3 >/dev/null 2>&1; then
+  python3 -c 'import json,sys; json.load(open(".loop/results.json"))' 2>/dev/null; assert_eq 0 $? "results.json stays valid JSON with quotes/backslash/TAB in an item"
+else
+  echo "  SKIP: no jq/python3 — backlog JSON validity not checked (1 assertion)" >&2
+fi
+
+# No backlog, or a backlog nobody opted in: no backlog block at all, and the
+# old model-ticked contract is untouched.
+rm -f .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1
+assert_eq 0 "$(grep -c '"backlog"' .loop/results.json)" "no backlog file means no backlog block in the ledger"
+printf -- '- [ ] an old-style item\n' > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1
+assert_eq 0 "$(grep -c '"backlog"' .loop/results.json)" "a backlog with no verify commands is left entirely alone"
+assert_file_contains .loop/backlog.md '- [ ] an old-style item' "an opt-out backlog is not rewritten"
+rm -f .loop/backlog.md should-not-rerun.marker
+
 report "test-run-contract"

@@ -98,6 +98,23 @@ case "$TOOL" in
         if [ -e "$(dirname "$FILE")/active" ]; then
           deny "the armed contract .loop/criteria.tsv (loop is active)"
         fi ;;
+      */.loop/backlog.md|.loop/backlog.md)
+        # A MACHINE-TICKED backlog only. A line written
+        # `- [ ] <item> | verify: <cmd>` is ticked by run-contract from that
+        # command's exit status, so a model write to the file is the completion
+        # claim the ledger exists to produce, typed instead of earned — the same
+        # thing results.json is guarded against. A backlog with NO verify
+        # commands keeps the older model-ticked contract and stays writable:
+        # opting in is what locks the file, so no existing loop changes under
+        # anyone. Reads the file that is there now, which is also what makes
+        # "remove the verify commands, then write freely" a denied write.
+        if [ -e "$(dirname "$FILE")/active" ] \
+           && grep -q '|[[:space:]]*verify:' "$FILE" 2>/dev/null; then
+          deny "the machine-ticked backlog .loop/backlog.md (loop is active).
+Its \`| verify:\` lines are ticked by run-contract.sh from the verify command's
+exit status — that is what makes a ticked box a fact rather than a claim. Make
+the command pass; the next stop attempt ticks the box for you."
+        fi ;;
       */.loop/criteria.sha256|.loop/criteria.sha256)
         # The hash-lock: writing it to match a weakened criteria.tsv would defeat
         # run-contract's tamper check, so lock it while armed too — create as well
@@ -157,6 +174,15 @@ case "$TOOL" in
 If this is a wrap-up removing both .loop/active and .loop/criteria.sha256 in one
 command, split it into two Bash calls: remove .loop/active first (that disarms
 the loop), then remove .loop/criteria.sha256 in a second call."
+    fi
+    # The machine-ticked backlog, while armed — same reasoning as the Write/Edit
+    # branch above, and gated on the same `| verify:` opt-in, so a backlog
+    # without verify commands is untouched by this rule.
+    if [ -e .loop/active ] && grep -q '|[[:space:]]*verify:' .loop/backlog.md 2>/dev/null \
+       && printf '%s' "$SCAN" | grep -qE '(>>?\|?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/+backlog\.md'; then
+      deny "a Bash command writing to the machine-ticked backlog .loop/backlog.md.
+Its \`| verify:\` lines are ticked by run-contract.sh from the verify command's
+exit status. Make the command pass; the next stop attempt ticks the box."
     fi
     # The whole directory, while armed. Everything above guards one file inside
     # .loop/; `rm -rf .loop` takes the stop-gate's marker, the hash-lock, the

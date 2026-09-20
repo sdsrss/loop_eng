@@ -8,6 +8,24 @@ discipline — the assertion that would have caught it first, then the fix.
 
 ### Upgrade
 
+- **A backlog box is now ticked by a command, not by a claim.** `.loop/backlog.md`
+  was the last link in the completion chain a model could simply type: the
+  all-boxes-ticked check read a file the orchestrator writes, so "tick a box
+  only after the checker reports ALL GREEN" was a red line honoured rather than
+  a fact produced. A line written `- [ ] <item> | verify: <cmd>` is now ticked
+  by `run-contract.sh` when that command exits 0, on every stop attempt, with
+  the outcome recorded in `.loop/results.json` under `"backlog"`; while the loop
+  is armed the evidence-gate denies model writes to a backlog carrying any such
+  line. Only **pending** lines are re-verified, so the cost is proportional to
+  work remaining rather than to work done. A red backlog item does **not** turn
+  a green contract red — the backlog is progress, and draining it is the
+  orchestrator's job across rounds, not one stop attempt's.
+
+  **Opting in is what locks the file**, so nothing changes for a backlog
+  without `| verify:` commands: nothing runs, nothing is denied, and the
+  orchestrator ticks boxes as before. That shape remains a trust boundary and
+  is now labelled as one. README also spells out the `backlog` criterion it had
+  referred to without ever defining: `! grep -q '^- \[ \]' .loop/backlog.md`.
 - **The evidence-gate now denies `rm -rf .loop` while a loop is armed.** That
   one command takes the stop-gate's marker, the hash-lock and the evidence
   ledger together, so however innocently it is typed it is a disarm — and it is
@@ -82,6 +100,13 @@ discipline — the assertion that would have caught it first, then the fix.
   README's safety table gains the orchestrator row it was missing: it runs in
   your session with `Write` and `Bash`, and what is mechanical about it is that
   the evidence ledger is denied to it by the same hook as to everyone else.
+- **`.loop/state.md` says out loud that nothing reads it.** Its `Status:` line
+  looked like a completion signal and is prose — no hook, script or gate has
+  ever read this file. It is now labelled advisory, with the machine answer
+  named (`results.json`'s `all_green`, and the ticked boxes) and the tie-break
+  stated: if the two disagree, the ledger is right and state.md is stale. The
+  template also gains the `## Deferred (not loopable)` heading the roadmap
+  triage step has always told the orchestrator to write here.
 - **`allowed-tools` lists `Agent` alongside `Task`.** The subagent tool's
   current name is `Agent`; `allowed-tools` is a pre-authorization list, so
   naming only the old one costs a permission prompt on every dispatch in
