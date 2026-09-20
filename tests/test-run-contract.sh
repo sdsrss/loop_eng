@@ -512,6 +512,35 @@ else
   echo "  SKIP: no jq/python3 — backlog JSON validity not checked (1 assertion)" >&2
 fi
 
+# --- locked must imply tickable ---------------------------------------------
+# The evidence-gate locks the WHOLE backlog file on `grep '|[[:space:]]*verify:'`
+# while the loop is armed, but this runner used to tick only the strict literal
+# `| verify: ` behind a 6-char `- [ ] ` prefix test. A line matching the gate and
+# not the runner was untickable by ANYONE: the model's Write/Edit/Bash is denied
+# and the runner never sees a verify command, so the box cannot move — the
+# unattended driver re-picks the same item every round until its circuit breaker
+# fires. Every shape below is one the gate locks; each must therefore tick.
+rm -f .loop/backlog.md .loop/results.json
+{
+  printf -- '- [ ] canonical | verify: true\n'
+  printf -- '- [ ] nospace |verify: true\n'
+  printf -- '- [ ] tabbed |\tverify: true\n'
+  printf -- '- [ ] twospace |  verify: true\n'
+  printf -- '  - [ ] indented | verify: true\n'
+  printf -- '- [ ] tight | verify:true\n'
+  printf -- '- [ ] still red |verify: false\n'
+} > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "a tolerantly-spaced backlog does not change the contract's own verdict"
+assert_file_contains .loop/backlog.md '- [x] canonical | verify: true' "the canonical spacing still ticks (control)"
+assert_file_contains .loop/backlog.md '- [x] nospace | verify: true' "a pipe with no space before verify: ticks"
+assert_file_contains .loop/backlog.md '- [x] tabbed | verify: true' "a TAB between the pipe and verify: ticks"
+assert_file_contains .loop/backlog.md '- [x] twospace | verify: true' "two spaces between the pipe and verify: ticks"
+assert_file_contains .loop/backlog.md '  - [x] indented | verify: true' "an indented item ticks, and keeps its indentation"
+assert_file_contains .loop/backlog.md '- [x] tight | verify: true' "no space after verify: ticks"
+assert_file_contains .loop/backlog.md '- [ ] still red |verify: false' "a red tolerant line stays unticked, byte for byte as written"
+assert_file_contains .loop/results.json '"item": "indented", "verify": "true", "exit": 0, "done": true' "the ledger records the item without its indentation"
+assert_file_contains .loop/results.json '"item": "tabbed", "verify": "true", "exit": 0, "done": true' "the ledger records a TAB-spaced item's command without the TAB"
+
 # No backlog, or a backlog nobody opted in: no backlog block at all, and the
 # old model-ticked contract is untouched.
 rm -f .loop/backlog.md

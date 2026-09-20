@@ -368,25 +368,51 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
     while IFS= read -r bline || [ -n "$bline" ]; do
       bline="${bline%$'\r'}"
       bcmd=""
-      # Substring compare, not a case pattern: `- [ ] ` read as a glob makes
-      # `[ ]` a bracket expression matching one space, which silently matches
-      # the wrong prefix. The `| verify: ` probe is quoted so its pipe is a
-      # literal rather than a pattern alternation.
-      if [ "${bline:0:6}" = "- [ ] " ]; then
-        case "$bline" in *"| verify: "*) bcmd="${bline#*| verify: }" ;; esac
+      bitem=""
+      # Accept exactly what the evidence-gate LOCKS — `|[[:space:]]*verify:`,
+      # under an optionally indented checkbox. The gate locks the whole file on
+      # that pattern, so a line it matched and this parser missed was untickable
+      # by ANYONE: the model's Write/Edit/Bash is denied and the runner never
+      # sees a verify command, so the box can never move and the driver re-picks
+      # the item every round. Widening here rather than narrowing the gate is
+      # deliberate — a narrower gate leaves such a line unlocked AND unrun, i.e.
+      # a box a model can type, which is the one thing this runner exists to
+      # prevent. Substring compare, not a case pattern: `- [ ]` read as a glob
+      # makes `[ ]` a bracket expression matching one space, which silently
+      # matches the wrong prefix.
+      bindent="${bline%%[![:space:]]*}"
+      brest="${bline#"$bindent"}"
+      if [ "${brest:0:5}" = "- [ ]" ]; then
+        # Pipe by pipe, taking the FIRST whose tail is whitespace + `verify:`:
+        # the item text may itself contain a pipe, so the first pipe on the line
+        # is not necessarily the separator.
+        bscan="${brest:5}"
+        while case "$bscan" in *"|"*) true ;; *) false ;; esac; do
+          bitem="$bitem${bscan%%|*}"
+          bscan="${bscan#*|}"
+          btail="${bscan#"${bscan%%[![:space:]]*}"}"
+          case "$btail" in
+            verify:*)
+              bcmd="${btail#verify:}"
+              bcmd="${bcmd#"${bcmd%%[![:space:]]*}"}"
+              break ;;
+          esac
+          bitem="$bitem|"
+        done
       fi
       if [ -z "$bcmd" ]; then
         printf '%s\n' "$bline" >> "$BACK_TMP"
         continue
       fi
-      bitem="${bline#- \[ \] }"
-      bitem="${bitem%%|*}"
-      # strip the single space before the pipe without touching inner spacing
+      # strip the whitespace around the item without touching inner spacing
+      bitem="${bitem#"${bitem%%[![:space:]]*}"}"
       bitem="${bitem%"${bitem##*[![:space:]]}"}"
       bstatus=0
       bash -c "$bcmd" >/dev/null 2>&1 </dev/null || bstatus=$?
       if [ "$bstatus" -eq 0 ]; then
-        printf -- '- [x] %s | verify: %s\n' "$bitem" "$bcmd" >> "$BACK_TMP"
+        # Keeps the line's indentation: a nested item is nested on purpose, and
+        # re-emitting it at column 0 would reparent it in the rendered list.
+        printf -- '%s- [x] %s | verify: %s\n' "$bindent" "$bitem" "$bcmd" >> "$BACK_TMP"
         bchanged=1
         bdone=true
       else
