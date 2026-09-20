@@ -158,11 +158,15 @@ fi
 # Absence still degrades rather than refuses (a scheduled report-only review is
 # worth running uncapped), but it is now said out loud on stderr, where the
 # scheduler's own log will keep it.
+#
+# `-k 30` matches the autoloop driver: plain `timeout` sends TERM and then waits
+# forever if the child ignores it, so a wedged session with a TERM handler made
+# the budget advisory. The follow-up KILL 30s later makes it a budget.
 TIMEOUT_CMD=()
 if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_CMD=(timeout "${MAX_MINUTES}m")
+  TIMEOUT_CMD=(timeout -k 30 "${MAX_MINUTES}m")
 elif command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_CMD=(gtimeout "${MAX_MINUTES}m")
+  TIMEOUT_CMD=(gtimeout -k 30 "${MAX_MINUTES}m")
 else
   # tee, not a bare >&2: this file's own cron example (line 19) ends `>/dev/null
   # 2>&1`, so a stderr-only warning is discarded by exactly the invocation it is
@@ -172,11 +176,44 @@ else
     | tee -a "$LOG_DIR/unattended.log" >&2
 fi
 
+# Signal handling. Without it, a SIGTERM to this driver — `systemctl stop` on a
+# host whose unit does not cgroup-kill, a cron `kill <pid>`, a hand-typed Ctrl-C
+# — killed the driver and LEFT THE SESSION RUNNING: a `bypassPermissions`
+# claude with nobody watching it, working to its own budget. Reproduced with a
+# sleeping stub: driver dead, stub alive. Only systemd's cgroup kill cleaned up.
+#
+# The session therefore runs in the BACKGROUND with an explicit `wait`. A
+# foreground child blocks trap dispatch until it exits, so a trap installed
+# around one is a trap that fires too late to do anything. On a signal, TERM the
+# session and give it a grace period before KILL; `timeout(1)` forwards TERM to
+# its own child, so one TERM reaches claude whether or not a wrapper is in play.
+#
+# 143 = 128 + SIGTERM, the conventional "terminated by signal" status, so a
+# scheduler can tell an interrupted run from a failed one.
+SESSION_PID=""
+_terminate() {
+  trap '' TERM INT HUP   # a second signal must not re-enter this handler
+  if [ -n "$SESSION_PID" ] && kill -0 "$SESSION_PID" 2>/dev/null; then
+    kill -TERM "$SESSION_PID" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$SESSION_PID" 2>/dev/null || break
+      sleep 1
+    done
+    kill -KILL "$SESSION_PID" 2>/dev/null || true
+  fi
+  echo "$STAMP interrupted by signal — session terminated" | tee -a "$LOG_DIR/unattended.log" >&2
+  exit 143
+}
+trap _terminate TERM INT HUP
+
 STATUS=0
 "${TIMEOUT_CMD[@]}" "$CLAUDE_BIN" -p "/polish $SCOPE $MODE" \
   --permission-mode bypassPermissions \
   --max-turns 120 \
-  > "$LOG" 2>&1 || STATUS=$?
+  > "$LOG" 2>&1 &
+SESSION_PID=$!
+wait "$SESSION_PID" || STATUS=$?
+SESSION_PID=""
 
 # Broad phrases are safe here because the grep only runs on FAILED runs
 # (STATUS != 0), which bounds the false-positive surface.

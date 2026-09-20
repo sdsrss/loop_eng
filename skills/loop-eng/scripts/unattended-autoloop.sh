@@ -136,6 +136,34 @@ session=0
 
 note() { echo "$(date +%Y%m%d-%H%M%S) autoloop-driver $*" | tee -a "$LOG_MAIN" >&2; }
 
+# Signal handling. Without it, a SIGTERM to this driver — `systemctl stop` on a
+# host whose unit does not cgroup-kill, a cron `kill <pid>`, a hand-typed Ctrl-C
+# — killed the driver and LEFT THE SESSION RUNNING: a `bypassPermissions`
+# claude that WRITES CODE, with nobody watching it, working to its own budget.
+# Reproduced with a sleeping stub: driver dead, stub alive.
+#
+# Each session therefore runs in the BACKGROUND with an explicit `wait`. A
+# foreground child blocks trap dispatch until it exits, so a trap installed
+# around one fires too late to do anything. On a signal, TERM the session and
+# give it a grace period before KILL; `timeout(1)` forwards TERM to its own
+# child, so one TERM reaches claude whether or not a wrapper is in play.
+#
+# 143 = 128 + SIGTERM, so a scheduler can tell an interrupted run from a failure.
+SESSION_PID=""
+_terminate() {
+  trap '' TERM INT HUP   # a second signal must not re-enter this handler
+  if [ -n "$SESSION_PID" ] && kill -0 "$SESSION_PID" 2>/dev/null; then
+    kill -TERM "$SESSION_PID" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$SESSION_PID" 2>/dev/null || break
+      sleep 1
+    done
+    kill -KILL "$SESSION_PID" 2>/dev/null || true
+  fi
+  note "interrupted by signal — session terminated, $(count_pending) item(s) still pending"
+  exit 143
+}
+
 count_pending() {
   # A missing/unreadable backlog (e.g. a session deleted it mid-run) must count
   # as 0 pending, not as an empty string — `[ "" -eq 0 ]` errors and the if
@@ -146,6 +174,10 @@ count_pending() {
   case "$n" in '' | *[!0-9]*) n=0 ;; esac
   echo "$n"
 }
+
+# Installed here, not beside _terminate: the handler reports the pending count,
+# so it must not be reachable before count_pending exists.
+trap _terminate TERM INT HUP
 
 # Per-session hard cap: without it, MAX_MINUTES is only checked BETWEEN sessions,
 # so a single hung `claude -p` (network stall, wedged tool) blocks the driver
@@ -188,7 +220,10 @@ while :; do
   "${SESSION_WRAP[@]}" "$CLAUDE_BIN" -p "/autoloop Take exactly ONE backlog item — the first unchecked '- [ ]' line in .loop/backlog.md: \"$item\". Before writing the contract, read .loop/state.md (if present) and run 'git log --oneline -10' for handoff context from previous sessions. On ALL GREEN, mark that backlog line '- [x]'. Do not start any other backlog item." \
     --permission-mode bypassPermissions \
     --max-turns 150 \
-    > "$SLOG" 2>&1 || STATUS=$?
+    > "$SLOG" 2>&1 &
+  SESSION_PID=$!
+  wait "$SESSION_PID" || STATUS=$?
+  SESSION_PID=""
 
   if [ -n "$TIMEOUT_BIN" ] && [ "$STATUS" -eq 124 ]; then
     note "session $session TIMED OUT after ${budget_left}s (wall-clock budget) — killed, counts toward no-progress unless it committed"

@@ -305,6 +305,53 @@ assert_eq 75 "$rc" "provider limit hit twice exits 75 (EX_TEMPFAIL)"
 assert_file_contains "$SB8/.loop/unattended.log" "provider limit hit twice" "second limit hit is logged and stops the driver"
 assert_eq 2 "$(grep -c 'session .* starting' "$SB8/.loop/unattended.log")" "driver ran exactly 2 sessions before the limit stop"
 
+# --- SIGTERM to the driver must not leave the session running ---
+# Pre-fix neither driver had a trap (`grep -c trap` = 0 in both) and GNU
+# `timeout` puts itself in its own process group, so `systemctl stop` on a host
+# whose unit does not cgroup-kill, a cron `kill <pid>`, or a hand-typed Ctrl-C
+# killed the driver and left a `bypassPermissions` claude running to its own
+# budget — and THIS driver's session writes code. Reproduced exactly this way:
+# driver dead, stub alive. Mirrors the same block in test-unattended-polish.sh.
+#
+# The stub records its pid and then BECOMES `sleep` via exec, so the recorded
+# pid is the process a terminating driver actually has to reach through its
+# `timeout -k 30 <budget>` wrapper — not a bash shell that could die while its
+# own child survives, which is the failure mode under test.
+SB9=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SD" "$TD"' EXIT
+mkdir -p "$SB9/.loop"; printf -- '- [ ] one\n' > "$SB9/.loop/backlog.md"
+TERM_STUB="$SD/stub-sleeper"
+cat > "$TERM_STUB" <<'EOF'
+#!/usr/bin/env bash
+echo $$ > "$STUB_PIDFILE"
+exec sleep 30
+EOF
+chmod +x "$TERM_STUB"
+rm -f "$SD/termpid"
+STUB_PIDFILE="$SD/termpid" LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$TERM_STUB" \
+  bash "$DRIVER" "$SB9" 5 >/dev/null 2>&1 &
+TERM_DRV=$!
+for _ in $(seq 1 60); do [ -s "$SD/termpid" ] && break; sleep 0.2; done
+if [ -s "$SD/termpid" ]; then
+  TERM_SESS=$(cat "$SD/termpid")
+  assert_eq 0 0 "the sleeping session started (driver reached the claude call)"
+  kill -TERM "$TERM_DRV" 2>/dev/null || true
+  wait "$TERM_DRV" 2>/dev/null && term_rc=0 || term_rc=$?
+  assert_eq 143 "$term_rc" "a TERMed driver exits 143 (128+SIGTERM), not a bare 0 or 1"
+  for _ in $(seq 1 60); do kill -0 "$TERM_SESS" 2>/dev/null || break; sleep 0.2; done
+  if kill -0 "$TERM_SESS" 2>/dev/null; then
+    kill -KILL "$TERM_SESS" 2>/dev/null || true   # never leak it out of the suite
+    assert_eq "session terminated" "session orphaned" "TERM to the driver terminates the claude session through the timeout wrapper"
+  else
+    assert_eq 0 0 "TERM to the driver terminates the claude session through the timeout wrapper"
+  fi
+  assert_file_contains "$SB9/.loop/unattended.log" "interrupted by signal" "the interruption is recorded, with the pending count"
+  assert_file_contains "$SB9/.loop/unattended.log" "item(s) still pending" "the interruption log says how much work was left"
+else
+  kill -TERM "$TERM_DRV" 2>/dev/null || true
+  wait "$TERM_DRV" 2>/dev/null || true
+  FAIL=$((FAIL+1)); echo "  FAIL: the sleeping stub never recorded a pid — the SIGTERM arm did not run" >&2
+fi
+
 # --- non-git target: refuse with a named reason, not a raw git fatal ---
 # The driver reached `git rev-parse HEAD` and died under `set -e` with git's own
 # "fatal: not a git repository" (exit 128) — it stopped, but the operator got a

@@ -101,6 +101,29 @@ cause the runner cannot observe. Verified under real bash 3.2.57 (the CI floor)
 as well as 5.x. Suite 517 → 533 assertions; 7 of the new ones fail against the
 pre-fix scripts.
 
+**Killing an unattended driver left its `claude` session running.** Neither
+driver had a `trap` (`grep -c trap` was 0 in both) and GNU `timeout` places
+itself in its own process group, so `systemctl stop` on a host whose unit does
+not cgroup-kill, a cron `kill <pid>`, or a hand-typed Ctrl-C killed the driver
+and orphaned a `--permission-mode bypassPermissions` session — for
+`unattended-autoloop.sh`, one that *writes code* — to run on to its own budget
+with nobody watching it. Reproduced with a sleeping stub: driver dead, stub
+alive.
+
+Each session now runs in the background under an explicit `wait` (a foreground
+child blocks trap dispatch, so a trap around one fires too late to act), with a
+`TERM INT HUP` handler that TERMs the session, waits up to 10s, then KILLs it,
+logs the interruption — with the pending-item count, for autoloop — and exits
+**143** (128+SIGTERM) so a scheduler can tell an interrupted run from a failed
+one.
+
+**`unattended-polish.sh` gets the `-k 30` its sibling always had.** Plain
+`timeout` sends TERM and then waits indefinitely if the child ignores it, so a
+wedged session made `LOOP_ENG_MAX_MINUTES` advisory rather than a budget.
+
+Suite 533 → 542 assertions; the orphan and kill-after assertions fail against
+the pre-fix drivers.
+
 ## 0.14.0 — 2026-09-20
 
 Two gaps this repo had already written down and left open: a wall-clock budget

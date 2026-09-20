@@ -212,6 +212,49 @@ else
 fi
 assert_file_contains "$SB/.loop/unattended.log" "TAIL-MARKER-SURVIVES" "truncation keeps the tail (marker survives)"
 
+# --- SIGTERM to the driver must not leave the session running ---
+# Pre-fix neither driver had a trap (`grep -c trap` = 0 in both) and GNU
+# `timeout` puts itself in its own process group, so `systemctl stop` on a host
+# whose unit does not cgroup-kill, a cron `kill <pid>`, or a hand-typed Ctrl-C
+# killed the driver and left a `bypassPermissions` claude running to its own
+# budget with nobody watching it. Reproduced exactly this way: driver dead,
+# stub alive.
+#
+# The stub records its pid and then BECOMES `sleep` via exec, so the recorded
+# pid is the process a terminating driver actually has to reach — not a bash
+# wrapper that could die while its child survives, which is the failure mode.
+TERM_STUB="$SD/stub-sleeper"
+cat > "$TERM_STUB" <<'EOF'
+#!/usr/bin/env bash
+echo $$ > "$STUB_PIDFILE"
+exec sleep 30
+EOF
+chmod +x "$TERM_STUB"
+rm -f "$SD/termpid"
+STUB_PIDFILE="$SD/termpid" LOOP_ENG_CLAUDE_BIN="$TERM_STUB" \
+  bash "$SCRIPT" "$SB" src/ >/dev/null 2>&1 &
+TERM_DRV=$!
+for _ in $(seq 1 60); do [ -s "$SD/termpid" ] && break; sleep 0.2; done
+if [ -s "$SD/termpid" ]; then
+  TERM_SESS=$(cat "$SD/termpid")
+  assert_eq 0 0 "the sleeping session started (driver reached the claude call)"
+  kill -TERM "$TERM_DRV" 2>/dev/null || true
+  wait "$TERM_DRV" 2>/dev/null && term_rc=0 || term_rc=$?
+  assert_eq 143 "$term_rc" "a TERMed driver exits 143 (128+SIGTERM), not a bare 0 or 1"
+  for _ in $(seq 1 60); do kill -0 "$TERM_SESS" 2>/dev/null || break; sleep 0.2; done
+  if kill -0 "$TERM_SESS" 2>/dev/null; then
+    kill -KILL "$TERM_SESS" 2>/dev/null || true   # never leak it out of the suite
+    assert_eq "session terminated" "session orphaned" "TERM to the driver terminates the claude session"
+  else
+    assert_eq 0 0 "TERM to the driver terminates the claude session"
+  fi
+  assert_file_contains "$SB/.loop/unattended.log" "interrupted by signal" "the interruption is recorded in the rolling log"
+else
+  kill -TERM "$TERM_DRV" 2>/dev/null || true
+  wait "$TERM_DRV" 2>/dev/null || true
+  FAIL=$((FAIL+1)); echo "  FAIL: the sleeping stub never recorded a pid — the SIGTERM arm did not run" >&2
+fi
+
 # --- wall-clock budget: WHICH binary wraps the session, and what a host with
 # neither is told. `timeout` is GNU coreutils; on macOS-with-Homebrew-coreutils
 # it is installed as `gtimeout`, which this driver alone among its three
@@ -239,7 +282,7 @@ mk_fake_timeout() { # $1: binary name to install
   cat > "$TD/bin/$1" <<'FAKE'
 #!/usr/bin/env bash
 echo "$0 $*" >> "$TIMEOUT_RECORD"
-shift 1   # the <N>m budget
+shift 3   # -k 30 <N>m
 exec "$@"
 FAKE
   chmod +x "$TD/bin/$1"
@@ -254,7 +297,10 @@ mk_fake_timeout timeout; mk_fake_timeout gtimeout
 : > "$TD/record"
 run_restricted "$TD/err-both" && rc=0 || rc=$?
 assert_eq 0 "$rc" "restricted-PATH run completes (the minimal bin dir is sufficient)"
-assert_file_contains "$TD/record" "/timeout 120m" "with both installed, GNU timeout wraps the session"
+# `-k 30` is part of the shape, not decoration: plain `timeout` sends TERM and
+# then waits forever if the child ignores it, so a wedged session with a TERM
+# handler made the budget advisory. Its autoloop sibling always had the -k.
+assert_file_contains "$TD/record" "/timeout -k 30 120m" "with both installed, GNU timeout wraps the session with a kill-after"
 # ONE wrapper, not two: the assertion above is a substring test on an append-only
 # record, so a driver that wrapped the session twice would satisfy it unnoticed.
 assert_eq 1 "$(wc -l < "$TD/record" | tr -d ' ')" "exactly one wrapper ran (gtimeout did not also fire)"
@@ -263,7 +309,7 @@ assert_eq 1 "$(wc -l < "$TD/record" | tr -d ' ')" "exactly one wrapper ran (gtim
 rm -f "$TD/bin/timeout"; : > "$TD/record"
 run_restricted "$TD/err-gt" && rc=0 || rc=$?
 assert_eq 0 "$rc" "gtimeout-only run completes"
-assert_file_contains "$TD/record" "/gtimeout 120m" "no timeout(1): the session falls back to gtimeout"
+assert_file_contains "$TD/record" "/gtimeout -k 30 120m" "no timeout(1): the session falls back to gtimeout, kill-after included"
 
 # neither -> degrade (run unwrapped) but SAY so; silence is what hid this
 rm -f "$TD/bin/gtimeout"; : > "$TD/record"
