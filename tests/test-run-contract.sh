@@ -166,6 +166,33 @@ printf '1\tok\ttrue\r\n2\talso ok\ttrue\r\n' > .loop/criteria.tsv   # CRLF line 
 bash "$RUNNER"; assert_eq 0 $? "CRLF line endings: passing criteria go GREEN, not false-red"
 assert_file_contains .loop/results.json '"all_green": true' "CRLF: passing contract is green"
 
+# --- a criterion that rewrites criteria.tsv MID-RUN cannot delete its siblings ---
+# The loop used to stream the live file, so a criterion that truncated
+# criteria.tsv made every line after it vanish at EOF — silently. Not "skipped",
+# not "malformed": absent. The vacuous and partial-parse guards below cannot see
+# it either, because from their side the contract simply WAS one line. Verified
+# pre-fix: exit 0 with only "one" in the ledger and "all_green": true, while the
+# authored contract's second criterion was `false`.
+rm -f .loop/active .loop/criteria.sha256 .loop/results.json
+printf 'one\ttruncates the contract\t: > .loop/criteria.tsv; true\ntwo\tred\tfalse\n' > .loop/criteria.tsv
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 1 $? "a criterion truncating criteria.tsv cannot hide the RED criterion after it"
+assert_file_contains .loop/results.json '"all_green": false' "truncating criterion: contract is red, not vacuously green"
+assert_file_contains .loop/results.json '"id": "two"' "truncating criterion: the criterion after it still appears in the ledger"
+
+# ...and the mirror image: a criterion that APPENDS to criteria.tsv does not get
+# its new line executed by this run. The executed set is the snapshot taken
+# before the first command, which is also the set the hash-lock verified — a
+# contract that could grow mid-run would report on criteria nothing checked.
+printf 'one\tappends\tprintf "smuggled\\tadded mid-run\\ttrue\\n" >> .loop/criteria.tsv\n' > .loop/criteria.tsv
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "a criterion appending to criteria.tsv still exits on its own result"
+# grep for the ID FIELD, not the bare word: the appending criterion's own `cmd`
+# is recorded in the ledger and contains "smuggled", so a bare-word count is 1
+# even when the fix works.
+assert_eq 0 "$(grep -c '"id": "smuggled"' .loop/results.json)" "appended criterion is NOT in this run's ledger (executed set is the snapshot)"
+# the snapshot is private bookkeeping and must not outlive the run
+assert_eq 0 "$(find .loop -maxdepth 1 -name '.criteria.snapshot.*' | wc -l | tr -d ' ')" "the contract snapshot is cleaned up on exit"
+rm -f .loop/results.json
+
 # --- hash-lock: armed + matching hash runs the contract normally ---
 printf '1\tok\ttrue\n' > .loop/criteria.tsv
 : > .loop/active
@@ -184,6 +211,41 @@ rm -f .loop/active
 bash "$RUNNER"; assert_eq 0 $? "hash-lock: not armed -> hash ignored, runs normally"
 rm -f .loop/criteria.sha256
 
+# --- hash-lock: a criterion that rewrites the contract DURING the run -> 77 ---
+# The pre-run check proves criteria.tsv matched the armed contract when the run
+# STARTED. Every criterion then executes with the repo's own privileges, so the
+# file can move between that check and the ledger — drift caused BY the run,
+# which is the one class the pre-run check structurally cannot see. The snapshot
+# decides what ran; this decides whether the result may be reported at all.
+rm -f .loop/results.json
+printf 'one\trewrites the contract\tprintf "one\\tok\\ttrue\\n" > .loop/criteria.tsv\n' > .loop/criteria.tsv
+: > .loop/active
+sha_of .loop/criteria.tsv > .loop/criteria.sha256
+bash "$RUNNER" >/dev/null 2>.loop/drift.err; assert_eq 77 $? "armed: a criterion rewriting criteria.tsv mid-run fails closed, exit 77"
+assert_file_contains .loop/results.json '"all_green": false' "mid-run drift: ledger is not green"
+assert_file_contains .loop/results.json 'during the run' "mid-run drift: ledger says the change happened during the run"
+assert_file_contains .loop/drift.err 'WHILE the contract ran' "mid-run drift: stderr says when the contract moved"
+
+# ...including when the criterion deletes the LOCK first. Gating the post-run
+# check on criteria.sha256 still being present would hand a two-line bypass to
+# anything that can run a command: rm the lock, then rewrite the contract.
+rm -f .loop/results.json .loop/drift.err
+printf 'one\tunlocks then rewrites\trm -f .loop/criteria.sha256; printf "one\\tok\\ttrue\\n" > .loop/criteria.tsv\n' > .loop/criteria.tsv
+: > .loop/active
+sha_of .loop/criteria.tsv > .loop/criteria.sha256
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 77 $? "armed: deleting criteria.sha256 mid-run does not disable the post-run check"
+rm -f .loop/active .loop/criteria.sha256 .loop/results.json .loop/drift.err
+
+# a contract that leaves criteria.tsv alone must NOT be reported as drifted —
+# the check has to distinguish "the run changed it" from "the run ran".
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+: > .loop/active
+sha_of .loop/criteria.tsv > .loop/criteria.sha256
+bash "$RUNNER"; assert_eq 0 $? "armed: a well-behaved contract still exits 0 (no false drift)"
+assert_file_contains .loop/results.json '"all_green": true' "armed: well-behaved contract stays green"
+rm -f .loop/active .loop/criteria.sha256 .loop/results.json
+printf '1\tok\ttrue\n9\tsmuggled\ttrue\n' > .loop/criteria.tsv   # restore the state the next case inherits
+
 # --- hash-lock present but NO SHA-256 tool on PATH: integrity unverifiable -> fail CLOSED ---
 # (armed + a stale criteria.sha256 on disk, but sha256sum/shasum/openssl all
 # missing: run-contract must refuse to execute the contract rather than skip
@@ -193,7 +255,7 @@ printf '1\tok\ttrue\n' > .loop/criteria.tsv
 : > .loop/active
 printf 'deadbeef-stale-hash\n' > .loop/criteria.sha256
 FAKEBIN="$SB/fakebin-run"; mkdir -p "$FAKEBIN"
-for t in bash mkdir cut mv rm; do
+for t in bash mkdir cut mv rm cp; do
   src=$(command -v "$t") && ln -sf "$src" "$FAKEBIN/$t"
 done
 if env PATH="$FAKEBIN" bash -c 'command -v sha256sum || command -v shasum || command -v openssl' >/dev/null 2>&1; then
@@ -240,7 +302,11 @@ assert_eq "" "$(grep -c 'contract_lock' .loop/results.json | sed 's/^0$//')" "no
 # not a missing lock — it must stay silent, or every run on such a box cries wolf.
 : > .loop/active
 FAKEBIN2="$SB/fakebin-nolock"; mkdir -p "$FAKEBIN2"
-for t in bash mkdir cut mv rm date tail sed printf; do
+# This list is the runner's external-tool contract, not a convenience: anything
+# missing here makes the runner fail for the wrong reason and the arm below
+# assert nothing. `cp` joined it when the criteria loop started reading a
+# snapshot of criteria.tsv instead of the live file.
+for t in bash mkdir cut mv rm cp date tail sed printf; do
   src=$(command -v "$t") && ln -sf "$src" "$FAKEBIN2/$t"
 done
 if env PATH="$FAKEBIN2" bash -c 'command -v sha256sum || command -v shasum || command -v openssl' >/dev/null 2>&1; then

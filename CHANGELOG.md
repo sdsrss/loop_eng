@@ -47,6 +47,36 @@ draft asserted their absence over files the setup had already deleted, so it
 passed against the very mutation it was written to catch — and asserts all three
 are gone. Suite 490 → 504 assertions across 13 suites.
 
+**A criterion could delete the criteria that came after it, and the ledger said
+ALL GREEN.** `run-contract.sh` streamed `criteria.tsv` with `while … done <
+"$CRIT"`, so a criterion that truncated or rewrote that file made every line
+after it vanish mid-read — silently, at EOF. Not "skipped", not "malformed":
+absent.
+
+```
+printf 'one\ttruncates\t: > .loop/criteria.tsv; true\ntwo\tred\tfalse\n' > .loop/criteria.tsv
+→ exit 0, results.json holds only "one", "all_green": true
+```
+
+The authored contract's second criterion was `false`. Neither the vacuous guard
+nor the partial-parse guard can see this, because from their side the contract
+simply *was* one line — which makes it the one gap in "`passes: true` can only
+come from running the command".
+
+Two halves, mirroring the two questions a ledger has to answer. **What ran:**
+the criteria loop now reads a private snapshot taken after the hash check, so
+the executed set is the set that was read and (when armed) hash-verified,
+whatever the commands do to the file afterwards; an appended criterion is not
+executed by the run that appended it. **Whether the result may be reported:**
+when the loop is armed with a hash-lock, `criteria.tsv` is re-hashed *after* the
+last criterion and a mismatch writes a tampered ledger and exits 77. That
+post-run check is gated on "a lock was checked at start", not on the lock still
+existing, so deleting `criteria.sha256` mid-run is not a bypass.
+
+`run-contract.sh` now needs `cp` alongside the `mv`/`rm`/`mkdir`/`cut`/`date`/
+`tail`/`sed` it already required; both restricted-PATH fixtures list it. Suite
+504 → 517 assertions; 9 of the 13 new ones fail against the pre-fix runner.
+
 ## 0.14.0 — 2026-09-20
 
 Two gaps this repo had already written down and left open: a wall-clock budget

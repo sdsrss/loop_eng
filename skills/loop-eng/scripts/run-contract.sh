@@ -73,7 +73,11 @@ overall=0
 nfail=0
 fail_report=""
 TMP="$RESULTS.tmp.$$"
-trap 'rm -f "$TMP"' EXIT
+# The criteria loop reads a private SNAPSHOT of the contract, never the live
+# file — see the cp below for why. Declared here so the trap covers it from the
+# start; under `set -u` a trap naming an unset variable is its own failure.
+SNAP="$LOOP_DIR/.criteria.snapshot.$$"
+trap 'rm -f "$TMP" "$SNAP"' EXIT
 
 # Prove BOTH output paths are writable before a single criterion runs. Without
 # this the failures were safe only by accident: an unwritable .loop/ made the
@@ -104,7 +108,10 @@ rm -f "$EVID/.writable"
 # that rewrites BOTH criteria.tsv and criteria.sha256 to a matching weakened pair
 # remains out of scope (red lines + human diff review cover that residual); what
 # the lock guarantees is that post-arm drift can never pass SILENTLY.
+LOCK_CHECKED=0
+armed_hash=""
 if [ -f "$ACTIVE" ] && [ -f "$SHA_LOCK" ]; then
+  LOCK_CHECKED=1
   armed_hash=$(cut -d' ' -f1 < "$SHA_LOCK")
   live_hash=$(loop_sha256 "$CRIT")
   if [ -z "$live_hash" ]; then
@@ -163,6 +170,26 @@ if [ -f "$ACTIVE" ] && [ ! -f "$SHA_LOCK" ] \
   LOCK_STATE="absent"
   echo "run-contract: WARNING — the loop is armed but $SHA_LOCK is missing while a SHA-256 tool is available, so this run verified NO contract integrity: a criteria.tsv weakened after arming would pass unnoticed. This is expected if the loop was armed by a bare \`touch .loop/active\` (the orchestrator's documented last resort) or with no criteria.tsv present; if arm-contract.sh is available, arming through it records the lock." >&2
 fi
+# Read the criteria from a private SNAPSHOT, not from the live file.
+#
+# `while … done < "$CRIT"` streams an inode that the criteria themselves can
+# reach: a criterion that truncates or rewrites criteria.tsv makes every line
+# after it vanish mid-read, and they vanish SILENTLY — the loop simply sees EOF.
+#   printf 'one\ttruncates\t: > .loop/criteria.tsv; true\ntwo\tred\tfalse\n'
+#   -> exit 0, results.json holds only "one", "all_green": true
+# The RED criterion is not reported as skipped or malformed; it is not reported
+# at all, which is the one outcome this runner exists to make impossible. The
+# vacuous and partial-parse guards below cannot see it either: from their side
+# the contract simply WAS one line. Snapshotting makes the executed set the set
+# that was read (and, when armed, the set that was hash-verified) whatever the
+# commands do to the file afterwards. The post-run drift check after the loop is
+# the other half: the snapshot decides WHAT RAN, that check decides whether the
+# result may be reported at all.
+#
+# Failure here is fail-closed for the same reason as the two probes above: a
+# contract whose snapshot cannot be taken has not been verified.
+cp "$CRIT" "$SNAP" 2>/dev/null || cannot_write "$SNAP" "could not snapshot the contract for reading"
+
 {
   printf '{\n  "generated_by": "run-contract.sh",\n'
   printf '  "generated_at": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -260,7 +287,7 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
     printf '    {"id": "%s", "desc": "%s", "cmd": "%s", "exit": %d, "passes": %s, "evidence": "%s"}' \
       "$(json_str "$id")" "$(json_str "$desc")" "$(json_str "$cmd")" \
       "$status" "$pass" "$(json_str "$log")"
-  done < "$CRIT"
+  done < "$SNAP"
   printf '\n  ],\n'
   # A contract with ZERO runnable criteria (empty, all-comment, or every line
   # malformed) is vacuous — treat it as a FAIL, never a silent all_green. This is
@@ -283,6 +310,32 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
   fi
   printf '}\n'
 } > "$TMP"
+
+# Post-run drift check — the hash-lock's second half. The pre-run check above
+# proves criteria.tsv matched the armed contract when the run STARTED; between
+# that check and here, every criterion has executed with the repo's own
+# privileges, so the file may no longer be what was verified. Without this, the
+# lock's promise ("post-arm drift can never pass silently") held only for drift
+# that happened between arm and run, not for drift caused BY the run.
+#
+# Gated on LOCK_CHECKED rather than on `[ -f "$SHA_LOCK" ]`: a criterion that
+# deletes the lock and then rewrites the contract would otherwise skip this
+# check entirely. A vanished criteria.tsv hashes to "" and mismatches too, which
+# is the correct verdict — the contract this ledger describes is gone.
+if [ "$LOCK_CHECKED" -eq 1 ]; then
+  post_hash=$(loop_sha256 "$CRIT" 2>/dev/null)
+  if [ "$armed_hash" != "$post_hash" ]; then
+    echo "run-contract: criteria.tsv changed WHILE the contract ran — a criterion altered the contract out from under the run. Refusing to report its result (fail closed)." >&2
+    {
+      printf '{\n  "generated_by": "run-contract.sh",\n  "all_green": false,\n'
+      printf '  "error": "contract tampered: criteria.tsv changed during the run (armed %s, after run %s)"\n}\n' \
+        "$(json_str "$armed_hash")" "$(json_str "$post_hash")"
+    } > "$TMP"
+    mv "$TMP" "$RESULTS"
+    exit 77
+  fi
+fi
+
 mv "$TMP" "$RESULTS"
 
 # Say what failed, on stderr. The ledger stays the machine record; this is the
@@ -317,6 +370,9 @@ fi
 #     no-sha-tool (exit 77), and the missing-criteria (exit 78) fail-closed paths
 #     all `exit` BEFORE the criteria loop, so they never reach here — their armed
 #     evidence is left untouched, and none of the fail-closed exits are weakened.
+#     The post-run drift check (exit 77) is the one fail-closed path that DOES
+#     sit after the loop; it exits above this block for the same reason — a run
+#     whose contract moved under it has no trustworthy current id set either.
 #   - Guarded on malformed too: a partly parsed contract's id set is incomplete
 #     by definition, so a dropped line's still-valid evidence log would look
 #     stale and be deleted — destroying evidence on the one run that is telling
