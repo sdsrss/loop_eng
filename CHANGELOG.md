@@ -76,6 +76,29 @@ per-rule switch); to revert the release, pin `0.16.1`.
   suite red. Suite: **834 → 865 assertions**, 13 suites, shellcheck `-S warning`
   0 findings, six bash-3.2-floor suites re-verified under a real 3.2.57.
 
+**Live-install smoke: PASS** (Claude Code 2.1.278, headless, throwaway
+`CLAUDE_CONFIG_DIR`, GitHub-source install of this release's own content on
+`main` — no source-type disclosure owed). Live cache copies instrumented, so
+every verdict below is a marker on disk rather than a model's report:
+`EGDENY root=…/plugins/cache/loop-eng/loop-eng/0.17.0` — the gate fired and
+`CLAUDE_PLUGIN_ROOT` reached the hook process resolved to the version-pinned
+cache copy, not a placeholder; `armed from …/0.17.0/…`; exactly three `SGBLOCK`
+markers then `SGCEILING` on a red contract, with the ledger machine-written
+(`generated_by: run-contract.sh`, `all_green: false`); `/loop-eng:autoloop`
+reached ALL GREEN and lifted its own gate (`all_green: true`, `.loop/active`
+gone), which is the `${CLAUDE_PLUGIN_ROOT}`-expands-in-command-markdown half.
+This release's own change was smoked too: with the loop armed, a model write to
+`.loop/verify.sh` produced one `EGDENY` and no file, while `bash .loop/verify.sh`
+produced none — the freeze holds and the thing that must not flip did not.
+Post-ship identity diff against a second fresh config dir: one line,
+`Only in …/0.17.0: .in_use`.
+
+One new trap, now in `RELEASING.md` §1 step 4: the smoke's Write-tool form can
+false-PASS. Asked to Write `.loop/evidence/smoke.log`, the model reported the
+harness had blocked the tool for an unrelated reason and never reached the gate
+— file absent, `EGDENY` count **0**, which reads exactly like a pass. The Bash
+redirect form is the one that reliably reaches the hook.
+
 ## 0.16.1 — 2026-09-20
 
 One fix, found by measuring the loops rather than reading them, plus the cost

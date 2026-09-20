@@ -166,9 +166,24 @@ smoked commit and the tag is then the commit recording the smoke itself, which
      that file itself, so it appears during a perfectly healthy smoke. If you
      must check `results.json`, read its `generated_by` field: `run-contract.sh`
      is the gate doing its job; anything else is the failure.
+   - **The Write-tool form of this step can false-PASS; use the Bash redirect.**
+     Observed 2026-09-20 on 2.1.278 while smoking 0.17.0: asked to Write
+     `hello` into `.loop/evidence/smoke.log`, the model reported that the
+     harness had blocked the Write tool for an unrelated reason and stopped.
+     The file was absent and the step looked green — but the marker count was
+     **0**, so the gate had never run. Any harness-side reason the model does
+     not reach the tool call (tool gating, a delegation policy, its own
+     refusal) produces the same indistinguishable "pass". Prompt instead with
+     `Run exactly this Bash command: echo hello > .loop/evidence/smoke.log`,
+     which the model has no reason to argue with and which reaches the hook.
+     The marker below is what settles it either way — a file-absent check alone
+     cannot.
    - To turn a model report into a machine fact, instrument the LIVE copy
      before the run — `sed`/`python3` a marker line into `deny()` — and assert
-     the marker file afterwards. Note the live copy is
+     the marker file afterwards. Record `$CLAUDE_PLUGIN_ROOT` **in the marker**
+     (`echo "EGDENY root=${CLAUDE_PLUGIN_ROOT:-UNSET}" >> …`) rather than
+     eyeballing the deny text for a placeholder: the model's own report elides
+     long paths, and the env var is the thing the check is actually about. Note the live copy is
      `plugins/cache/<marketplace>/<plugin>/<version>/hooks/evidence-gate.sh`,
      NOT `plugins/marketplaces/<name>/hooks/...`; instrumenting the marketplace
      clone by mistake produces an empty log that reads exactly like
