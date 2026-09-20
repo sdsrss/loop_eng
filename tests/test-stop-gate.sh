@@ -4,7 +4,11 @@ set -u
 . "$(dirname "$0")/lib.sh"
 
 GATE="$PLUGIN_ROOT/hooks/stop-gate.sh"
-SB=$(mk_sandbox_repo); trap 'rm -rf "$SB"' EXIT
+SB=$(mk_sandbox_repo)
+# Declared here and covered by the one EXIT trap, so a killed suite (CI cancel,
+# Ctrl-C) still cleans it and the leak scan can see the name.
+FAKE_NOTO=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-noto.XXXXXX")
+trap 'rm -rf "$SB" "$FAKE_NOTO"' EXIT
 cd "$SB" || exit 1
 mkdir -p .loop
 
@@ -119,6 +123,37 @@ else
 fi
 rm -f .loop/active .loop/gate-count
 
+# --- TC-4: with NO timeout(1)/gtimeout the gate runs the contract UNBOUNDED ---
+# The `else` arm exists because the fail-closed budget cannot be applied without
+# a timeout binary (stock macOS has neither until coreutils is installed), and
+# the warning is the only signal a human gets that the near-timeout guard is
+# inactive. Gutting the entire arm — warning, run and all — left 834 assertions
+# green, so the path that actually executes the contract on those machines was
+# pinned by nothing. Exercised over the legacy verify.sh contract on purpose:
+# it needs only `bash`, so the stripped PATH isolates the missing-timeout
+# variable instead of starving run-contract.sh of its own tools.
+rm -f .loop/criteria.tsv .loop/results.json .loop/gate-count
+for t in bash cat date rm tail dirname; do
+  src=$(command -v "$t") && ln -sf "$src" "$FAKE_NOTO/$t"
+done
+if ! PATH="$FAKE_NOTO" bash -c 'command -v timeout || command -v gtimeout' >/dev/null 2>&1; then
+  printf '#!/usr/bin/env bash\nexit 1\n' > .loop/verify.sh
+  touch .loop/active
+  echo '{}' | PATH="$FAKE_NOTO" LOOP_ENG_GATE_DEDUP_WINDOW=0 bash "$GATE" 2>.loop/errU
+  assert_eq 2 $? "no timeout binary: a RED contract still BLOCKS (the run really happens)"
+  assert_file_contains .loop/errU 'UNBOUNDED' "no timeout binary: the inactive fail-closed guard says so on stderr"
+  assert_eq 1 "$([ -f .loop/active ] && echo 1)" "no timeout binary: the block does not lift the gate"
+  rm -f .loop/gate-count
+  printf '#!/usr/bin/env bash\nexit 0\n' > .loop/verify.sh
+  echo '{}' | PATH="$FAKE_NOTO" LOOP_ENG_GATE_DEDUP_WINDOW=0 bash "$GATE" 2>/dev/null
+  assert_eq 0 $? "no timeout binary: a GREEN contract still allows"
+  assert_eq "" "$([ -f .loop/active ] && echo 1)" "no timeout binary: the green path still lifts the gate"
+  rm -f .loop/verify.sh .loop/errU .loop/gate-count
+else
+  echo "  SKIP: could not hide timeout/gtimeout from PATH — UNBOUNDED arm not forced" >&2
+fi
+rm -f .loop/active
+
 # --- legacy verify.sh fallback (no criteria.tsv) ---
 rm -f .loop/criteria.tsv .loop/results.json
 printf '#!/usr/bin/env bash\nexit 1\n' > .loop/verify.sh
@@ -158,6 +193,32 @@ echo '{}' | LOOP_ENG_GATE_DEDUP_WINDOW=0 bash lonelyhooks/stop-gate.sh 2>/dev/nu
 echo '{}' | LOOP_ENG_GATE_DEDUP_WINDOW=0 bash lonelyhooks/stop-gate.sh 2>.loop/errE; assert_eq 0 $? "missing-runner respects the block ceiling"
 assert_file_contains .loop/errE 'ceiling' "ceiling notice ends the missing-runner blocks"
 rm -rf lonelyhooks; rm -f .loop/active .loop/gate-count .loop/errD .loop/errE
+
+# --- P0-B: criteria.tsv + a legacy verify.sh + NO runner -> the CONTRACT wins
+#     the fail-closed decision; the legacy script does not get to answer for it ---
+# The branch order was contract -> legacy verify.sh -> missing-runner, so this
+# combination ran verify.sh: a GREEN legacy script allowed the stop while
+# criteria.tsv — the contract the loop was actually armed with — was never
+# executed. CLAUDE.md states the gate fails closed on "a criteria.tsv whose
+# runner it cannot find"; with a verify.sh sitting beside it, it did not. The
+# shape is not exotic: the same interrupted /plugin update that removes the
+# runner leaves whatever else is in .loop/ untouched.
+rm -f .loop/results.json .loop/gate-count
+mkdir -p lonelyhooks
+cp "$GATE" lonelyhooks/stop-gate.sh   # no sibling ../skills/loop-eng/scripts/
+printf '1\tred\tfalse\n' > .loop/criteria.tsv
+printf '#!/usr/bin/env bash\nexit 0\n' > .loop/verify.sh   # a GREEN legacy script
+touch .loop/active
+echo '{}' | LOOP_ENG_GATE_DEDUP_WINDOW=0 bash lonelyhooks/stop-gate.sh 2>.loop/errF
+assert_eq 2 $? "criteria.tsv + green verify.sh + no runner: still BLOCKS (contract wins)"
+assert_file_contains .loop/errF 'runner' "the block names the missing runner, not the legacy script"
+assert_eq 1 "$([ -f .loop/active ] && echo 1)" "contract-wins block does not lift the gate"
+# The legacy path is narrowed, not removed: with no criteria.tsv beside it,
+# verify.sh is still the contract and still answers.
+rm -f .loop/criteria.tsv .loop/gate-count
+echo '{}' | LOOP_ENG_GATE_DEDUP_WINDOW=0 bash lonelyhooks/stop-gate.sh 2>/dev/null
+assert_eq 0 $? "legacy verify.sh alone still answers (green allows) even with no runner"
+rm -rf lonelyhooks; rm -f .loop/active .loop/gate-count .loop/verify.sh .loop/errF
 
 # --- P2-19: the SAME stop attempt must cost ONE block, however many times the
 #     hook is registered. ---

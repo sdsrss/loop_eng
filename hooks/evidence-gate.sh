@@ -4,6 +4,10 @@
 # .loop/results.json and .loop/evidence/ are machine-written by run-contract.sh;
 # .loop/criteria.tsv is written once at contract time and fixed while the loop
 # is armed (.loop/active); after a loop ends the next contract may rewrite it.
+# .loop/verify.sh — the legacy contract, which the stop-gate executes when a
+# loop was armed without a criteria.tsv — is frozen on the same armed-scoped
+# terms: it is the one gate input with no hash-lock behind it, so a model
+# rewriting its own gate to `exit 0` had nothing downstream to catch it.
 # This hook denies model writes to them (exit 2, stderr fed back to the model),
 # so a "passes": true can never be typed into existence — only produced by the
 # runner actually executing the contract's commands. Weakening the contract by
@@ -122,6 +126,19 @@ the command pass; the next stop attempt ticks the box for you."
         if [ -e "$(dirname "$FILE")/active" ]; then
           deny "the armed contract hash-lock .loop/criteria.sha256 (loop is active)"
         fi ;;
+      */.loop/verify.sh|.loop/verify.sh)
+        # A legacy (pre-0.2) loop has no criteria.tsv and the stop-gate runs this
+        # script instead — there, verify.sh IS the contract, and it was the last
+        # gate input a model could still author. Rewriting it to `exit 0` is the
+        # completion claim typed rather than earned, exactly what results.json is
+        # guarded against, and it has no hash-lock behind it to catch the drift.
+        # Armed-scoped like criteria.tsv: authoring the script BEFORE arming is
+        # the legitimate case and stays writable. Create as well as overwrite —
+        # handing the gate a verify.sh it did not have is the same hijack as
+        # replacing the one it had.
+        if [ -e "$(dirname "$FILE")/active" ]; then
+          deny "the armed contract script .loop/verify.sh (loop is active)"
+        fi ;;
     esac
     ;;
   Bash)
@@ -161,16 +178,19 @@ the command pass; the next stop attempt ticks the box for you."
     if printf '%s' "$SCAN" | grep -qE '(>>?\|?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/+(results\.json|evidence(/|$|[^A-Za-z0-9._-]))'; then
       deny "a Bash command writing to the .loop evidence ledger"
     fi
-    # criteria.tsv + its hash-lock are locked only while the loop is armed
-    # (.loop/active in cwd — Bash commands run in the project cwd, so the
-    # cwd-relative check suffices). This regex is best-effort (see header): the
-    # real integrity guarantee is run-contract's hash re-derivation, which no
-    # Bash verb can slip past.
-    if [ -e .loop/active ] && printf '%s' "$SCAN" | grep -qE '(>>?\|?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/+criteria\.(tsv|sha256)'; then
+    # criteria.tsv, its hash-lock and the legacy verify.sh are locked only while
+    # the loop is armed (.loop/active in cwd — Bash commands run in the project
+    # cwd, so the cwd-relative check suffices). One pattern rather than three:
+    # they are the same rule over the three files the stop-gate may execute, and
+    # the verb group is the expensive half. This regex is best-effort (see
+    # header): for criteria.tsv the real integrity guarantee is run-contract's
+    # hash re-derivation, which no Bash verb can slip past. A legacy verify.sh
+    # has no such second layer, which is the reason it belongs in the set.
+    if [ -e .loop/active ] && printf '%s' "$SCAN" | grep -qE '(>>?\|?|\btee\b|\bmv\b|\bcp\b|\bsed\b[^|;&]*-i|\btruncate\b|\brm\b)[^|;&]*\.loop/+(criteria\.(tsv|sha256)|verify\.sh)'; then
       # Common legitimate case: a wrap-up that removes .loop/active AND
       # .loop/criteria.sha256 in ONE command is denied because the gate scans the
       # whole command string while active still exists. Advise splitting it.
-      deny "a Bash command writing to the armed contract .loop/criteria.tsv or its hash-lock.
+      deny "a Bash command writing to the armed contract (.loop/criteria.tsv, its hash-lock, or the legacy .loop/verify.sh).
 If this is a wrap-up removing both .loop/active and .loop/criteria.sha256 in one
 command, split it into two Bash calls: remove .loop/active first (that disarms
 the loop), then remove .loop/criteria.sha256 in a second call."

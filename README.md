@@ -122,15 +122,17 @@ loop-eng when done must be a machine-verified, multi-criterion fact.
 
 While `.loop/active` exists, the plugin's Stop hook re-runs the contract's
 checks on every stop attempt — `.loop/criteria.tsv` (via `run-contract.sh`),
-falling back to legacy `.loop/verify.sh` when no `criteria.tsv` is present —
-and blocks premature exit (exit 2 with the failure output fed back to the
+falling back to legacy `.loop/verify.sh` only when no `criteria.tsv` is present
+(a `criteria.tsv` whose runner is missing fails closed rather than letting the
+legacy script answer for it) — and blocks premature exit (exit 2 with the failure output fed back to the
 model). A hard ceiling of 3 blocks
 guarantees the gate can never deadlock a session, and the gate lifts itself
 the moment the contract passes.
 
 A companion PreToolUse hook (`hooks/evidence-gate.sh`) denies model writes
 to `.loop/results.json`, `.loop/evidence/`, and the armed `criteria.tsv` (plus
-its `criteria.sha256` hash-lock) while the loop is armed (`.loop/active`
+its `criteria.sha256` hash-lock and, for a legacy loop, the `verify.sh` that
+*is* its contract) while the loop is armed (`.loop/active`
 present) — via the Write/Edit tools this path is mechanically closed, so
 "passes: true" can only be produced by running the command, never typed. While
 armed it also denies a Bash `rm`/`mv` aimed at the whole `.loop` directory,

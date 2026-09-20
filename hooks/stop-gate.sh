@@ -9,7 +9,10 @@
 #   1. .loop/criteria.tsv  -> executed via the plugin-owned run-contract.sh
 #      (also refreshes .loop/results.json + .loop/evidence/ on every stop
 #      attempt, so the evidence ledger is never staler than the last stop)
-#   2. .loop/verify.sh     -> legacy path (pre-0.2 loops)
+#   2. .loop/verify.sh     -> legacy path (pre-0.2 loops), used ONLY when there
+#      is no criteria.tsv. A criteria.tsv whose runner is missing fails closed;
+#      it never falls back to verify.sh, which would let a script this loop was
+#      not armed with answer for the contract it was.
 #
 # Never blocks forever: a block counter (MAX_BLOCKS) is the hard ceiling,
 # and the orchestrator removes .loop/active on any legitimate end
@@ -115,15 +118,22 @@ MISSING_RUNNER=0
 if [ -f "$CRIT" ] && [ -f "$RUNNER" ]; then
   CHECK_CMD=(bash "$RUNNER")
   CHECK_DESC="contract criteria ($CRIT via run-contract.sh)"
-elif [ -f "$VERIFY" ]; then
-  CHECK_CMD=(bash "$VERIFY")
-  CHECK_DESC="verify script ($VERIFY)"
 elif [ -f "$CRIT" ]; then
   # A contract EXISTS and we have no way to execute it — that is an UNVERIFIED
   # contract, not an absent one. Handled below, after the block counter is read,
   # so the MAX_BLOCKS ceiling still bounds it (a broken install must not be able
   # to deadlock a session either).
+  #
+  # This arm MUST precede the legacy verify.sh one. With the order reversed, a
+  # loop that has both files and no runner ran verify.sh — so a GREEN legacy
+  # script answered for a contract that was never executed, allowed the stop and
+  # took .loop/active with it on the way out. The two files are not
+  # interchangeable: criteria.tsv is what this loop was armed with, verify.sh is
+  # a fallback for loops that have no criteria.tsv at all.
   MISSING_RUNNER=1
+elif [ -f "$VERIFY" ]; then
+  CHECK_CMD=(bash "$VERIFY")
+  CHECK_DESC="verify script ($VERIFY)"
 else
   # Genuinely contract-less: armed with neither criteria.tsv nor verify.sh.
   # arm-contract.sh arms even without criteria.tsv (legacy verify.sh loops), so

@@ -1,5 +1,57 @@
 # Changelog
 
+## Unreleased
+
+The completion invariant had one input a model could still write, and one branch
+order that let the wrong script answer for a contract. Both are closed, and the
+three arms that a mutation could delete without turning the suite red are now
+pinned.
+
+### Upgrade
+
+- **While a loop is armed, `.loop/verify.sh` is now read-only to the model.**
+  Writing, editing or removing it through Write/Edit/MultiEdit/Bash is denied
+  the same way `.loop/criteria.tsv` already was, and creating one is denied too.
+  Authoring a `verify.sh` *before* arming is unchanged, running it is unchanged,
+  and once the loop disarms the file is writable again — so an ordinary legacy
+  loop sees no difference. If you have a workflow where the model rewrites
+  `verify.sh` mid-loop, it will now get an `evidence-gate DENIED` instead: split
+  it (`rm .loop/active` first), or use the documented human escape hatch
+  `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
+
+### Fixed
+
+- **A model could rewrite its own gate.** In a legacy loop — one armed without a
+  `criteria.tsv`, which `arm-contract.sh` still supports — `.loop/verify.sh`
+  *is* the contract: the stop-gate executes it and nothing else. It was the one
+  gate input missing from the evidence-gate's protected set, and unlike
+  `criteria.tsv` it has no hash-lock behind it to catch the drift, so rewriting
+  it to `exit 0` produced a passing stop that nothing downstream could
+  distinguish from an earned one. That is the exact claim this plugin exists to
+  make impossible. Severity is high and reachability is low: the current
+  `/autoloop` and `/polish` always arm with a `criteria.tsv`, so the exposed
+  shape is a hand-armed or leftover `.loop/`. Nine assertions now cover it,
+  including the one that must NOT flip — `bash .loop/verify.sh` is still
+  allowed, because a frozen gate still has to run.
+- **A green legacy script could answer for a red contract, and disarm the loop
+  on its way out.** The stop-gate resolved its contract source in the order
+  `criteria.tsv` → legacy `verify.sh` → missing-runner-fail-closed, so a tree
+  holding *both* files with no runner present took the legacy branch: the
+  `criteria.tsv` the loop was actually armed with was never executed, and a
+  `verify.sh` exiting 0 both allowed the stop and removed `.loop/active`. The
+  documented behaviour — fail closed on "a `criteria.tsv` whose runner it cannot
+  find" — did not hold whenever a `verify.sh` sat beside it, and the reachable
+  cause is the same interrupted `/plugin update` that removes the runner while
+  leaving the rest of `.loop/` alone. The missing-runner arm now precedes the
+  legacy one; `verify.sh` still answers for loops that have no `criteria.tsv`.
+- **Three enforcement arms were held in place by nothing.** Deleting `MultiEdit|`
+  from the evidence-gate's write-tool arm, breaking the `python3` fallback
+  parser's command extraction (the whole Bash branch in jq-less environments),
+  or gutting the stop-gate's no-`timeout`-binary path (how the contract runs on
+  a stock macOS) each left all 834 assertions green. Each mutation now turns the
+  suite red. Suite: **834 → 865 assertions**, 13 suites, shellcheck `-S warning`
+  0 findings, six bash-3.2-floor suites re-verified under a real 3.2.57.
+
 ## 0.16.1 — 2026-09-20
 
 One fix, found by measuring the loops rather than reading them, plus the cost

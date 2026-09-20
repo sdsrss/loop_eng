@@ -113,16 +113,19 @@ machine-written fact, never a model claim. Three layers, all in `hooks/` +
    commands) and records `.loop/criteria.sha256` (a hash-lock), then drops
    `.loop/active`.
 2. `hooks/evidence-gate.sh` (PreToolUse on Write/Edit/Bash) **denies model writes**
-   to `.loop/results.json`, `.loop/evidence/`, and the armed `criteria.tsv` while
+   to `.loop/results.json`, `.loop/evidence/`, the armed `criteria.tsv` and the
+   legacy `.loop/verify.sh` (the contract of a loop armed without a
+   `criteria.tsv`, and the one gate input with no hash-lock behind it) while
    `.loop/active` exists. Escape hatch: `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
 3. `hooks/stop-gate.sh` (Stop) re-runs `run-contract.sh` on every stop attempt
    and blocks exit (exit 2, failure fed back) until the contract passes. It fails
    **closed** on a vacuous/empty contract, on a *partly parsed* one (any criteria
    line that is not blank, not a `#comment`, and yields no id or no command
    column — the usual slip is spaces where TABs belong), on a hash-lock
-   mismatch, and on a `criteria.tsv` whose runner it cannot find (a broken
-   install must not silently disarm the gate — only a loop armed with *no*
-   contract at all still allows the stop), with a hard ceiling of 3 blocks
+   mismatch, and on a `criteria.tsv` whose runner it cannot find — even when a
+   legacy `verify.sh` sits beside it, which does *not* get to answer for a
+   contract it is not (a broken install must not silently disarm the gate; only
+   a loop armed with *no* contract at all still allows the stop), with a hard ceiling of 3 blocks
    (Claude Code force-allows after 8, so the gate can't deadlock a session).
    The rule they share: a contract
    the runner could not fully parse is never reported green, because nothing

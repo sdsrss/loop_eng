@@ -121,11 +121,53 @@ gate "${W/FILE/$SB/.loop/criteria.tsv}";          assert_eq 2 $? "create abs-pat
 rm -f .loop/active
 gate "${W/FILE/.loop/criteria.tsv}";              assert_eq 0 $? "create criteria.tsv allowed when not armed"
 
+# --- P0-A: .loop/verify.sh joins the armed protected set ---------------------
+# In a legacy loop verify.sh IS the contract: arm-contract.sh arms without a
+# criteria.tsv and the stop-gate then runs this script. It was the one gate
+# input still absent from the protected set, so a model could rewrite its own
+# gate to `exit 0` — on that path "passes: true can only be produced by running
+# the contract" simply did not hold. Armed-scoped like criteria.tsv: authoring a
+# verify.sh BEFORE arming is the legitimate case and stays writable; freezing it
+# once the loop is live is the point. Create as well as overwrite, for the same
+# reason criteria.tsv denies the create — handing the gate a script it did not
+# have is the same hijack as replacing the one it had.
+gate "${W/FILE/.loop/verify.sh}";                 assert_eq 0 $? "Write verify.sh allowed when not armed"
+printf '#!/usr/bin/env bash\nexit 1\n' > .loop/verify.sh
+touch .loop/active
+gate "${W/FILE/.loop/verify.sh}";                 assert_eq 2 $? "overwrite verify.sh denied when armed"
+gate "${E/FILE/.loop/verify.sh}";                 assert_eq 2 $? "Edit verify.sh denied when armed"
+gate "${W/FILE/$SB/.loop/verify.sh}";             assert_eq 2 $? "abs-path verify.sh denied when armed"
+gate "${B/CMD/echo exit 0 > .loop/verify.sh}";    assert_eq 2 $? "Bash redirect into verify.sh denied when armed"
+gate "${B/CMD/sed -i s/1/0/ .loop/verify.sh}";    assert_eq 2 $? "Bash sed -i on verify.sh denied when armed"
+gate "${B/CMD/rm .loop/verify.sh}";               assert_eq 2 $? "Bash rm of verify.sh denied when armed"
+# Executing the gate's own script is not writing it — a legacy loop has to be
+# able to RUN the very file this rule freezes.
+gate "${B/CMD/bash .loop/verify.sh}";             assert_eq 0 $? "running verify.sh still allowed when armed"
+rm -f .loop/verify.sh
+gate "${W/FILE/.loop/verify.sh}";                 assert_eq 2 $? "create verify.sh denied when armed (no prior file)"
+printf '%s' "${W/FILE/.loop/verify.sh}" | bash "$GATE" 2>.loop/errV || true
+assert_file_contains .loop/errV 'verify.sh' "the verify.sh deny names the file it froze"
+rm -f .loop/active .loop/errV
+gate "${W/FILE/.loop/verify.sh}";                 assert_eq 0 $? "verify.sh writable again once the loop is disarmed"
+
 # --- L2: NotebookEdit carries the target in notebook_path, not file_path; the
 #     gate must read it or NotebookEdit is a blind spot into the ledger. ---
 N='{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"FILE"}}'
 gate "${N/FILE/.loop/results.json}";              assert_eq 2 $? "NotebookEdit notebook_path results.json denied"
 gate "${N/FILE/src/notebook.ipynb}";              assert_eq 0 $? "NotebookEdit unrelated notebook allowed"
+
+# --- TC-1: MultiEdit sits in the write-tool arm and nothing pinned it there ---
+# Deleting `MultiEdit|` from the `case "$TOOL"` arm left all 834 assertions
+# green: the tool most likely to rewrite a ledger in bulk was held in the
+# protected set by prompt-strength alone.
+M='{"tool_name":"MultiEdit","tool_input":{"file_path":"FILE"}}'
+gate "${M/FILE/.loop/results.json}";              assert_eq 2 $? "MultiEdit results.json denied"
+gate "${M/FILE/.loop/evidence/1.log}";            assert_eq 2 $? "MultiEdit evidence log denied"
+gate "${M/FILE/src/app.js}";                      assert_eq 0 $? "MultiEdit unrelated file allowed"
+touch .loop/active
+gate "${M/FILE/.loop/criteria.tsv}";              assert_eq 2 $? "MultiEdit armed criteria.tsv denied"
+gate "${M/FILE/.loop/verify.sh}";                 assert_eq 2 $? "MultiEdit armed verify.sh denied"
+rm -f .loop/active
 
 # --- unrelated paths allowed ---
 gate "${W/FILE/src/app.js}";                      assert_eq 0 $? "unrelated Write allowed"
@@ -210,6 +252,21 @@ if command -v python3 >/dev/null 2>&1; then
     assert_eq 2 $? "python3 fallback (no jq): Write results.json still denied"
     printf '%s' "${W/FILE/src/app.js}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
     assert_eq 0 $? "python3 fallback (no jq): unrelated Write still allowed"
+    # TC-2: the fallback parser's CMD line is what the whole Bash branch reads,
+    # and only its FILE line was pinned — breaking the CMD extraction left 834
+    # assertions green while every Bash deny went silent in jq-less
+    # environments. The tool_name half is pinned by the same call: a broken
+    # TOOL line lands in neither branch and the write is allowed.
+    printf '%s' "${B/CMD/echo done > .loop/results.json}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
+    assert_eq 2 $? "python3 fallback (no jq): Bash redirect to results.json still denied"
+    printf '%s' "${B/CMD/rm -rf .loop/evidence}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
+    assert_eq 2 $? "python3 fallback (no jq): Bash rm of the evidence dir still denied"
+    printf '%s' "${B/CMD/cat .loop/results.json}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
+    assert_eq 0 $? "python3 fallback (no jq): benign Bash read still allowed"
+    # NotebookEdit's notebook_path is read by the fallback's own `or` chain, a
+    # second untested half of the same three lines.
+    printf '%s' "${N/FILE/.loop/results.json}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
+    assert_eq 2 $? "python3 fallback (no jq): NotebookEdit notebook_path still denied"
   else
     echo "  SKIP: could not hide jq from PATH — python3 branch not forced" >&2
   fi
