@@ -25,10 +25,11 @@ After a marketplace install the commands may resolve namespace-prefixed —
 
 Bash and git are the baseline. Everything below is probed at run time, and the
 table says which way each probe falls: most degrade on a documented path, four
-of them **weaken a guard** (rows 1-4 — each says so on the stream it has, which
-is the whole difference between a degrade and a silent one), and two **refuse
-outright** rather than degrade (the `claude` CLI, and bash ≥ 4.4 for the
-unattended drivers). None of this belongs only in a script comment, which is
+of them **weaken a guard** (rows 1-4, and each says so on the stream it has —
+the difference between a degrade and a silent one; the one exception is
+`arm-contract.sh`'s advisory per-criterion red-check in row 3, which simply runs
+unbounded), and two **refuse outright** rather than degrade (the `claude` CLI,
+and bash ≥ 4.4 for the unattended drivers). None of this belongs only in a script comment, which is
 where it lived before.
 
 | Tool | Used by | Absent → |
@@ -322,7 +323,7 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 | `LOOP_ENG_GATE_TIMEOUT` | `hooks/stop-gate.sh` | `100` (seconds) | Internal budget for re-running the contract on each stop attempt, kept below the hook's own timeout in `hooks.json` (120s) so the gate fails closed by design instead of being killed by the platform. |
 | `LOOP_ENG_LIMIT_WAIT_MIN` | `unattended-autoloop.sh` | `60` (minutes) | Wait once and retry after a session log indicates a provider usage/rate limit; a second hit stops the driver (exit 75). |
 | `LOOP_ENG_LOOP_DIR` | `arm-contract.sh`, `run-contract.sh` | `.loop` | **TEST-ONLY.** The stop-gate and evidence-gate hooks are fixed to `.loop/`; pointing a production loop at a custom dir with this var silently removes it from both hooks' protection. |
-| `LOOP_ENG_MAX_MINUTES` | `unattended-polish.sh`, `unattended-autoloop.sh` | `120` (polish) / `240` (autoloop) | Wall-clock budget enforced via `timeout` for the unattended run; `0` is a config error (would disable the timeout) and falls back to the script's default. |
+| `LOOP_ENG_MAX_MINUTES` | `unattended-polish.sh`, `unattended-autoloop.sh` | `120` (polish) / `240` (autoloop) | Wall-clock budget for the unattended run, enforced via `timeout` or `gtimeout` (both drivers probe in that order; with neither on `PATH` the run is uncapped and says so). `0` is a config error (would disable the timeout) and falls back to the script's default. |
 | `LOOP_ENG_TIMER_NO_SYSTEMCTL` | `install-timer.sh`, `uninstall-timer.sh` | unset (`0`) | Set to `1` to write the systemd unit files without calling `systemctl` — used by the test suite, also useful on a box with no user D-Bus. |
 
 ## Safety model

@@ -85,8 +85,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Printing the version proves nothing on its own: if the runner image ever
+      # ships a newer /bin/bash, a print-only step keeps this leg green while it
+      # tests the wrong interpreter — the silent-disarm shape the rest of this
+      # file refuses. Assert the major version, and let the print stay for the log.
       - name: Prove /bin/bash is stock 3.2
-        run: /bin/bash --version | head -1
+        run: |
+          /bin/bash --version | head -1
+          /bin/bash -c '[ "${BASH_VERSINFO[0]}" -eq 3 ] || {
+            echo "/bin/bash is ${BASH_VERSION}, not 3.x — this leg no longer tests the 3.2 floor" >&2
+            exit 1
+          }'
 
       - name: Run hooks-only suites under stock /bin/bash (3.2)
         run: |

@@ -172,8 +172,10 @@ assert_file_contains "$SB/.loop/unattended.log" "TAIL-MARKER-SURVIVES" "truncati
 #
 # Both "absent" arms need a PATH holding no timeout of either name, which the
 # real PATH cannot provide, so build a minimal bin dir with symlinks to exactly
-# what the driver and the stub exec. A missing entry here would look like a
-# driver bug, so each one is asserted rather than assumed.
+# what the driver and the stub exec BY NAME. A missing entry here would look like
+# a driver bug, so each one is asserted rather than assumed. The one prerequisite
+# no symlink can cover is /usr/bin/env, which the stub's and the fake wrapper's
+# shebangs reach by absolute path — outside PATH, so outside this list.
 TD=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-polishto.XXXXXX")
 trap 'rm -rf "$SB" "$SD" "$TD"' EXIT
 mkdir -p "$TD/bin"
@@ -205,6 +207,9 @@ mk_fake_timeout timeout; mk_fake_timeout gtimeout
 run_restricted "$TD/err-both" && rc=0 || rc=$?
 assert_eq 0 "$rc" "restricted-PATH run completes (the minimal bin dir is sufficient)"
 assert_file_contains "$TD/record" "/timeout 120m" "with both installed, GNU timeout wraps the session"
+# ONE wrapper, not two: the assertion above is a substring test on an append-only
+# record, so a driver that wrapped the session twice would satisfy it unnoticed.
+assert_eq 1 "$(wc -l < "$TD/record" | tr -d ' ')" "exactly one wrapper ran (gtimeout did not also fire)"
 
 # gtimeout only (the macOS-with-coreutils shape) -> budget still enforced
 rm -f "$TD/bin/timeout"; : > "$TD/record"
@@ -217,6 +222,10 @@ rm -f "$TD/bin/gtimeout"; : > "$TD/record"
 run_restricted "$TD/err-none" && rc=0 || rc=$?
 assert_eq 0 "$rc" "no timeout of either name: the run still happens (degrade, not refuse)"
 assert_file_contains "$TD/err-none" "UNBOUNDED" "a dropped wall-clock budget is announced on stderr"
+# ...and lands in the rolling log, because this script's own cron example ends
+# `>/dev/null 2>&1`: a stderr-only warning is discarded by the very invocation it
+# is written for, leaving a plain `exit=0` behind for an uncapped run.
+assert_file_contains "$SB/.loop/unattended.log" "UNBOUNDED" "the warning survives a cron line that discards stderr"
 assert_eq 0 "$(wc -c < "$TD/record" | tr -d ' ')" "nothing wrapped the session when neither binary exists"
 
 report "test-unattended-polish"

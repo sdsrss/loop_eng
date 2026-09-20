@@ -4,7 +4,7 @@
 
 Two gaps this repo had already written down and left open: a wall-clock budget
 that silently did not apply on macOS, and a bash-3.2 compatibility claim that
-lived only in a code comment. Test suite 468 → 475 assertions (counted by
+lived only in a code comment. Test suite 468 → 477 assertions (counted by
 summing `bash tests/run-all.sh`, at the previous release commit and at this one
 — the 0.13.0 entry's "456" does not match a fresh count of that tree, which is
 why these two numbers were measured rather than carried forward).
@@ -37,9 +37,11 @@ the hook and uses `$BASH`, the interpreter running the suite: under the 3.2 leg 
 hook, and the leg would have reported a 3.2 verdict it never tested.
 
 Evidence for the polish fix, in the order it happened:
-`tests/test-unattended-polish.sh` 30 → 37 assertions, pre-fix 35 passed /
-2 failed — the gtimeout arm and the stderr-warning arm — post-fix 37 / 0. The
-both-installed arm passed throughout, which is what proves the harness rather
+`tests/test-unattended-polish.sh` 30 → 39 assertions. Run against the pre-fix
+driver, exactly the arms carrying the fix fail and everything else passes —
+35 passed / 2 failed for the gtimeout arm and the stderr-warning arm, and later
+38 / 1 for the rolling-log assertion the pre-ship review added. Post-fix: 39 / 0.
+The both-installed arm passed throughout, which is what proves the harness rather
 than the fix. Both absent-binary arms run the driver under a minimal bin dir of
 symlinks to exactly what it and the stub exec, because no real PATH can be made
 to lack `timeout` on demand; each prerequisite symlink is asserted, so a missing
@@ -49,6 +51,25 @@ Docs: the README Requirements table drops its "Known, not yet fixed" admission,
 and its intro names the guard-weakening rows correctly — rows 1-4, not "1-3 and
 5", which counted `curl` (a missing notice, not a guard) and skipped the polish
 timeout row.
+
+**Pre-ship review** (independent reviewer, fresh context, over `dcf2745..9b9f62f`):
+every numeric claim above re-measured, including under a real 3.2.57; no blocking
+finding; six accepted repairs. Two were load-bearing. The new UNBOUNDED warning
+went to stderr only, and this script's own cron example ends `>/dev/null 2>&1` —
+so the warning was discarded by the very invocation it is written for, leaving a
+plain `exit=0` in `.loop/unattended.log` for an uncapped run, and making the
+"where the scheduler's log keeps it" line above false for anything but the systemd
+path. It is now tee'd into the rolling log, like the dirty-tree refusal. And the
+`test-bash32` leg's "Prove /bin/bash is stock 3.2" step printed the version
+without asserting it: a runner image that ever ships a newer `/bin/bash` would
+have kept that leg green while testing the wrong interpreter — the same
+silent-disarm shape this release's other half exists to close. It now fails the
+job unless `BASH_VERSINFO[0]` is 3. Four smaller ones: README's "each says so"
+now excludes `arm-contract.sh`'s advisory red-check (which really does just run
+unbounded), the env-var table stops crediting `timeout` alone for the budget, the
+both-installed arm asserts that exactly one wrapper ran rather than trusting a
+substring on an append-only record, and the minimal-bin-dir comment names
+`/usr/bin/env` as the one prerequisite no symlink can cover.
 
 ## 0.13.0 — 2026-09-19
 

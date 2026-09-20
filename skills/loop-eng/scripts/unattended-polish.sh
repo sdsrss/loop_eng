@@ -164,7 +164,12 @@ if command -v timeout >/dev/null 2>&1; then
 elif command -v gtimeout >/dev/null 2>&1; then
   TIMEOUT_CMD=(gtimeout "${MAX_MINUTES}m")
 else
-  echo "warning: no timeout(1)/gtimeout — this run is UNBOUNDED; LOOP_ENG_MAX_MINUTES=$MAX_MINUTES cannot be enforced" >&2
+  # tee, not a bare >&2: this file's own cron example (line 19) ends `>/dev/null
+  # 2>&1`, so a stderr-only warning is discarded by exactly the invocation it is
+  # written for, leaving `.loop/unattended.log` showing a plain `exit=0` for an
+  # uncapped run. Same idiom as the dirty-tree refusal below.
+  echo "$STAMP warning: no timeout(1)/gtimeout — this run is UNBOUNDED; LOOP_ENG_MAX_MINUTES=$MAX_MINUTES cannot be enforced" \
+    | tee -a "$LOG_DIR/unattended.log" >&2
 fi
 
 STATUS=0
