@@ -2,10 +2,11 @@
 # loop-eng update-notify — SessionStart hook.
 #
 # A NOTIFIER, not an updater: it never downloads or installs anything. It reads
-# the installed version from the plugin manifest, at most once per 24h asks the
-# GitHub releases API for the latest tag, and — only when a newer version
-# exists — injects a one-line system notice telling the human to run
-# `/plugin update loop-eng`.
+# the installed version from the plugin manifest, asks the GitHub releases API
+# for the latest tag on a throttle (see THROTTLE below: 24h after a successful
+# check, 1h after a failed one — so "once per 24h" is the best case, not the
+# floor), and — only when a newer version exists — injects a one-line system
+# notice telling the human to run `/plugin update loop-eng`.
 #
 # Every failure path (no CLAUDE_PLUGIN_ROOT, missing manifest, no curl, network
 # error, unparseable body, throttled-with-no-update, already up-to-date) emits

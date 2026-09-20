@@ -1,5 +1,5 @@
 {
-  "description": "loop-eng hooks. Stop: while .loop/active exists, block session stop until the loop contract passes (hard ceiling: 3 blocks; the platform force-allows after 8). PreToolUse: deny model writes to the machine-written evidence ledger (.loop/results.json, .loop/evidence/) and, while the loop is armed, to the contract itself (criteria.tsv, its criteria.sha256 hash-lock, a machine-ticked backlog.md, and the legacy verify.sh); escape hatch LOOP_ENG_DISABLE_EVIDENCE_GATE=1. SessionStart: a fail-open update-available NOTIFIER (no auto-download) that at most once per 24h checks the GitHub releases API and injects a one-line notice when a newer version exists. NOTE: if plugin hooks.json auto-loading does not fire in your Claude Code version, register these hooks manually in settings.json — see README.",
+  "description": "loop-eng hooks. Stop: while .loop/active exists, block session stop until the loop contract passes (hard ceiling: 3 blocks; the platform force-allows after 8). PreToolUse: deny model writes to the machine-written evidence ledger (.loop/results.json, .loop/evidence/) and, while the loop is armed, to the contract itself (criteria.tsv, its criteria.sha256 hash-lock, a machine-ticked backlog.md, and the legacy verify.sh); escape hatch LOOP_ENG_DISABLE_EVIDENCE_GATE=1. SessionStart: a fail-open update-available NOTIFIER (no auto-download) that checks the GitHub releases API on a throttle (24h after a successful check, 1h after a failed one) and injects a one-line notice when a newer version exists. NOTE: if plugin hooks.json auto-loading does not fire in your Claude Code version, register these hooks manually in settings.json — see README.",
   "hooks": {
     "SessionStart": [
       {
@@ -15,7 +15,6 @@
     ],
     "Stop": [
       {
-        "matcher": "*",
         "hooks": [
           {
             "type": "command",
