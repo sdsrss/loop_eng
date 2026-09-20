@@ -94,6 +94,13 @@ if [ -f "$CRIT" ]; then
   while IFS= read -r crit_line || [ -n "$crit_line" ]; do
     crit_lineno=$((crit_lineno + 1))
     crit_line="${crit_line%$'\r'}"
+    # UTF-8 BOM on line 1, stripped exactly where run-contract.sh strips it. Arm
+    # and run must name the same id: every warning below exists so a human can
+    # find the criterion BEFORE the evidence-gate locks the file, and a warning
+    # naming "﻿baseline" for a ledger entry that says "baseline" sends them
+    # looking for a criterion that does not exist. Same failure shape as the
+    # empty-description split the two scripts were made to share.
+    [ "$crit_lineno" -eq 1 ] && crit_line="${crit_line#$'\xef\xbb\xbf'}"
     case "$crit_line" in
       *[![:space:]]*) : ;;
       *) continue ;;
@@ -219,8 +226,13 @@ if [ -f "$CRIT" ] && [ "${LOOP_ENG_ARM_REDCHECK:-1}" != "0" ]; then
   # left cmd empty), so the one class of criterion most likely to be a hasty
   # afterthought was also the one that never got red-checked.
   rc_line=""
+  rc_lineno=0
   while IFS= read -r rc_line || [ -n "$rc_line" ]; do
+    rc_lineno=$((rc_lineno + 1))
     rc_line="${rc_line%$'\r'}"
+    # Same BOM strip as the classification loop above and run-contract.sh: this
+    # loop names criteria too ("criterion 'x' is already green").
+    [ "$rc_lineno" -eq 1 ] && rc_line="${rc_line#$'\xef\xbb\xbf'}"
     case "$rc_line" in
       *[![:space:]]*) : ;;
       *) continue ;;
@@ -251,7 +263,11 @@ if [ -f "$CRIT" ] && [ "${LOOP_ENG_ARM_REDCHECK:-1}" != "0" ]; then
 fi
 
 : > "$ACTIVE"
-rm -f "$COUNT_FILE"
+# gate-last is the stop-gate's same-stop-attempt marker. It is time-bounded, so a
+# stale one is already harmless — but a loop arms with a clean slate, and leaving
+# a previous loop's verdict lying next to a fresh contract is the same class of
+# leftover as the stale gate-count beside it.
+rm -f "$COUNT_FILE" "$LOOP_DIR/gate-last"
 echo "loop-eng arm-contract: stop-gate armed ($ACTIVE)." >&2
 # Provenance line (cache-vs-repo divergence guard, pilot retro finding): print
 # the path THIS script was invoked as. In a dogfood run the loop arms from the

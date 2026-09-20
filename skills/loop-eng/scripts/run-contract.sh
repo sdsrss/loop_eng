@@ -230,6 +230,15 @@ cp "$CRIT" "$SNAP" 2>/dev/null || cannot_write "$SNAP" "could not snapshot the c
     # exactly like its LF form whichever column the CR would have landed in.
     # (json_str already escapes CR for JSON validity; this fixes the exec path.)
     line="${line%$'\r'}"
+    # UTF-8 BOM, first line only — the same class as the CR above, and the same
+    # remedy. An editor that writes a BOM puts EF BB BF in front of the first
+    # id, so the ledger reports an id nobody authored and the evidence log lands
+    # at evidence/_<id>.log (safe_id maps the three bytes to underscores).
+    # Nothing FAILS, which is why it went unnoticed: the contract still runs and
+    # can still go green; only a human or a stop rule looking the criterion up by
+    # name finds it missing. arm-contract.sh strips it in the same place, so the
+    # two agree on the id the way they already agree on the TAB split.
+    [ "$lineno" -eq 1 ] && line="${line#$'\xef\xbb\xbf'}"
     case "$line" in
       *$'\t'*$'\t'*)
         id="${line%%$'\t'*}"

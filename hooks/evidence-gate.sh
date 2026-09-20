@@ -158,6 +158,30 @@ If this is a wrap-up removing both .loop/active and .loop/criteria.sha256 in one
 command, split it into two Bash calls: remove .loop/active first (that disarms
 the loop), then remove .loop/criteria.sha256 in a second call."
     fi
+    # The whole directory, while armed. Everything above guards one file inside
+    # .loop/; `rm -rf .loop` takes the stop-gate's marker, the hash-lock, the
+    # ledger and the evidence in a single command, so the loop is disarmed and
+    # every check above is moot. It is not an adversarial shape — README offers
+    # exactly this line as the human cleanup command — which makes it the most
+    # likely way an ordinary wrap-up ends a loop without verifying it.
+    #
+    # The boundary is the same one the ledger pattern above had to learn: the
+    # name matches when followed by `/` and nothing more, by end of line, or by
+    # a byte that cannot continue a filename. NOT `\b`, and NOT a bare `.loop`
+    # prefix — a SUBPATH must still go through. `.loop/state.md` is the
+    # orchestrator's own scratch file and has never been guarded, and
+    # `.loopback` is a different directory that merely shares five characters.
+    #
+    # `rm` and `mv` only. A redirect or `tee` cannot destroy a directory, and
+    # `cp` onto one does not disarm anything; the verbs here are the two that
+    # make .loop stop existing where the gate looks for it.
+    if [ -e .loop/active ] && printf '%s' "$SCAN" | grep -qE '(\brm\b|\bmv\b)[^|;&]*\.loop/*([^A-Za-z0-9._/-]|$)'; then
+      deny "a Bash command removing or moving the whole .loop directory while the loop is ARMED.
+That single command disarms the stop-gate, drops the hash-lock and destroys the
+evidence ledger at once — the loop would end unverified with nothing left to
+show for it. If the loop is genuinely over, disarm first and clean up after:
+run \`rm .loop/active\` in one Bash call, then \`rm -rf .loop\` in a second."
+    fi
     ;;
 esac
 

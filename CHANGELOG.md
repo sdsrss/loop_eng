@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+Closing out the 2026-09-20 production-readiness audit: 0.15.0 took every P0 and
+P1, this entry takes the P2 and P3 remainder. Each item keeps the project's own
+discipline — the assertion that would have caught it first, then the fix.
+
+### Upgrade
+
+- **The evidence-gate now denies `rm -rf .loop` while a loop is armed.** That
+  one command takes the stop-gate's marker, the hash-lock and the evidence
+  ledger together, so however innocently it is typed it is a disarm — and it is
+  the command this README hands humans for cleanup, which is what made it the
+  likeliest accidental one. The refusal names the two-step form: `rm
+  .loop/active` in one call, then `rm -rf .loop` in the next. A **subpath** is
+  unaffected (`.loop/state.md` was never guarded and still isn't), and once the
+  loop is over the single command goes through unchanged. Humans keep
+  `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
+
+### Fixed
+
+- **A double-registered Stop hook no longer costs two blocks per stop attempt.**
+  Listing the loop-eng hooks in a project's `.claude/settings.json` while the
+  plugin is also installed fires the gate twice, serially, and each invocation
+  read the counter the previous one had just written: the 3-block ceiling
+  arrived on the second attempt. The half that was never written down is worse —
+  the ceiling clears `gate-count` on its way to allowing, so the twin read 0,
+  re-ran the red contract and exited 2, meaning under double registration the
+  ceiling never actually released the stop. The gate now records its verdict in
+  `.loop/gate-last` and replays it for a repeat invocation arriving within
+  `LOOP_ENG_GATE_DEDUP_WINDOW` seconds (default 1 — one second is the smallest
+  window that survives `date +%s`'s own resolution). A marker that is
+  unparseable, dated in the future, or older than the window is ignored rather
+  than honoured; `0` disables the replay.
+- **A UTF-8 BOM on the first line of `criteria.tsv` no longer renames the first
+  criterion.** An editor that writes one put `EF BB BF` in front of the first
+  id, so the ledger reported an id nobody authored and its evidence landed in
+  `evidence/_<id>.log`. Nothing failed, which is why it survived: the contract
+  still went green, and the mismatch only surfaced when a human looked the
+  criterion up by name. Stripped on line 1 in `run-contract.sh` and in both of
+  `arm-contract.sh`'s parse loops, so arm and run keep naming the same id — the
+  same agreement the empty-description TAB split was fixed to preserve.
+
 ## 0.15.0 — 2026-09-20
 
 Everything the 2026-09-20 production-readiness audit rated P0 or P1, fixed with

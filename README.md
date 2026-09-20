@@ -132,7 +132,12 @@ A companion PreToolUse hook (`hooks/evidence-gate.sh`) denies model writes
 to `.loop/results.json`, `.loop/evidence/`, and the armed `criteria.tsv` (plus
 its `criteria.sha256` hash-lock) while the loop is armed (`.loop/active`
 present) — via the Write/Edit tools this path is mechanically closed, so
-"passes: true" can only be produced by running the command, never typed.
+"passes: true" can only be produced by running the command, never typed. While
+armed it also denies a Bash `rm`/`mv` aimed at the whole `.loop` directory,
+which would take the gate's marker, the hash-lock and the ledger in one
+command; the refusal names the two-step form (`rm .loop/active`, then
+`rm -rf .loop`). A **subpath** is unaffected — `.loop/state.md` is the
+orchestrator's own scratch file and has never been guarded.
 Escape hatch for humans: `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
 
 The armed contract is additionally pinned by a **hash-lock**: `arm-contract.sh`
@@ -203,9 +208,14 @@ Scope notes:
   literal filename don't co-occur, or have a human use the escape hatch.
 - **Register the hooks in one place only.** If a project lists the loop-eng
   hooks in its own `.claude/settings.json` AND the plugin is installed globally,
-  every event fires both — a **double-fire**: the stop-gate's block counter then
-  climbs by 2 per stop, hitting the ceiling in ~1–2 blocks instead of 3. Pick
-  one registration site, not both.
+  every event fires both — a **double-fire**. The stop-gate now absorbs its own
+  half of that: a repeat invocation arriving within `LOOP_ENG_GATE_DEDUP_WINDOW`
+  seconds (default 1) replays the first one's verdict instead of re-running the
+  contract, so one stop attempt costs one block and the ceiling still releases
+  the stop rather than being re-blocked by its own twin. It is a mitigation, not
+  a reason to double-register: the contract still runs twice per stop on any
+  event the window does not cover, and every other hook fires twice regardless.
+  Pick one registration site, not both.
 - **The `backlog` criterion is a trust boundary, not a mechanism.** The
   all-boxes-ticked completion check reads `.loop/backlog.md`, which the
   orchestrator can write; so "tick a box only after a checker reports ALL GREEN"
@@ -349,6 +359,7 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 | `LOOP_ENG_ARM_REDCHECK_TIMEOUT` | `arm-contract.sh` | `10` (seconds) | Per-criterion timeout budget for the arm-time red-check; non-numeric or `0` falls back to `10`. |
 | `LOOP_ENG_CLAUDE_BIN` | `unattended-polish.sh`, `unattended-autoloop.sh`, `install-timer.sh` | `claude` | Path/name of the `claude` CLI binary the unattended runners and the systemd timer installer invoke. |
 | `LOOP_ENG_DISABLE_EVIDENCE_GATE` | `hooks/evidence-gate.sh` | unset (`0`) | Human escape hatch: set to `1` to disable the PreToolUse evidence-gate hook, letting a legitimate mid-loop contract edit through. |
+| `LOOP_ENG_GATE_DEDUP_WINDOW` | `hooks/stop-gate.sh` | `1` (second) | How long a stop verdict is replayed for a repeat invocation, so that registering the Stop hook twice (project `settings.json` **and** the plugin) costs one block per stop attempt rather than two. A marker that is unparseable, future-dated, or older than the window is ignored; `0` disables the replay. |
 | `LOOP_ENG_GATE_TIMEOUT` | `hooks/stop-gate.sh` | `100` (seconds) | Internal budget for re-running the contract on each stop attempt, kept below the hook's own timeout in `hooks.json` (120s) so the gate fails closed by design instead of being killed by the platform. |
 | `LOOP_ENG_LIMIT_WAIT_MIN` | `unattended-autoloop.sh` | `60` (minutes) | Wait once and retry after a session log indicates a provider usage/rate limit; a second hit stops the driver (exit 75). |
 | `LOOP_ENG_LOOP_DIR` | `arm-contract.sh`, `run-contract.sh` | `.loop` | **TEST-ONLY.** The stop-gate and evidence-gate hooks are fixed to `.loop/`; pointing a production loop at a custom dir with this var silently removes it from both hooks' protection. |
@@ -392,7 +403,12 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   your working tree. Neither the
   plugin uninstall nor `uninstall-timer.sh` deletes it — by design, since it
   may hold an in-progress loop's state. If you want it gone, remove it by
-  hand: `rm -rf .loop/`.
+  hand: `rm -rf .loop/`. While a loop is **armed**, the evidence-gate denies
+  that command from a model's Bash call — one `rm` would take the stop-gate's
+  marker, the hash-lock and the evidence ledger together, which is a disarm
+  however innocently it was typed. The gate names the two-step form in its
+  refusal: `rm .loop/active` first, then `rm -rf .loop/`. Once the loop is over
+  (no `.loop/active`) the single command goes through unchanged.
 - **One file outlives an uninstall.** The update notifier's 24h throttle stamp
   lives at `${XDG_CACHE_HOME:-~/.cache}/loop-eng/update-check.json` — outside
   `~/.claude/`, deliberately, so it survives a version bump instead of being

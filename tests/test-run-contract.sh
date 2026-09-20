@@ -166,6 +166,20 @@ printf '1\tok\ttrue\r\n2\talso ok\ttrue\r\n' > .loop/criteria.tsv   # CRLF line 
 bash "$RUNNER"; assert_eq 0 $? "CRLF line endings: passing criteria go GREEN, not false-red"
 assert_file_contains .loop/results.json '"all_green": true' "CRLF: passing contract is green"
 
+# --- UTF-8 BOM on the first line: the same class as CRLF and handled the same
+#     way. An editor that writes a BOM puts EF BB BF before the first id, so the
+#     id becomes "﻿check" — the ledger reports an id nobody authored and the
+#     evidence log lands at .loop/evidence/_check.log (the sanitizer maps the
+#     three non-ASCII bytes to underscores). Nothing FAILS, which is why it
+#     survived: the contract still goes green and the mismatch only surfaces when
+#     a human or a stop rule goes looking for a criterion by name. Strip it on
+#     line 1 only, where a BOM can legally appear. ---
+printf '\xef\xbb\xbfcheck\tbom first line\ttrue\nsecond\tplain\ttrue\n' > .loop/criteria.tsv
+bash "$RUNNER"; assert_eq 0 $? "BOM-prefixed criteria.tsv still runs green"
+assert_file_contains .loop/results.json '"id": "check"' "BOM stripped from the first criterion id"
+assert_eq 0 "$(LC_ALL=C grep -c $'\xef\xbb\xbf' .loop/results.json)" "no BOM bytes survive into the ledger"
+assert_eq "true" "$([ -f .loop/evidence/check.log ] && echo true)" "evidence log named by the clean id"
+
 # --- a criterion that rewrites criteria.tsv MID-RUN cannot delete its siblings ---
 # The loop used to stream the live file, so a criterion that truncated
 # criteria.tsv made every line after it vanish at EOF — silently. Not "skipped",

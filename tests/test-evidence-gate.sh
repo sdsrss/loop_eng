@@ -51,9 +51,33 @@ gate "${B/CMD/rm -f .loop/active .loop/criteria.sha256}"; assert_eq 2 $? "Bash r
 printf '%s' "${B/CMD/rm -f .loop/active .loop/criteria.sha256}" | bash "$GATE" 2>.loop/err || true
 assert_file_contains .loop/err 'active first' "deny advises removing active first"
 
+# --- P2-2: while armed, a Bash rm/mv aimed at .loop ITSELF takes the stop-gate's
+#     marker, the hash-lock and the ledger in ONE command — every layer at once.
+#     It is not an adversarial shape: README hands humans `rm -rf .loop` as the
+#     cleanup command, so it is the likeliest way a non-adversarial session ends
+#     up with a silently disarmed loop. Deny while armed and name the two-step
+#     form, exactly as the active+sha256 wrap-up above does.
+#     The boundary matters as much as the deny: a SUBPATH must be unaffected.
+#     .loop/state.md is the orchestrator's own scratch file and has never been
+#     guarded, and `.loopback` is a different directory that merely shares the
+#     prefix — a `\b`-style boundary would swallow both. ---
+gate "${B/CMD/rm -rf .loop}";                     assert_eq 2 $? "Bash rm -rf .loop denied when armed"
+gate "${B/CMD/rm -rf .loop/}";                    assert_eq 2 $? "Bash rm -rf .loop/ (trailing slash) denied when armed"
+gate "${B/CMD/rm -rf .loop; echo done}";          assert_eq 2 $? "Bash rm -rf .loop before a ; denied when armed"
+gate "${B/CMD/rm -rf ./.loop}";                   assert_eq 2 $? "Bash rm -rf ./.loop denied when armed"
+gate "${B/CMD/mv .loop .loop.bak}";               assert_eq 2 $? "Bash mv of the whole .loop dir denied when armed"
+printf '%s' "${B/CMD/rm -rf .loop}" | bash "$GATE" 2>.loop/err2 || true
+assert_file_contains .loop/err2 'rm .loop/active' "whole-dir deny names the disarm-first step"
+gate "${B/CMD/rm .loop/state.md}";                assert_eq 0 $? "Bash rm .loop/state.md still allowed when armed"
+gate "${B/CMD/rm -rf .loopback}";                 assert_eq 0 $? "Bash rm of a same-prefix sibling dir allowed when armed"
+gate "${B/CMD/echo see .loop for the logs}";      assert_eq 0 $? "naming .loop with no write verb allowed when armed"
+
 # --- results.json/evidence: always denied, armed or not ---
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied while armed"
 rm -f .loop/active
+# The whole-dir deny is armed-scoped like the contract lock: once the loop has
+# ended, `rm -rf .loop` is the documented cleanup and must go through.
+gate "${B/CMD/rm -rf .loop}";                     assert_eq 0 $? "Bash rm -rf .loop allowed when not armed"
 gate "${W/FILE/.loop/criteria.sha256}";           assert_eq 0 $? "criteria.sha256 rewrite allowed when not armed"
 rm -f .loop/criteria.sha256
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied with no active (explicit)"

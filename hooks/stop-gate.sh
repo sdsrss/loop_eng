@@ -42,6 +42,73 @@ MAX_BLOCKS=3 # keep < 8: see PLATFORM CEILING above
 # No active loop -> allow stop.
 [ -f "$ACTIVE" ] || exit 0
 
+# Same-stop-attempt replay — the double-registration guard.
+#
+# A project that registers this hook in its own .claude/settings.json while
+# loop-eng is ALSO installed as a plugin gets the gate fired twice for one stop
+# attempt, serially: each invocation read the counter the previous one had just
+# written, so one attempt cost two blocks and the 3-block ceiling arrived on the
+# second attempt instead of the third. The half nobody had written down is
+# worse: the ceiling clears gate-count on its way to allowing, so the twin of
+# that allow read 0, re-ran the red contract and exited 2 — under double
+# registration the ceiling never actually released the stop.
+#
+# The twin follows within milliseconds; a genuine next attempt needs a model
+# turn first. That gap is the whole signal. gate-last records <epoch> <verdict>
+# at every decision below, and an invocation arriving within
+# LOOP_ENG_GATE_DEDUP_WINDOW seconds of one replays that verdict verbatim — no
+# contract re-run, no counter increment.
+#
+# Bounded on purpose, because a cache in front of a fail-closed gate is only
+# safe while it cannot be aimed: a marker that is unparseable, dated in the
+# FUTURE, or older than the window is IGNORED, never honoured, and the window is
+# seconds wide. It is deliberately NOT in the evidence-gate's protected set —
+# forging one buys a couple of seconds of silence, strictly less than the plain
+# `rm .loop/active` this gate has always documented as out of scope. Setting the
+# window to 0 disables the replay entirely.
+#
+# The default is 1 second, which is the smallest window that works rather than a
+# guess: `date +%s` has one-second resolution, so two invocations milliseconds
+# apart can still land on consecutive integers. 1 covers that straddle and
+# nothing more. Narrow is the safe direction — an over-wide window swallows a
+# real block, and while that stays fail-closed (the gate keeps blocking; the
+# platform's own 8-block force-allow is still the outer bound), the gate's
+# ceiling message would never print.
+DEDUP_FILE="$LOOP_DIR/gate-last"
+DEDUP_WINDOW="${LOOP_ENG_GATE_DEDUP_WINDOW:-1}"
+# 10#: "00"/"08" are digit strings too; force base-10 so the arithmetic below
+# never sees a bad octal token (same guard as GATE_TIMEOUT further down).
+case "$DEDUP_WINDOW" in *[!0-9]* | "") DEDUP_WINDOW=1 ;; esac
+DEDUP_WINDOW=$((10#$DEDUP_WINDOW))
+
+record_verdict() { # $1 = allow|block — what this invocation decided, and when
+  [ "$DEDUP_WINDOW" -gt 0 ] || return 0
+  printf '%s %s\n' "$(date +%s 2>/dev/null || echo 0)" "$1" > "$DEDUP_FILE" 2>/dev/null || :
+  return 0
+}
+
+if [ "$DEDUP_WINDOW" -gt 0 ] && [ -f "$DEDUP_FILE" ]; then
+  LAST_AT=""
+  LAST_VERDICT=""
+  read -r LAST_AT LAST_VERDICT < "$DEDUP_FILE" 2>/dev/null || :
+  NOW=$(date +%s 2>/dev/null || echo 0)
+  case "$LAST_AT" in *[!0-9]* | "") LAST_AT="" ;; esac
+  # NOW >= LAST_AT rejects a future-dated marker; the subtraction then bounds it
+  # to the window. A clock that cannot be read leaves NOW=0, which fails the
+  # first test and simply counts the block — the fail-closed direction.
+  if [ -n "$LAST_AT" ] && [ "$NOW" -ge "$LAST_AT" ] \
+     && [ "$((NOW - LAST_AT))" -le "$DEDUP_WINDOW" ]; then
+    case "$LAST_VERDICT" in
+      allow)
+        echo "loop-eng stop-gate: this hook already ran for the same stop attempt (${DEDUP_WINDOW}s window) and allowed it; replaying that decision instead of re-running the contract. Registered twice? Remove the duplicate Stop hook from .claude/settings.json — the plugin registers its own." >&2
+        exit 0 ;;
+      block)
+        echo "loop-eng stop-gate: this hook already ran for the same stop attempt (${DEDUP_WINDOW}s window) and BLOCKED it; replaying that block without counting it twice. See the reason it printed above. Registered twice? Remove the duplicate Stop hook from .claude/settings.json — the plugin registers its own." >&2
+        exit 2 ;;
+    esac
+  fi
+fi
+
 RUNNER="$(cd "$(dirname "$0")" && pwd)/../skills/loop-eng/scripts/run-contract.sh"
 
 MISSING_RUNNER=0
@@ -78,6 +145,7 @@ if [ "$COUNT" -ge "$MAX_BLOCKS" ]; then
   # Clear the counter so a stale gate-count can't leave a re-armed loop instantly
   # inert (COUNT>=MAX). .loop/active stays until the orchestrator disarms.
   rm -f "$COUNT_FILE"
+  record_verdict allow
   exit 0
 fi
 
@@ -92,6 +160,7 @@ fi
 # plugin tree — in both cases the gate LOOKS armed while enforcing nothing.
 if [ "$MISSING_RUNNER" -eq 1 ]; then
   echo $((COUNT + 1)) > "$COUNT_FILE"
+  record_verdict block
   {
     echo "loop-eng stop-gate BLOCKED this stop ($((COUNT + 1))/$MAX_BLOCKS): $CRIT exists but its runner does not, so the contract was never verified (fail closed)."
     echo "Looked for the runner at:"
@@ -142,6 +211,7 @@ fi
 # finish within our budget. An unverified contract must not pass -> fail closed.
 if [ -n "$TIMEOUT_BIN" ] && [ "$STATUS" -eq 124 ]; then
   echo $((COUNT + 1)) > "$COUNT_FILE"
+  record_verdict block
   {
     echo "loop-eng stop-gate BLOCKED this stop ($((COUNT + 1))/$MAX_BLOCKS): the contract did not finish within ${GATE_TIMEOUT}s (fail closed)."
     echo "criteria.tsv is too slow for the Stop-hook budget. Make it a FAST subset"
@@ -152,12 +222,16 @@ if [ -n "$TIMEOUT_BIN" ] && [ "$STATUS" -eq 124 ]; then
 fi
 
 if [ "$STATUS" -eq 0 ]; then
-  # Contract satisfied: lift the gate so future stops are free.
-  rm -f "$ACTIVE" "$COUNT_FILE" "$SHA_LOCK"
+  # Contract satisfied: lift the gate so future stops are free. The dedup marker
+  # goes with the rest of the gate's state — the twin invocation finds no
+  # .loop/active and allows on its own, and a verdict left behind would be
+  # handed to whatever loop is armed in this tree next.
+  rm -f "$ACTIVE" "$COUNT_FILE" "$SHA_LOCK" "$DEDUP_FILE"
   exit 0
 fi
 
 echo $((COUNT + 1)) > "$COUNT_FILE"
+record_verdict block
 {
   echo "loop-eng stop-gate BLOCKED this stop ($((COUNT + 1))/$MAX_BLOCKS): the loop contract is not satisfied."
   echo "$CHECK_DESC failed with exit $STATUS. Output tail:"

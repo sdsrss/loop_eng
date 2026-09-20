@@ -12,10 +12,12 @@ mkdir -p .loop
 # --- arm pins the hash, creates active, clears a stale gate-count ---
 printf '1\tok\ttrue\n' > .loop/criteria.tsv
 echo 2 > .loop/gate-count   # stale counter from a previous loop
+echo "1 block" > .loop/gate-last   # stale same-stop-attempt marker from a previous loop
 bash "$ARM" 2>/dev/null
 assert_eq 0 $? "arm exits 0"
 assert_eq "1" "$([ -f .loop/active ] && echo 1)" "arm creates .loop/active"
 assert_eq "" "$([ -f .loop/gate-count ] && echo 1)" "arm clears stale gate-count"
+assert_eq "" "$([ -f .loop/gate-last ] && echo 1)" "arm clears the stale dedup marker with the counter"
 assert_eq "$(sha_of .loop/criteria.tsv)" "$(cut -d' ' -f1 < .loop/criteria.sha256)" "arm pins the correct sha256"
 
 # --- armed contract runs green through run-contract ---
@@ -200,6 +202,17 @@ bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm with an already-green criterion
 assert_eq "1" "$([ -f .loop/active ] && echo 1)" "arm still creates .loop/active despite red-check warning"
 assert_file_contains .loop/armwarn 'already green' "arm red-check warns on a criterion green at arm time"
 assert_file_contains .loop/armwarn 'baseline' "arm red-check names the offending criterion id"
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
+
+# --- UTF-8 BOM on line 1: arm and run must agree on the id, for the same reason
+#     they were made to agree on the empty-description split (P1-6). If only one
+#     of them strips the BOM, arm's warnings name a criterion the ledger does not
+#     contain — and every arm-time warning exists precisely so a human can find
+#     that criterion by name before the evidence-gate locks the file. ---
+rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+printf '\xef\xbb\xbfbaseline\talready passes\ttrue\n' > .loop/criteria.tsv
+bash "$ARM" 2>.loop/armwarn; assert_eq 0 $? "arm with a BOM-prefixed criteria.tsv exits 0"
+assert_file_contains .loop/armwarn "criterion 'baseline' is already green" "arm strips the BOM before naming the criterion"
 rm -f .loop/active .loop/criteria.sha256 .loop/gate-count .loop/armwarn
 
 # --- red-check: a stdin-reading criterion must not swallow later criteria lines ---
