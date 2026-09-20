@@ -216,6 +216,18 @@ Scope notes:
   may be ticked while its commit is missing, or a commit may have landed with its
   box still unticked. Disk state is the source of truth, but the two must agree
   before the loop moves on.
+- **A killed session leaves `.loop/active` behind, and it blocks the next one.**
+  The gate is lifted by the stop-gate only when the contract goes green; a
+  session that was killed, or that hit the 3-block ceiling, leaves the file. The
+  evidence-gate then denies the NEXT session's attempt to write a fresh
+  `criteria.tsv` — via Write *and* via Bash — so that session arms nothing,
+  commits nothing, and the unattended driver's circuit breaker opens after two
+  of them with only `NO new commits` in the log. `unattended-autoloop.sh` now
+  detects the leftover before each session, says `previous session left the gate
+  armed`, and clears `active` / `gate-count` / `criteria.sha256`; the driver is
+  the human-authorized outer layer, so disarming is its job, not the model's.
+  Resuming by hand: `rm -f .loop/active .loop/gate-count .loop/criteria.sha256`
+  (in that order — removing `active` first is what the evidence-gate requires).
 
 If your Claude Code version does not auto-load plugin hooks, register manually
 in your project's `.claude/settings.json`:

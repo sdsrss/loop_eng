@@ -220,6 +220,31 @@ count_pending() {
 # so it must not be reachable before count_pending exists.
 trap _terminate TERM INT HUP
 
+# Reclaim a stop-gate left armed by a previous session.
+#
+# .loop/active is lifted by the stop-gate ONLY when the contract goes green. A
+# session that was killed (this driver's own timeout, a TERM, a crash) or that
+# hit the 3-block ceiling leaves it on disk with a clean tree. The next session
+# then tries to write its own criteria.tsv and the evidence-gate DENIES it —
+# through Write and through Bash, since the file is the armed contract — so that
+# session arms nothing, verifies nothing and commits nothing. Two of those and
+# the circuit breaker opens, with only `NO new commits` in the log to explain a
+# backlog that stopped moving. Reproduced: DENIED on both write paths, then
+# `circuit breaker OPEN`.
+#
+# The driver is the human-authorized OUTER layer — "the model must not disarm
+# its own gate" is a rule about the session inside, not about the scheduler that
+# started it — so reclaiming here is correct where doing it from the prompt
+# would not be. All three files go: a lone criteria.sha256 would make the next
+# arm's own criteria.tsv read as tampered, and a lone gate-count would start it
+# partway to the ceiling.
+reclaim_stale_gate() {
+  [ -f .loop/active ] || return 0
+  note "previous session left the gate armed (.loop/active) — disarming so the next session can write its own contract"
+  rm -f .loop/active .loop/gate-count .loop/criteria.sha256
+}
+reclaim_stale_gate
+
 # Per-session hard cap: without it, MAX_MINUTES is only checked BETWEEN sessions,
 # so a single hung `claude -p` (network stall, wedged tool) blocks the driver
 # forever — under a systemd oneshot unit, potentially for days. Mirror the
@@ -269,6 +294,11 @@ while :; do
   if [ -n "$TIMEOUT_BIN" ] && [ "$STATUS" -eq 124 ]; then
     note "session $session TIMED OUT after ${budget_left}s (wall-clock budget) — killed, counts toward no-progress unless it committed"
   fi
+
+  # Again after the session, not only before the first one: this is where a
+  # killed or ceilinged session's leftover actually appears, and leaving it
+  # until the next driver run would cost this run every remaining session.
+  reclaim_stale_gate
 
   head_after=$(git rev-parse HEAD)
   if [ "$head_before" = "$head_after" ]; then

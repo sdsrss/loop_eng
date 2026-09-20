@@ -18,6 +18,13 @@ Preconditions first:
   dirty, STOP and tell the user — the final diff must be attributable to the
   loop alone, and a dirty tree makes the wrap-up diff conflate the user's
   uncommitted work with the loop's changes.
+- Check for a stop-gate left armed by a previous session: if `.loop/active`
+  exists BEFORE you arm anything, a killed or ceilinged loop left it. The
+  evidence-gate will deny your Step 1 write to `.loop/criteria.tsv` while it is
+  there, so the round cannot start. Record the leftover in `.loop/state.md`,
+  then disarm in this order — `rm -f .loop/active`, then
+  `rm -f .loop/gate-count .loop/criteria.sha256` as a SECOND Bash call (one
+  command naming both `active` and `criteria.sha256` is itself denied).
 - `.loop/` must not be tracked by git. Run `git ls-files .loop` — if it prints
   anything, STOP and tell the user to untrack it
   (`git rm -r --cached .loop && echo '.loop/' >> .gitignore`). `results.json`

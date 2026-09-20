@@ -150,6 +150,28 @@ repo at `03:00` today, re-run the installer for one of them with a different
 `--time`. Two *different* repos at `03:00`, and the same repo at different
 times, are both still allowed — the latter is how you run both.
 
+**A killed session left the gate armed, and that bricked every session after
+it.** `.loop/active` is lifted by the stop-gate only when the contract goes
+green; a session killed by the driver's own timeout, by a TERM, or by the
+3-block ceiling leaves the file on disk with a clean tree. The next session then
+tries to write its own `criteria.tsv` and the evidence-gate denies it — through
+Write *and* through Bash, because that file is the armed contract — so it arms
+nothing, verifies nothing, commits nothing. Two of those and the circuit breaker
+opens, with only `NO new commits` in the log to explain a backlog that stopped
+moving. Reproduced: DENIED on both write paths, then `circuit breaker OPEN`.
+
+`unattended-autoloop.sh` now reclaims the leftover before its first session and
+again after every session — after, because that is where a killed session's
+leftover actually appears, and deferring it to the next driver run would cost
+this run every remaining session. All three files go (`active`, `gate-count`,
+`criteria.sha256`): a lone hash-lock makes the next arm's own `criteria.tsv`
+read as tampered, a lone counter starts that loop partway to the ceiling. The
+driver is the human-authorized outer layer — "the model must not disarm its own
+gate" governs the session inside, not the scheduler that started it — so this is
+its job, and doing it from the prompt would not be equivalent.
+`commands/autoloop.md` Step 0 and README's resume bullet carry the manual form,
+including the two-call ordering the evidence-gate requires.
+
 **`.loop/` had to be gitignored for anything to work, and nothing made it so.**
 README asserted the directory "is gitignored"; this repo's own `.gitignore`,
 `tests/lib.sh` and `RELEASING.md` each hand-write the line, so the assumption
@@ -169,7 +191,7 @@ stranding a loop over bookkeeping would be the worse trade. `commands/autoloop.m
 Step 0 checks `git ls-files .loop` for the tracked case, and README's loop-state
 bullet now describes the guarantee instead of asserting the outcome.
 
-Suite 542 → 572 assertions. Three pre-existing install-timer fixtures that
+Suite 542 → 578 assertions. Three pre-existing install-timer fixtures that
 happened to stack both modes on one repo at `03:00` now pass `--time 04:00`;
 they were testing uninstall symmetry and unit contents, not collisions.
 

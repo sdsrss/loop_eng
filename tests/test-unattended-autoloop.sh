@@ -305,6 +305,69 @@ assert_eq 75 "$rc" "provider limit hit twice exits 75 (EX_TEMPFAIL)"
 assert_file_contains "$SB8/.loop/unattended.log" "provider limit hit twice" "second limit hit is logged and stops the driver"
 assert_eq 2 "$(grep -c 'session .* starting' "$SB8/.loop/unattended.log")" "driver ran exactly 2 sessions before the limit stop"
 
+# --- a stop-gate left armed by a previous session is reclaimed, not inherited ---
+# .loop/active is lifted only when the contract goes green. A session that was
+# killed (this driver's own timeout, a TERM, a crash) or that hit the 3-block
+# ceiling leaves it behind with a clean tree. The NEXT session then tries to
+# write its own criteria.tsv and the evidence-gate denies it — through Write and
+# through Bash, because that file is the armed contract — so the session arms
+# nothing, commits nothing, and two of those open the circuit breaker with only
+# `NO new commits` in the log to explain a backlog that stopped moving.
+#
+# The stub here stands in for that blocked session: it writes NO commit, exactly
+# like a real one that could not arm. What is asserted is that the driver clears
+# the leftover instead of handing it to the next session.
+SBG=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SBG" "$SD" "$TD"' EXIT
+mkdir -p "$SBG/.loop"; printf -- '- [ ] one\n' > "$SBG/.loop/backlog.md"
+: > "$SBG/.loop/active"                       # leftover from a killed session
+printf 'stale\tred\tfalse\n' > "$SBG/.loop/criteria.tsv"
+sha_of "$SBG/.loop/criteria.tsv" > "$SBG/.loop/criteria.sha256"
+echo 2 > "$SBG/.loop/gate-count"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SBG" 1 >/dev/null 2>&1 || true
+assert_file_contains "$SBG/.loop/unattended.log" "left the gate armed" "the driver says it found a stale armed gate"
+if [ -f "$SBG/.loop/active" ]; then
+  assert_eq "disarmed" "still armed" "the driver clears .loop/active before the next session"
+else
+  assert_eq 0 0 "the driver clears .loop/active before the next session"
+fi
+# all three, not just active: a lone criteria.sha256 makes the NEXT arm's own
+# criteria.tsv read as tampered (exit 77 on every stop), and a lone gate-count
+# starts that loop partway to the 3-block ceiling.
+if [ -f "$SBG/.loop/criteria.sha256" ]; then
+  assert_eq "cleared" "left behind" "the driver clears the stale hash-lock too"
+else
+  assert_eq 0 0 "the driver clears the stale hash-lock too"
+fi
+if [ -f "$SBG/.loop/gate-count" ]; then
+  assert_eq "cleared" "left behind" "the driver clears the stale block counter too"
+else
+  assert_eq 0 0 "the driver clears the stale block counter too"
+fi
+
+# ...and a session that ends with the gate STILL armed must be reclaimed before
+# the next one starts, not left for the next driver run — otherwise one killed
+# session costs every remaining session of this run.
+SBG2=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SBG" "$SBG2" "$SD" "$TD"' EXIT
+mkdir -p "$SBG2/.loop"; printf -- '- [ ] one\n- [ ] two\n' > "$SBG2/.loop/backlog.md"
+ARMER="$SD/stub-armer"
+cat > "$ARMER" <<'EOF'
+#!/usr/bin/env bash
+# a session that arms the gate and then dies without reaching green
+: > .loop/active
+printf 'x\tred\tfalse\n' > .loop/criteria.tsv
+exit 1
+EOF
+chmod +x "$ARMER"
+LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$ARMER" \
+  bash "$DRIVER" "$SBG2" 2 >/dev/null 2>&1 || true
+assert_eq 2 "$(grep -c 'left the gate armed' "$SBG2/.loop/unattended.log")" "each session's leftover is reclaimed in the same run, not carried to the next"
+if [ -f "$SBG2/.loop/active" ]; then
+  assert_eq "disarmed" "still armed" "the run does not end with the gate armed"
+else
+  assert_eq 0 0 "the run does not end with the gate armed"
+fi
+
 # --- one driver per repo: the second concurrent run is refused, not run ---
 # Same finding and same two mechanisms as the block in
 # tests/test-unattended-polish.sh; this driver is the one whose sessions WRITE
