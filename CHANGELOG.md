@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+**Test blind spot: a safety default could be deleted and the suite stayed
+green.** Both unattended drivers hand `claude` an argv that *is* their entire
+contract with the session, and the stub in each suite ignored it. Measured, not
+argued: deleting `$MODE` from `unattended-polish.sh`'s `-p "/polish $SCOPE
+$MODE"` — so every scheduled run auto-fixes the repo under `bypassPermissions`
+instead of reporting — kept `tests/test-unattended-polish.sh` at 39 passed / 0
+failed. Swapping `/autoloop` for `/polish` and `bypassPermissions` for `default`
+in `unattended-autoloop.sh` kept its suite at 41 passed / 0 failed. `report-only`
+is that driver's only write protection, and nothing was watching it.
+
+Both stubs now record their full argv (`STUB_ARGV_LOG`, one argument per line)
+and each suite asserts what actually goes out: the command, the scope, the
+`report-only` default and its removal only under the two-key `--auto-fix` +
+`LOOP_ENG_ALLOW_AUTOFIX=1` opt-in, `--permission-mode bypassPermissions`, and
+the per-driver turn cap (120 / 150). Each refusal path is asserted to invoke no
+session at all, rather than merely to exit non-zero. Suite 477 → 490 assertions;
+the two mutations above now fail 1 and 2 assertions respectively.
+
+No runtime script changed here — this is the gate that was missing, not a
+behavior fix.
+
 ## 0.14.0 — 2026-09-20
 
 Two gaps this repo had already written down and left open: a wall-clock budget

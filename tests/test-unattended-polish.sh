@@ -48,7 +48,11 @@ trap 'rm -rf "$SB" "$SD"' EXIT
 STUB="$SD/stub-claude"
 cat > "$STUB" <<'EOF'
 #!/usr/bin/env bash
-# stub claude: behavior driven by STUB_MODE
+# stub claude: behavior driven by STUB_MODE.
+# STUB_ARGV_LOG, when set, captures the FULL argv one argument per line. Without
+# it nothing downstream could see WHICH prompt and WHICH permission flags the
+# driver handed claude — see the argv block below for what that hid.
+[ -n "${STUB_ARGV_LOG:-}" ] && printf '%s\n' "$@" > "$STUB_ARGV_LOG"
 case "${STUB_MODE:-ok}" in
   ok)    echo "polish report: 0 findings"; exit 0 ;;
   fail)  echo "boom"; exit 3 ;;
@@ -94,6 +98,50 @@ assert_eq 0 "$rc" "repo-only invocation still runs (scope defaults to src/)"
 STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
   bash "$SCRIPT" "$SB" src/ --auto-fix >/dev/null && rc=0 || rc=$?
 assert_eq 0 "$rc" "well-formed --auto-fix invocation still runs"
+
+# --- WHICH prompt and WHICH permission flags reach claude ---
+# `report-only` is this driver's ONLY write protection and it lives entirely in
+# the `-p "/polish $SCOPE $MODE"` string. Nothing asserted it: deleting `$MODE`
+# from that line — i.e. auto-fixing the repo unattended under bypassPermissions
+# every night, the exact failure the two-key opt-in above exists to prevent —
+# left this suite at 39 passed / 0 failed. The argv shape tests above check the
+# flags going IN; these check the command going OUT, which is where the default
+# actually is. Same blind spot covered for the permission mode and the turn cap,
+# the two other bounds on an unattended session.
+argv_after() { # $1=argv file  $2=flag -> the argument that FOLLOWS that flag
+  awk -v f="$2" 'p { print; exit } $0 == f { p = 1 }' "$1"
+}
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ARGV_LOG="$SD/argv-report" \
+  bash "$SCRIPT" "$SB" src/ >/dev/null
+assert_eq "/polish src/ report-only" "$(argv_after "$SD/argv-report" -p)" \
+  "default run asks for report-only (the write protection is the prompt)"
+assert_eq "bypassPermissions" "$(argv_after "$SD/argv-report" --permission-mode)" \
+  "session runs under --permission-mode bypassPermissions"
+assert_eq "120" "$(argv_after "$SD/argv-report" --max-turns)" \
+  "session is capped at --max-turns 120"
+
+# ...and the opted-in write mode is the ONLY way report-only comes off.
+STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ARGV_LOG="$SD/argv-fix" \
+  bash "$SCRIPT" "$SB" src/ --auto-fix >/dev/null
+if grep -qF 'report-only' "$SD/argv-fix"; then
+  assert_eq "report-only dropped" "report-only still sent" \
+    "--auto-fix with LOOP_ENG_ALLOW_AUTOFIX=1 drops report-only"
+else
+  assert_eq 0 0 "--auto-fix with LOOP_ENG_ALLOW_AUTOFIX=1 drops report-only"
+fi
+assert_file_contains "$SD/argv-fix" "/polish src/" "write-mode run still targets the requested scope"
+
+# The flag WITHOUT the env var must not reach claude at all — the refusal is
+# supposed to happen before the session starts, not inside it.
+rm -f "$SD/argv-noenv"
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ARGV_LOG="$SD/argv-noenv" \
+  bash "$SCRIPT" "$SB" src/ --auto-fix >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "--auto-fix without LOOP_ENG_ALLOW_AUTOFIX=1 is refused"
+if [ -e "$SD/argv-noenv" ]; then
+  assert_eq "no session" "session launched" "refused --auto-fix never invokes claude"
+else
+  assert_eq 0 0 "refused --auto-fix never invokes claude"
+fi
 
 # --- non-git target: the dirty-tree guard must not fail OPEN ---
 # `git status --porcelain` in a non-repo writes its fatal to stderr and leaves

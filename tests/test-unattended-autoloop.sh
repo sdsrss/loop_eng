@@ -48,6 +48,10 @@ mk_stub() { # $1 = stub dir OUTSIDE any sandbox repo (untracked stub inside
 #!/usr/bin/env bash
 # stub claude: "progress" marks the first backlog item done and commits;
 # "stall" produces no commit. Runs inside the repo cwd set by the driver.
+# STUB_ARGV_LOG, when set, captures the FULL argv one argument per line — the
+# only way a test can see WHICH command and WHICH permission flags the driver
+# handed claude. See the argv block below for what that hid.
+[ -n "${STUB_ARGV_LOG:-}" ] && printf '%s\n' "$@" > "$STUB_ARGV_LOG"
 case "${STUB_MODE:-progress}" in
   progress)
     # awk, not sed: GNU's first-match-only address `0,/re/` does not exist in
@@ -103,6 +107,47 @@ STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
 assert_eq 0 $? "happy path exits 0"
 assert_eq 0 "$(grep -c '^- \[ \]' "$SB/.loop/backlog.md")" "backlog fully consumed"
 assert_file_contains "$SB/.loop/unattended.log" "backlog empty" "logs completion"
+
+# --- WHICH command and WHICH permission flags reach claude ---
+# This argv IS the driver's entire contract with the session: the /autoloop
+# command that scopes it to ONE backlog item, the bypassPermissions mode that
+# lets it write unattended, and the turn cap that bounds it. None of it was
+# asserted — swapping `/autoloop` for `/polish` and `bypassPermissions` for
+# `default` left this suite at 41 passed / 0 failed, so a driver that no longer
+# does what its own name says would have shipped green. Mirrors the same block
+# in tests/test-unattended-polish.sh.
+argv_after() { # $1=argv file  $2=flag -> the argument that FOLLOWS that flag
+  awk -v f="$2" 'p { print; exit } $0 == f { p = 1 }' "$1"
+}
+printf -- '- [ ] argv probe item\n' > "$SB/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  STUB_ARGV_LOG="$SD/argv" bash "$DRIVER" "$SB" 1 >/dev/null 2>&1
+prompt=$(argv_after "$SD/argv" -p)
+case "$prompt" in
+  "/autoloop "*) assert_eq 0 0 "session is driven by /autoloop, not some other command" ;;
+  *) assert_eq "/autoloop …" "$prompt" "session is driven by /autoloop, not some other command" ;;
+esac
+case "$prompt" in
+  *'"argv probe item"'*) assert_eq 0 0 "prompt names the one backlog item this session may take" ;;
+  *) assert_eq 'quoted "argv probe item"' "$prompt" "prompt names the one backlog item this session may take" ;;
+esac
+assert_eq "bypassPermissions" "$(argv_after "$SD/argv" --permission-mode)" \
+  "session runs under --permission-mode bypassPermissions"
+assert_eq "150" "$(argv_after "$SD/argv" --max-turns)" \
+  "session is capped at --max-turns 150"
+
+# The write-mode opt-in must gate the session itself, not just the exit code:
+# without LOOP_ENG_ALLOW_AUTOBUILD=1 no claude may be invoked at all.
+printf -- '- [ ] argv probe item\n' > "$SB/.loop/backlog.md"
+rm -f "$SD/argv-noenv"
+LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ARGV_LOG="$SD/argv-noenv" \
+  bash "$DRIVER" "$SB" 1 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "refuses without AUTOBUILD env (again, with argv capture armed)"
+if [ -e "$SD/argv-noenv" ]; then
+  assert_eq "no session" "session launched" "refused run never invokes claude"
+else
+  assert_eq 0 0 "refused run never invokes claude"
+fi
 
 # --- circuit breaker: stall stub -> stops after exactly 2 sessions ---
 SB2=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SD"' EXIT
