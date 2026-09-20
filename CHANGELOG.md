@@ -35,7 +35,6 @@ discipline — the assertion that would have caught it first, then the fix.
   unaffected (`.loop/state.md` was never guarded and still isn't), and once the
   loop is over the single command goes through unchanged. Humans keep
   `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
-
 - **`install-timer.sh` now runs `claude --version` under the unit's own PATH
   before writing anything.** Resolving the binary was never the same as proving
   it runs: `command -v` searches the installing shell's PATH while the unit
@@ -60,6 +59,8 @@ discipline — the assertion that would have caught it first, then the fix.
   every session logged as progress (reproduced at 8/8). It now also stops after
   `LOOP_ENG_MAX_ITEM_SESSIONS` sessions (default 2) on the same item. Set it to
   `0` for an item that legitimately spans sessions.
+
+### Changed
 
 - **`/polish` converges on deferred findings instead of re-confirming them
   every round.** A finding deferred under the public-contract stop rule is by
@@ -122,6 +123,32 @@ discipline — the assertion that would have caught it first, then the fix.
   unused-looking variables. All thirteen are fixed; the two deliberate
   exceptions carry an inline `# shellcheck disable=` with a reason. `-S style`
   stays out — SC1091 alone is 12 hits with nothing to fix.
+- **Three README sections that restate repo facts now derive from them.** The
+  env-var table was missing `LOOP_ENG_PLUGIN_CACHE_DIR`; the layout block named
+  two of four `hooks/` files and called six `skills/loop-eng/scripts/` entries
+  "unattended runner"; and two paragraphs disagreed about how many scripts hold
+  the bash-3.2 floor (four in one, five in the Requirements table — five is
+  right, and `update-notify.sh` was the one going unmentioned even though a
+  SessionStart hook is precisely what stock macOS bash 3.2 runs in every real
+  session). `test-packaging.sh` now reads the source of truth for each —
+  `git ls-files`, the scripts' own `LOOP_ENG_*` reads, and the list
+  `test.yml`'s bash-3.2 leg syntax-checks — so the next addition is covered the
+  day it lands rather than the day someone remembers.
+- **`.loop/state.md` says out loud that nothing reads it.** Its `Status:` line
+  looked like a completion signal and is prose — no hook, script or gate has
+  ever read this file. It is now labelled advisory, with the machine answer
+  named (`results.json`'s `all_green`, and the ticked boxes) and the tie-break
+  stated: if the two disagree, the ledger is right and state.md is stale. The
+  template also gains the `## Deferred (not loopable)` heading the roadmap
+  triage step has always told the orchestrator to write here.
+- **`allowed-tools` lists `Agent` alongside `Task`.** The subagent tool's
+  current name is `Agent`; `allowed-tools` is a pre-authorization list, so
+  naming only the old one costs a permission prompt on every dispatch in
+  interactive mode. `claude plugin validate` does not check tool names, so
+  nothing else would have caught it.
+
+### Fixed
+
 - **Every scratch directory a test suite creates is now in its EXIT trap, and
   `test-harness.sh` checks that statically.** Two suites cleaned theirs with an
   inline `rm` a killed run never reaches, and one of those used a bare
@@ -138,35 +165,9 @@ discipline — the assertion that would have caught it first, then the fix.
   while working in this repo, which then went on registering a command or hook
   the plugin no longer ships. `skills/` already did this; the other three did
   not. `.claude/settings.json` is still never touched.
-- **Three README sections that restate repo facts now derive from them.** The
-  env-var table was missing `LOOP_ENG_PLUGIN_CACHE_DIR`; the layout block named
-  two of four `hooks/` files and called six `skills/loop-eng/scripts/` entries
-  "unattended runner"; and two paragraphs disagreed about how many scripts hold
-  the bash-3.2 floor (four in one, five in the Requirements table — five is
-  right, and `update-notify.sh` was the one going unmentioned even though a
-  SessionStart hook is precisely what stock macOS bash 3.2 runs in every real
-  session). `test-packaging.sh` now reads the source of truth for each —
-  `git ls-files`, the scripts' own `LOOP_ENG_*` reads, and the list
-  `test.yml`'s bash-3.2 leg syntax-checks — so the next addition is covered the
-  day it lands rather than the day someone remembers.
 - **`SKILL.md` gave both loops `/autoloop`'s bounds.** "Six stop rules bound
   every loop at 5 rounds max" was wrong about `/polish`, which has four stop
   rules and three macro rounds.
-- **`.loop/state.md` says out loud that nothing reads it.** Its `Status:` line
-  looked like a completion signal and is prose — no hook, script or gate has
-  ever read this file. It is now labelled advisory, with the machine answer
-  named (`results.json`'s `all_green`, and the ticked boxes) and the tie-break
-  stated: if the two disagree, the ledger is right and state.md is stale. The
-  template also gains the `## Deferred (not loopable)` heading the roadmap
-  triage step has always told the orchestrator to write here.
-- **`allowed-tools` lists `Agent` alongside `Task`.** The subagent tool's
-  current name is `Agent`; `allowed-tools` is a pre-authorization list, so
-  naming only the old one costs a permission prompt on every dispatch in
-  interactive mode. `claude plugin validate` does not check tool names, so
-  nothing else would have caught it.
-
-### Fixed
-
 - **A failed update check now backs off for an hour instead of retrying every
   session.** Every failure path in the notifier — no connectivity, a 403, an
   empty body, a tag it cannot compare — exited above the state write, so
