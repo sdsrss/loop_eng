@@ -124,6 +124,36 @@ wedged session made `LOOP_ENG_MAX_MINUTES` advisory rather than a budget.
 Suite 533 → 542 assertions; the orphan and kill-after assertions fail against
 the pre-fix drivers.
 
+**Two drivers could edit one working tree at the same time.** Nothing enforced
+mutual exclusion: both passed the dirty-tree check (the tree *is* clean at that
+instant) and both started a `bypassPermissions` session. Reproduced with two
+concurrent drivers: 2 sessions started. `install-timer.sh` defaults **both**
+modes to `--time 03:00`, so installing a polish timer and an autoloop timer on
+one repo is the documented route to it.
+
+Each driver now takes a lock in `.loop/` before starting a session: `flock`
+where the host has it (the kernel releases it however the process dies), an
+atomic `mkdir` with a pid-staleness check where it does not (stock macOS ships
+no `flock(1)`; a driver killed with SIGKILL runs no trap, so the pid inside the
+lock is what tells "held" from "abandoned"). The second driver exits **69**
+(`EX_UNAVAILABLE`) and says so in the rolling log — deliberately not the `75`
+these drivers already use for provider limits, so a scheduler alerting on 75
+does not start alerting about its own second timer.
+
+**Upgrade note — `install-timer.sh` now refuses a same-repo, same-minute
+collision.** With the lock in place the tree is safe, but the collision becomes
+*silent*: the losing timer does no work, every night, while `systemctl status`
+stays green. Installing the second mode on a repo whose other timer already
+runs at that exact time is therefore refused, naming `--time` and the
+`uninstall-timer.sh` command as the two ways out. If you have both timers on one
+repo at `03:00` today, re-run the installer for one of them with a different
+`--time`. Two *different* repos at `03:00`, and the same repo at different
+times, are both still allowed — the latter is how you run both.
+
+Suite 542 → 564 assertions. Three pre-existing install-timer fixtures that
+happened to stack both modes on one repo at `03:00` now pass `--time 04:00`;
+they were testing uninstall symmetry and unit contents, not collisions.
+
 ## 0.14.0 — 2026-09-20
 
 Two gaps this repo had already written down and left open: a wall-clock budget

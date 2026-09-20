@@ -212,6 +212,77 @@ else
 fi
 assert_file_contains "$SB/.loop/unattended.log" "TAIL-MARKER-SURVIVES" "truncation keeps the tail (marker survives)"
 
+# --- one driver per repo: the second concurrent run is refused, not run ---
+# Nothing enforced this. Two drivers launched against one tree both passed the
+# dirty-tree check (the tree IS clean at that instant) and both started a
+# `bypassPermissions` session — two claudes interleaving edits and commits in
+# one working copy. Reproduced with two concurrent drivers: 2 sessions started.
+# install-timer.sh defaults BOTH modes to --time 03:00, so installing a polish
+# timer and an autoloop timer on one repo is the documented route to it.
+#
+# Both lock mechanisms are exercised: `flock` where the host has it, and the
+# atomic-`mkdir` fallback that stock macOS (no flock(1)) actually runs. Testing
+# only whichever this host happens to have would leave the other unasserted on
+# every leg of CI — which is how a fallback rots.
+LOCK_STUB="$SD/stub-slow"
+cat > "$LOCK_STUB" <<'EOF'
+#!/usr/bin/env bash
+echo "session $$ started" >> "$CONC_LOG"
+sleep 3
+EOF
+chmod +x "$LOCK_STUB"
+# a PATH with no flock, so the mkdir fallback is reachable on a host that has it
+NOFLOCK="$SD/noflock"; mkdir -p "$NOFLOCK"
+for b in bash sh git grep sed awk cat cut head tail wc mktemp rm mkdir rmdir \
+         dirname basename find chmod touch date env tee sleep kill; do
+  bp=$(command -v "$b" 2>/dev/null) || bp=""
+  if [ -n "$bp" ]; then ln -sf "$bp" "$NOFLOCK/$b"; else
+    FAIL=$((FAIL+1)); echo "  FAIL: test prerequisite '$b' is not on PATH" >&2; fi
+done
+if [ -e "$NOFLOCK/flock" ]; then
+  assert_eq "no flock" "flock present" "the fallback PATH really has no flock(1)"
+else
+  assert_eq 0 0 "the fallback PATH really has no flock(1)"
+fi
+
+lock_race() { # $1 = PATH to run both drivers under -> sets LOCK_SESSIONS, LOCK_RC2
+  : > "$SD/conc"
+  CONC_LOG="$SD/conc" PATH="$1" LOOP_ENG_CLAUDE_BIN="$LOCK_STUB" \
+    bash "$SCRIPT" "$SB" src/ >/dev/null 2>&1 &
+  local a=$!
+  sleep 1   # let the first driver take the lock before the second starts
+  CONC_LOG="$SD/conc" PATH="$1" LOOP_ENG_CLAUDE_BIN="$LOCK_STUB" \
+    bash "$SCRIPT" "$SB" src/ >/dev/null 2>&1 &
+  local b=$!
+  wait "$a" || true
+  wait "$b" && LOCK_RC2=0 || LOCK_RC2=$?
+  LOCK_SESSIONS=$(grep -c 'started' "$SD/conc" 2>/dev/null || echo 0)
+}
+
+lock_race "$PATH"
+assert_eq 1 "$LOCK_SESSIONS" "flock: exactly one of two concurrent drivers starts a session"
+assert_eq 69 "$LOCK_RC2" "flock: the refused driver exits 69 (EX_UNAVAILABLE), not 0 and not 75"
+lock_race "$NOFLOCK"
+assert_eq 1 "$LOCK_SESSIONS" "mkdir fallback: exactly one of two concurrent drivers starts a session"
+assert_eq 69 "$LOCK_RC2" "mkdir fallback: the refused driver exits 69 (EX_UNAVAILABLE)"
+assert_file_contains "$SB/.loop/unattended.log" "already running" "the refusal is recorded in the rolling log"
+if [ -d "$SB/.loop/driver.lock" ]; then
+  assert_eq "released" "still held" "the mkdir lock is released when the driver exits"
+else
+  assert_eq 0 0 "the mkdir lock is released when the driver exits"
+fi
+
+# A driver killed with SIGKILL runs no trap, so the mkdir lock outlives it. The
+# pid inside is what tells "held" from "abandoned" — without that check the
+# first hard kill would wedge every future scheduled run.
+mkdir -p "$SB/.loop/driver.lock"
+echo 999999 > "$SB/.loop/driver.lock/pid"   # a pid no live process can have here
+: > "$SD/conc"
+CONC_LOG="$SD/conc" PATH="$NOFLOCK" LOOP_ENG_CLAUDE_BIN="$LOCK_STUB" \
+  bash "$SCRIPT" "$SB" src/ >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 0 "$rc" "mkdir fallback: a stale lock left by a SIGKILLed driver is reclaimed, not obeyed forever"
+assert_eq 1 "$(grep -c 'started' "$SD/conc" 2>/dev/null || echo 0)" "mkdir fallback: the reclaiming driver actually runs its session"
+
 # --- SIGTERM to the driver must not leave the session running ---
 # Pre-fix neither driver had a trap (`grep -c trap` = 0 in both) and GNU
 # `timeout` puts itself in its own process group, so `systemctl stop` on a host

@@ -60,7 +60,10 @@ assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "unattended-polish.sh $
 assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "LOOP_ENG_ALLOW_AUTOFIX=1" "allow-write injects autofix env"
 
 # --- autoloop --allow-write: max-sessions + autobuild env ---
-run_install autoloop "$SB" 5 --allow-write >/dev/null
+# --time 04:00: a polish timer already holds 03:00 on this repo, and two modes
+# on one repo at the same minute are refused (see the collision block at the
+# end of this file). This case is about the autoloop unit's own contents.
+run_install autoloop "$SB" 5 --allow-write --time 04:00 >/dev/null
 assert_file_contains "$UNIT_DIR/loop-eng-autoloop.service" "unattended-autoloop.sh $SB 5" "autoloop ExecStart has max-sessions"
 assert_file_contains "$UNIT_DIR/loop-eng-autoloop.service" "LOOP_ENG_ALLOW_AUTOBUILD=1" "autoloop allow-write injects autobuild env"
 
@@ -170,7 +173,11 @@ assert_eq 0 "$rc" "uninstall of absent unit is benign no-op"
 # (mirror of the polish symmetry test above — pre-fix, uninstall was only ever
 # exercised in polish mode, so an autoloop-specific regression would slip by)
 run_install polish "$SB" >/dev/null
-run_install autoloop "$SB" >/dev/null
+# --time 04:00 because two modes on one repo at the SAME minute is now refused
+# (the losing driver would exit 69 and do nothing, silently, every night). This
+# test is about uninstall symmetry between two coexisting timers, and staggered
+# times are how a real user makes them coexist.
+run_install autoloop "$SB" --time 04:00 >/dev/null
 run_uninstall autoloop >/dev/null; rc=$?
 assert_eq 0 "$rc" "autoloop uninstall exits 0"
 assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.service")" "autoloop uninstall removed .service"
@@ -193,7 +200,7 @@ assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.service")" "bad-mode uninstal
 # way a real trigger would. A repo that only ever had a timer (never ran a loop)
 # has nothing else in .loop — uninstall must reap both the log and the now-empty
 # dir. The cron.log path is parsed out of the .service unit file being removed.
-run_install autoloop "$SB" >/dev/null
+run_install autoloop "$SB" --time 04:00 >/dev/null   # polish still holds 03:00 on this repo
 assert_eq yes "$(exists "$SB/.loop")" "install pre-created repo .loop"
 : > "$SB/.loop/cron.log"
 run_uninstall autoloop >/dev/null; rc=$?
@@ -205,7 +212,7 @@ assert_eq no "$(exists "$SB/.loop")" "uninstall removed the now-empty .loop dir"
 # Plant real loop state (results.json) alongside cron.log. A live loop's state
 # must survive a timer uninstall, so cleanup removes NOTHING here — not the dir,
 # not the extra file, and (err on preservation) not even cron.log.
-run_install autoloop "$SB" >/dev/null
+run_install autoloop "$SB" --time 04:00 >/dev/null   # polish still holds 03:00 on this repo
 : > "$SB/.loop/cron.log"
 echo '{"passes":true}' > "$SB/.loop/results.json"
 run_uninstall autoloop >/dev/null; rc=$?
@@ -213,5 +220,34 @@ assert_eq 0 "$rc" "preservation uninstall exits 0"
 assert_eq yes "$(exists "$SB/.loop")" "uninstall preserved .loop dir holding live state"
 assert_eq yes "$(exists "$SB/.loop/results.json")" "uninstall preserved live loop state (results.json)"
 assert_eq yes "$(exists "$SB/.loop/cron.log")" "cron.log-only cleanup does not fire beside other loop state"
+
+# --- same repo, same minute, both modes: refused at install time ---
+# Both modes default to --time 03:00 and both unit names are per-USER, not
+# per-repo, so installing a polish timer and then an autoloop timer on one repo
+# — the documented way to use this script twice — scheduled two drivers against
+# one working tree at the same instant. The drivers now refuse to overlap (the
+# loser exits 69), which makes the tree safe and the collision SILENT: the
+# losing timer does no work, every night, while systemctl status stays green.
+run_uninstall polish >/dev/null 2>&1 || true
+run_uninstall autoloop >/dev/null 2>&1 || true
+run_install polish "$SB" src/ >/dev/null
+run_install autoloop "$SB" >/dev/null 2>"$XDG/collide.err" && rc=0 || rc=$?
+assert_eq 1 "$rc" "second mode on the same repo at the same time is refused"
+assert_file_contains "$XDG/collide.err" "--time" "the refusal names --time as the fix"
+assert_file_contains "$XDG/collide.err" "uninstall-timer.sh polish" "the refusal names the other timer and how to remove it"
+assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.service")" "the refused install writes no unit file"
+
+# ...and the two legitimate shapes are NOT refused.
+run_install autoloop "$SB" --time 04:00 >/dev/null && rc=0 || rc=$?
+assert_eq 0 "$rc" "same repo at a DIFFERENT time is allowed (this is how you run both)"
+assert_file_contains "$UNIT_DIR/loop-eng-autoloop.timer" "OnCalendar=*-*-* 04:00:00" "the allowed install wrote its own time"
+run_uninstall autoloop >/dev/null
+SB2=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$XDG"' EXIT
+run_install autoloop "$SB2" >/dev/null && rc=0 || rc=$?
+assert_eq 0 "$rc" "a DIFFERENT repo at the same time is allowed (different tree, different lock)"
+# re-installing the SAME mode is an overwrite, not a collision
+run_install autoloop "$SB2" >/dev/null && rc=0 || rc=$?
+assert_eq 0 "$rc" "re-installing the same mode on the same repo is an overwrite, not a collision"
+run_uninstall autoloop >/dev/null; run_uninstall polish >/dev/null
 
 report "test-install-timer"

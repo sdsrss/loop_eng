@@ -126,6 +126,57 @@ fi
 LOG_DIR=".loop"
 mkdir -p "$LOG_DIR"
 
+# Mutual exclusion, one driver per repo. Nothing enforced it: two drivers
+# launched against the same tree both passed the dirty-tree check (the tree IS
+# clean at that moment) and both started a session — two `bypassPermissions`
+# claudes editing one working copy, interleaving edits and commits. This is not
+# hypothetical: `install-timer.sh` defaults BOTH modes to `--time 03:00`, so
+# installing a polish timer and an autoloop timer on one repo is the documented
+# way to produce it. Reproduced with two concurrent drivers: 2 sessions started.
+#
+# Two mechanisms because there is no one portable lock. `flock` is the better
+# one — the kernel drops the lock when the process dies, however it dies — but
+# stock macOS does not ship it. `mkdir` is atomic on every POSIX filesystem and
+# is the fallback; it needs its own staleness check, because a driver killed
+# with SIGKILL runs no trap and leaves the directory behind. The pid inside is
+# what distinguishes "held" from "abandoned", and `mkdir` stays the arbiter when
+# two drivers reclaim the same stale lock at once.
+#
+# 69 = EX_UNAVAILABLE: the repo is busy. Deliberately NOT 75/EX_TEMPFAIL, which
+# these drivers already use for provider limits — a scheduler that alerts on 75
+# must not start alerting about its own second timer.
+LOCK_DIR="$LOG_DIR/driver.lock"
+LOCK_HELD=0
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LOG_DIR/driver.lock.fd"
+  if ! flock -n 9; then
+    echo "$(date +%Y%m%d-%H%M%S) another unattended driver is already running in $REPO — refusing to run a second session against the same tree" \
+      | tee -a "$LOG_DIR/unattended.log" >&2
+    exit 69
+  fi
+else
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    LOCK_HELD=1
+  else
+    lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")
+    case "$lock_pid" in ''|*[!0-9]*) lock_pid="" ;; esac
+    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+      echo "$(date +%Y%m%d-%H%M%S) another unattended driver (pid $lock_pid) is already running in $REPO — refusing to run a second session against the same tree" \
+        | tee -a "$LOG_DIR/unattended.log" >&2
+      exit 69
+    fi
+    rm -rf "${LOCK_DIR:?}"
+    if mkdir "$LOCK_DIR" 2>/dev/null; then LOCK_HELD=1; else
+      echo "$(date +%Y%m%d-%H%M%S) could not take the driver lock in $REPO — refusing" \
+        | tee -a "$LOG_DIR/unattended.log" >&2
+      exit 69
+    fi
+  fi
+  echo $$ > "$LOCK_DIR/pid"
+fi
+_release_lock() { [ "$LOCK_HELD" -eq 1 ] && rm -rf "${LOCK_DIR:?}"; return 0; }
+trap _release_lock EXIT
+
 # Log rotation, before anything else appends: under a years-long systemd timer
 # every run adds a timestamped per-run log and the rolling log only ever grows,
 # so an unattended host fills .loop/ (eventually the disk) without bound.

@@ -260,6 +260,17 @@ skills/loop-eng/scripts/unattended-polish.sh <repo> [scope] [--auto-fix]
 - Scheduling: prefer the systemd timer pair below (tracked, one-command
   removable). Where systemd isn't available, cron works too:
   `0 3 * * * /path/unattended-polish.sh /path/to/repo src/`
+- **One driver per repo.** Both drivers take a lock in `.loop/` before starting
+  a session (`flock` where the host has it, an atomic `mkdir` with a
+  pid-staleness check where it does not). A second driver against the same tree
+  exits **69** (`EX_UNAVAILABLE`) and logs why, rather than running a second
+  `bypassPermissions` session in the same working copy. `69` is kept distinct
+  from the `75` these drivers use for provider limits, so a scheduler alerting
+  on `75` does not start alerting about its own second timer.
+- **Interrupting a driver stops its session.** `SIGTERM` / `SIGINT` / `SIGHUP`
+  terminate the `claude` session and exit **143** (128+SIGTERM), so a
+  `systemctl stop`, a cron `kill`, or a Ctrl-C cannot leave an unattended write
+  session running with nobody watching it.
 
 Cross-session building (fresh context per backlog item — compaction is not
 a recovery strategy):
@@ -297,6 +308,12 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   exist in the repo (a path or a glob that matches) — otherwise the unit would
   enable cleanly and review nothing every night, so it is refused at install
   time, like the whitespace and `%` cases above.
+- **Both modes default to `03:00`, and both timers on one repo at the same
+  minute is refused.** The two drivers cannot share a working tree, so the
+  second one to fire would take the lock refusal (exit 69) and do nothing —
+  silently, every night, with `systemctl status` still green. Stagger them
+  (`--time 04:00` for the second) or remove the other timer first. Two
+  *different* repos at `03:00` are fine.
 - **Safe by default**: without `--allow-write` the timer runs polish report-only
   and autoloop refuses to build — a scheduled run cannot modify the repo.
   `--allow-write` injects the mode's write-enable env (`LOOP_ENG_ALLOW_AUTOFIX`

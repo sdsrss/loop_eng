@@ -305,6 +305,50 @@ assert_eq 75 "$rc" "provider limit hit twice exits 75 (EX_TEMPFAIL)"
 assert_file_contains "$SB8/.loop/unattended.log" "provider limit hit twice" "second limit hit is logged and stops the driver"
 assert_eq 2 "$(grep -c 'session .* starting' "$SB8/.loop/unattended.log")" "driver ran exactly 2 sessions before the limit stop"
 
+# --- one driver per repo: the second concurrent run is refused, not run ---
+# Same finding and same two mechanisms as the block in
+# tests/test-unattended-polish.sh; this driver is the one whose sessions WRITE
+# CODE, so two of them on one tree interleave commits. Reproduced pre-fix with
+# two concurrent drivers: both started a session.
+SBL=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SBL" "$SD" "$TD"' EXIT
+mkdir -p "$SBL/.loop"; printf -- '- [ ] one\n' > "$SBL/.loop/backlog.md"
+LOCK_STUB="$SD/stub-slow"
+cat > "$LOCK_STUB" <<'EOF'
+#!/usr/bin/env bash
+echo "session $$ started" >> "$CONC_LOG"
+sleep 3
+EOF
+chmod +x "$LOCK_STUB"
+NOFLOCK="$SD/noflock"; mkdir -p "$NOFLOCK"
+for b in bash sh git grep sed awk cat cut head tail wc mktemp rm mkdir rmdir \
+         dirname basename find chmod touch date env tee sleep kill; do
+  bp=$(command -v "$b" 2>/dev/null) || bp=""
+  if [ -n "$bp" ]; then ln -sf "$bp" "$NOFLOCK/$b"; else
+    FAIL=$((FAIL+1)); echo "  FAIL: test prerequisite '$b' is not on PATH" >&2; fi
+done
+
+lock_race() { # $1 = PATH to run both drivers under -> sets LOCK_SESSIONS, LOCK_RC2
+  : > "$SD/conc"
+  CONC_LOG="$SD/conc" PATH="$1" LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$LOCK_STUB" \
+    bash "$DRIVER" "$SBL" 1 >/dev/null 2>&1 &
+  local a=$!
+  sleep 1   # let the first driver take the lock before the second starts
+  CONC_LOG="$SD/conc" PATH="$1" LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$LOCK_STUB" \
+    bash "$DRIVER" "$SBL" 1 >/dev/null 2>&1 &
+  local b=$!
+  wait "$a" || true
+  wait "$b" && LOCK_RC2=0 || LOCK_RC2=$?
+  LOCK_SESSIONS=$(grep -c 'started' "$SD/conc" 2>/dev/null || echo 0)
+}
+
+lock_race "$PATH"
+assert_eq 1 "$LOCK_SESSIONS" "flock: exactly one of two concurrent drivers starts a session"
+assert_eq 69 "$LOCK_RC2" "flock: the refused driver exits 69 (EX_UNAVAILABLE), not 0 and not 75"
+lock_race "$NOFLOCK"
+assert_eq 1 "$LOCK_SESSIONS" "mkdir fallback: exactly one of two concurrent drivers starts a session"
+assert_eq 69 "$LOCK_RC2" "mkdir fallback: the refused driver exits 69 (EX_UNAVAILABLE)"
+assert_file_contains "$SBL/.loop/unattended.log" "already running" "the refusal is recorded in the rolling log"
+
 # --- SIGTERM to the driver must not leave the session running ---
 # Pre-fix neither driver had a trap (`grep -c trap` = 0 in both) and GNU
 # `timeout` puts itself in its own process group, so `systemctl stop` on a host

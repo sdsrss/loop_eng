@@ -115,6 +115,47 @@ fi
 mkdir -p .loop
 LOG_MAIN=".loop/unattended.log"
 
+# Mutual exclusion, one driver per repo — see the long note in
+# unattended-polish.sh, which carries the same block. Short version: nothing
+# enforced it, two drivers on one tree both passed the dirty-tree check and both
+# started a `bypassPermissions` session, and `install-timer.sh` defaults BOTH
+# modes to `--time 03:00`, so installing both timers on one repo is the
+# documented way to get there. `flock` where it exists (the kernel releases it
+# however the process dies), atomic `mkdir` with a pid-staleness check where it
+# does not (stock macOS). 69 = EX_UNAVAILABLE, kept distinct from the 75 these
+# drivers already use for provider limits.
+LOCK_DIR=".loop/driver.lock"
+LOCK_HELD=0
+if command -v flock >/dev/null 2>&1; then
+  exec 9>".loop/driver.lock.fd"
+  if ! flock -n 9; then
+    echo "$(date +%Y%m%d-%H%M%S) autoloop-driver another unattended driver is already running in $REPO — refusing to run a second session against the same tree" \
+      | tee -a "$LOG_MAIN" >&2
+    exit 69
+  fi
+else
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    LOCK_HELD=1
+  else
+    lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")
+    case "$lock_pid" in ''|*[!0-9]*) lock_pid="" ;; esac
+    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+      echo "$(date +%Y%m%d-%H%M%S) autoloop-driver another unattended driver (pid $lock_pid) is already running in $REPO — refusing to run a second session against the same tree" \
+        | tee -a "$LOG_MAIN" >&2
+      exit 69
+    fi
+    rm -rf "${LOCK_DIR:?}"
+    if mkdir "$LOCK_DIR" 2>/dev/null; then LOCK_HELD=1; else
+      echo "$(date +%Y%m%d-%H%M%S) autoloop-driver could not take the driver lock in $REPO — refusing" \
+        | tee -a "$LOG_MAIN" >&2
+      exit 69
+    fi
+  fi
+  echo $$ > "$LOCK_DIR/pid"
+fi
+_release_lock() { [ "$LOCK_HELD" -eq 1 ] && rm -rf "${LOCK_DIR:?}"; return 0; }
+trap _release_lock EXIT
+
 # Log rotation, before anything else appends: under a years-long systemd timer
 # every run adds a timestamped per-session log and the rolling log only ever
 # grows, so an unattended host fills .loop/ (eventually the disk) without

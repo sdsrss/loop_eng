@@ -155,6 +155,34 @@ UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT="loop-eng-$MODE"
 mkdir -p "$UNIT_DIR"
 
+# Same-repo, same-minute collision with the OTHER mode's timer.
+#
+# Both modes default to `--time 03:00` and both unit names are per-USER, not
+# per-repo, so "install a nightly polish timer, then a nightly autoloop timer on
+# the same repo" — the documented way to use this script twice — schedules two
+# drivers against one working tree at the same instant. The drivers now refuse
+# to overlap (the loser exits 69, EX_UNAVAILABLE), so the tree is safe; but that
+# makes the collision SILENT: whichever timer loses the race does no work, every
+# night, while `systemctl status` stays green and the only trace is one line in
+# .loop/unattended.log. Refuse here instead, where a human can pick a time.
+#
+# Only an exact same-repo AND same-time pair is refused. Two repos at 03:00 are
+# fine (different trees, different locks), and so is the same repo at different
+# times — that is the intended way to run both.
+OTHER_MODE=autoloop
+[ "$MODE" = autoloop ] && OTHER_MODE=polish
+OTHER_SVC="$UNIT_DIR/loop-eng-$OTHER_MODE.service"
+OTHER_TMR="$UNIT_DIR/loop-eng-$OTHER_MODE.timer"
+if [ -f "$OTHER_SVC" ] && [ -f "$OTHER_TMR" ]; then
+  # ExecStart=<runner> <repo> <args…> — every path in it is whitespace-free by
+  # the guards above, so field 2 is the repo.
+  other_repo=$(grep -m1 '^ExecStart=' "$OTHER_SVC" 2>/dev/null | awk '{print $2}')
+  other_time=$(grep -m1 '^OnCalendar=' "$OTHER_TMR" 2>/dev/null | sed 's/^OnCalendar=\*-\*-\* //; s/:00$//')
+  if [ -n "$other_repo" ] && [ "$other_repo" = "$REPO" ] && [ "$other_time" = "$TIME" ]; then
+    die "loop-eng-$OTHER_MODE.timer already runs $REPO at $TIME, and the two drivers cannot share a working tree — the second one to fire would exit 69 (another driver is running) and do nothing, silently, every night. Re-run with a different --time (e.g. --time 04:00), or remove the other timer first: $(dirname "$0")/uninstall-timer.sh $OTHER_MODE"
+  fi
+fi
+
 # The unit's StandardOutput/Error append to $REPO/.loop/cron.log; systemd opens
 # that file BEFORE ExecStart runs, so the directory must already exist at first
 # trigger. The runner's own `mkdir -p .loop` happens inside ExecStart — too late
