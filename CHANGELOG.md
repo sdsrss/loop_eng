@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.14.0 — 2026-09-20
+
+Two gaps this repo had already written down and left open: a wall-clock budget
+that silently did not apply on macOS, and a bash-3.2 compatibility claim that
+lived only in a code comment. Test suite 468 → 475 assertions (counted by
+summing `bash tests/run-all.sh`, at the previous release commit and at this one
+— the 0.13.0 entry's "456" does not match a fresh count of that tree, which is
+why these two numbers were measured rather than carried forward).
+
+**Behavior change, macOS only — read this if you schedule `/polish`.**
+`unattended-polish.sh` probed only `timeout`, so on a mac with Homebrew
+coreutils — where GNU coreutils installs the binary as `gtimeout` — a scheduled
+polish ran with **no** wall-clock cap, while the autoloop driver and the
+stop-gate, both of which fall back to `gtimeout`, stayed bounded. The probe is
+now `timeout` → `gtimeout`, so on such a host a nightly polish is from now on
+killed at `LOOP_ENG_MAX_MINUTES` (default **120 minutes**) where it previously
+ran to completion. To keep long runs: raise `LOOP_ENG_MAX_MINUTES` (`0` is
+refused and falls back to 120 — `timeout 0m` means "no limit", which is the
+opposite of what a budget knob's lowest value should do), or pin 0.13.0. A host
+with neither binary still runs uncapped, but now says so on stderr, where the
+scheduler's own log keeps it, instead of dropping the budget in silence. Linux
+is unaffected: `timeout` was always found there.
+
+**`update-notify.sh` joins the bash-3.2 CI leg.** It is a SessionStart hook, so
+on a stock macOS box it is bash 3.2 that runs it in every real session — and the
+only thing asserting it could was a comment in its own header, while README said
+outright that the `test-bash32` job did not cover it. That job now runs six
+suites and syntax-checks six scripts. Verified under a real 3.2.57 before
+wiring, via CLAUDE.md's docker recipe (extended to the same six suites): all six
+green, `test-update-notify` 26 passed / 0 failed, and the six-script `bash -n`
+list parses. musl is not BSD, so the macOS cell is the one the CI leg adds.
+`tests/test-update-notify.sh` also stops resolving `bash` from PATH when it runs
+the hook and uses `$BASH`, the interpreter running the suite: under the 3.2 leg a
+5.x homebrew bash that happened to be installed would otherwise have run the
+hook, and the leg would have reported a 3.2 verdict it never tested.
+
+Evidence for the polish fix, in the order it happened:
+`tests/test-unattended-polish.sh` 30 → 37 assertions, pre-fix 35 passed /
+2 failed — the gtimeout arm and the stderr-warning arm — post-fix 37 / 0. The
+both-installed arm passed throughout, which is what proves the harness rather
+than the fix. Both absent-binary arms run the driver under a minimal bin dir of
+symlinks to exactly what it and the stub exec, because no real PATH can be made
+to lack `timeout` on demand; each prerequisite symlink is asserted, so a missing
+one cannot masquerade as a driver bug.
+
+Docs: the README Requirements table drops its "Known, not yet fixed" admission,
+and its intro names the guard-weakening rows correctly — rows 1-4, not "1-3 and
+5", which counted `curl` (a missing notice, not a guard) and skipped the polish
+timeout row.
+
 ## 0.13.0 — 2026-09-19
 
 New-user lifecycle QA: install → use → update → self-heal → uninstall, driven
