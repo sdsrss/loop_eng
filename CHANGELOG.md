@@ -100,6 +100,19 @@ discipline — the assertion that would have caught it first, then the fix.
   README's safety table gains the orchestrator row it was missing: it runs in
   your session with `Write` and `Bash`, and what is mechanical about it is that
   the evidence ledger is denied to it by the same hook as to everyone else.
+- **A tag push now runs a release gate.** `.github/workflows/release.yml` fires
+  on `v*`: it re-runs the full test matrix against the *tagged* tree (by calling
+  `test.yml`, so there is one definition of "the suite" rather than two that
+  drift) and asserts that the three manifest version fields, the CHANGELOG's
+  dated section and the tag all say the same thing — plus that no
+  `## Unreleased` was left behind. A tag whose manifests disagree with it
+  installs cleanly and then serves the wrong version forever, and until now the
+  only thing comparing them was a line in a checklist. The gate has
+  `contents: read` and **publishes nothing**: `gh release create` stays a
+  person's step, and so do RELEASING.md's live-install smoke and post-ship
+  identity diff. CI's `npm i -g @anthropic-ai/claude-code` also gets three
+  attempts with a backoff, so a registry blip cannot be what turns the manifest
+  gate off.
 - **The shellcheck gate moves from `-S error` to `-S warning`.** Thirteen
   warnings sat unchecked behind it and they were not cosmetic: nine were SC2164,
   a `cd` with no `|| exit` — in a *test* suite, where a failed `cd` into the

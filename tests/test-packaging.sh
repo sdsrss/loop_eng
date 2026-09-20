@@ -189,4 +189,28 @@ done
 hasnt skills/loop-eng/SKILL.md "Six stop rules bound every loop at 5 rounds max" "SKILL.md no longer gives both loops /autoloop's caps"
 has   skills/loop-eng/SKILL.md "three macro rounds" "SKILL.md states /polish's own round cap"
 
+# --- P2-17: the release gate's WIRING, checked here because its verdict can
+#     only be produced in CI ---
+# The gate itself compares the tag against the manifests, and that comparison
+# needs a tag, so it cannot run locally. What can be checked locally is that it
+# is wired at all: a workflow that never fires is indistinguishable from the
+# manual checklist it replaced.
+REL=.github/workflows/release.yml
+if [ -f "$REL" ]; then
+  PASS=$((PASS+1))
+  has "$REL" "tags: ['v*']" "the release gate fires on a v* tag"
+  has "$REL" "uses: ./.github/workflows/test.yml" "the release gate re-runs THE suite, not a copy of it"
+  has "$REL" "contents: read" "the release gate has read-only permissions (it publishes nothing)"
+  has .github/workflows/test.yml "workflow_call:" "test.yml is callable, or the release gate's suite job cannot run"
+  # The three manifest fields the gate compares must be the three that exist.
+  # Named here so renaming one in the manifests reddens a fast local suite
+  # rather than a tag push.
+  for field in '"version"' 'metadata.version' 'plugins\[0\].version'; do
+    if grep -qF -- "$field" "$REL" || grep -q -- "$field" "$REL"; then PASS=$((PASS+1)); else
+      FAIL=$((FAIL+1)); echo "  FAIL: the release gate does not mention the manifest field $field" >&2; fi
+  done
+else
+  FAIL=$((FAIL+1)); echo "  FAIL: $REL is missing — tag pushes are unchecked again" >&2
+fi
+
 report "test-packaging"

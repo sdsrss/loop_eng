@@ -1,0 +1,95 @@
+# loop-eng release gate — the machine half of RELEASING.md.
+#
+# Releases stay MANUAL on purpose: `gh release create` is the human's step, so
+# the decision to publish and the wording of the notes remain a person's. What
+# this workflow removes is the other half of a manual checklist — the part that
+# is mechanical, silent when skipped, and only discovered by a user. A tag
+# pushed with a manifest that still says the previous version installs cleanly
+# and serves the wrong version forever; nothing in the repo noticed, because the
+# only thing that ever compared the tag to the manifests was a line in a
+# checklist (audit P2-17).
+#
+# Two jobs:
+#   suite   — the full test matrix, re-run against the tagged tree rather than
+#             trusted from whatever main was when the tag was cut. Calls
+#             test.yml so there is one definition of "the suite", not two that
+#             drift.
+#   version — the three manifest fields, the CHANGELOG section, and the absence
+#             of a leftover `## Unreleased`, all compared against the tag name.
+#
+# `contents: read` only. This workflow publishes nothing.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    uses: ./.github/workflows/test.yml
+
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Manifests, CHANGELOG and tag must agree
+        env:
+          # workflow_dispatch has no tag; fall back to the ref name so a manual
+          # run reports "not a tag" rather than silently comparing nothing.
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAG" ]; then
+            echo "not a tag push (ref_type=${{ github.ref_type }}) — nothing to compare" >&2
+            exit 1
+          fi
+          python3 - "$TAG" <<'PY'
+          import json, re, sys
+
+          tag = sys.argv[1]
+          if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+              sys.exit(f"tag {tag!r} is not vMAJOR.MINOR.PATCH")
+          want = tag[1:]
+
+          plugin = json.load(open(".claude-plugin/plugin.json"))
+          market = json.load(open(".claude-plugin/marketplace.json"))
+          fields = {
+              ".claude-plugin/plugin.json: version":
+                  plugin.get("version"),
+              ".claude-plugin/marketplace.json: metadata.version":
+                  (market.get("metadata") or {}).get("version"),
+              ".claude-plugin/marketplace.json: plugins[0].version":
+                  (market.get("plugins") or [{}])[0].get("version"),
+          }
+
+          bad = [f"  {k} = {v!r}, tag says {want!r}"
+                 for k, v in fields.items() if v != want]
+
+          changelog = open("CHANGELOG.md").read()
+          if not re.search(rf"^## {re.escape(want)} — \d{{4}}-\d{{2}}-\d{{2}}$",
+                           changelog, re.M):
+              bad.append(f"  CHANGELOG.md has no dated '## {want} — YYYY-MM-DD' section")
+          if re.search(r"^## Unreleased\b", changelog, re.M):
+              bad.append("  CHANGELOG.md still has a '## Unreleased' section — "
+                         "the release notes were never moved down under the version")
+
+          if bad:
+              print(f"release gate FAILED for {tag}:")
+              print("\n".join(bad))
+              print("\nA tag whose manifests disagree with it installs cleanly and "
+                    "serves the wrong version, so this is a release blocker, not a "
+                    "warning. Fix, delete the tag, re-tag.")
+              sys.exit(1)
+          print(f"{tag}: three manifest fields, the CHANGELOG section and the tag all agree.")
+          PY
+
+      - name: What is still manual
+        run: |
+          echo "Verified: suite green on the tagged tree, manifests == tag, CHANGELOG section present."
+          echo "Still yours: gh release create, and RELEASING.md sections 1 and 3"
+          echo "(live-install smoke, post-ship identity diff). This gate publishes nothing."

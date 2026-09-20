@@ -13,7 +13,8 @@ memory of having run it.
       `.claude-plugin/marketplace.json` (`metadata.version` +
       `plugins[0].version`). Verify:
       `grep -n '"version"' .claude-plugin/plugin.json .claude-plugin/marketplace.json`
-- [ ] CHANGELOG has a dated section for the version (move `## Unreleased` down).
+- [ ] CHANGELOG has a dated section for the version (move `## Unreleased` down),
+      written to the skeleton below.
 - [ ] Manifest + components validate:
       `claude plugin validate .claude-plugin/plugin.json`
       **Point it at the plugin manifest, not at `.`** — given the repo root the
@@ -26,6 +27,47 @@ memory of having run it.
       repo root for Claude Code to load it here; it ships inert (see CLAUDE.md,
       "Packaging scope"). Treat exactly that one warning as expected and any
       other as a release blocker.
+
+### CHANGELOG skeleton (from 0.16.0 onward)
+
+Fixed headings, in this order, omitting any that are empty. The point is that a
+reader upgrading knows where to look without reading the prose: "what do I have
+to do" is always the first section, and it is always called the same thing.
+
+```markdown
+## X.Y.Z — YYYY-MM-DD
+
+<One short paragraph: what this release is about. Not a list.>
+
+### Upgrade
+
+- Only entries that require the reader to DO something, or to know that a
+  default moved under them. Each one says what changed, what breaks if they
+  ignore it, and the opt-out or revert.
+
+### Changed
+
+- User-visible behavior that moved but needs no action.
+
+### Fixed
+
+- Bugs. What was wrong, what it cost, what it does now.
+```
+
+The 19 sections before 0.16.0 are left as written. They are diary-style and
+long — about 129 lines each over the last five releases — but that prose is the
+project's decision record, and rewriting it would destroy the thing that makes
+it worth keeping while changing nothing for any reader. The skeleton binds
+forward only. When an entry wants a full incident narrative, put the narrative
+in the commit message or `docs/` and keep the CHANGELOG entry to the shape
+above.
+
+`## 0.1.0` has no tag and no GitHub Release — it predates the release flow in
+this file. Every version from 0.2.0 on has all four of section, tag, Release and
+manifest agreeing; the release gate in `.github/workflows/release.yml` is what
+keeps that true now. 0.1.0 is deliberately not back-filled: a tag invented years
+later points at a commit nobody released, which is a worse record than an
+honest gap.
 
 ## 1. Live-install smoke (REQUIRED before any release that touches
 ##    hooks/, commands/, skills/, or .claude-plugin/ — audit H2)
@@ -168,7 +210,19 @@ smoked commit and the tag is then the commit recording the smoke itself, which
 
 - [ ] ff-merge to `main`, push, wait for CI green.
 - [ ] Annotated tag: `git tag -a vX.Y.Z -m "vX.Y.Z"` + `git push origin vX.Y.Z`.
+- [ ] Wait for the **release gate** (`.github/workflows/release.yml`, fires on
+      the `v*` tag): it re-runs the full suite against the TAGGED tree and
+      asserts that the three manifest fields, the CHANGELOG's dated section and
+      the tag all say the same version.
+      `gh run list --workflow=release.yml --limit 1` → `completed success`.
+      A red gate means **do not publish**: delete the tag, fix, re-tag. A tag
+      whose manifests disagree with it installs cleanly and then serves the
+      wrong version forever, which is why this is the one step that is now a
+      machine's rather than a line in this list.
 - [ ] `gh release create vX.Y.Z --title "vX.Y.Z" --notes "<CHANGELOG section>"`.
+      Still manual, deliberately: the gate has `contents: read` and publishes
+      nothing, so the decision to publish and the wording of the notes stay a
+      person's.
 
 ## 3. Post-ship
 

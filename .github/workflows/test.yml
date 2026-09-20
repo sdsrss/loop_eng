@@ -26,6 +26,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # release.yml calls this workflow on a `v*` tag so the release gate re-runs
+  # the suite against the TAGGED tree rather than trusting whatever main was
+  # when the tag was cut. Calling it keeps one definition of "the suite"; a
+  # copy in release.yml would be two that drift.
+  workflow_call:
 
 jobs:
   test:
@@ -62,9 +67,23 @@ jobs:
       # purpose too — a plugin ships to users running the CURRENT CLI, so that is
       # the validator whose verdict matters; if a new upstream rule reddens this
       # leg, that is a release blocker worth seeing, not noise to pin away.
+      # Retried, because the one thing this install must not do is fail for a
+      # reason that has nothing to do with the code. It is deliberately NOT
+      # `|| true` (see above): a transient registry blip turning the manifest
+      # gate off while CI stays green is the silent-disarm shape this repo
+      # refuses. Three attempts with a backoff distinguishes "npm was flaky"
+      # from "the install is actually broken", and only the second one reddens
+      # the leg.
       - name: Install Claude Code CLI (Linux — enables the manifest gate)
         if: runner.os == 'Linux'
-        run: npm i -g @anthropic-ai/claude-code
+        run: |
+          for attempt in 1 2 3; do
+            if npm i -g @anthropic-ai/claude-code; then exit 0; fi
+            echo "npm install attempt $attempt failed; retrying in $((attempt * 15))s" >&2
+            sleep $((attempt * 15))
+          done
+          echo "npm i -g @anthropic-ai/claude-code failed three times — the manifest gate cannot run" >&2
+          exit 1
 
       - name: Show tool versions
         run: |
