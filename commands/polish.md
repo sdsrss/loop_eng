@@ -1,7 +1,7 @@
 ---
 description: Iteratively raise code quality until a review round comes back clean. Use when the user asks to polish/clean up a module or codebase — 打磨/清理/提升代码质量 — or wants review findings actually fixed, not just listed. Unlike a one-shot code review, every finding is adversarially verified, then fixed and regression-tested, looping until a dry round (no fresh confirmed findings). Behavior-preserving — public-contract changes are reported, never applied.
 argument-hint: [scope, e.g. src/ — defaults to the whole project source]
-allowed-tools: Read, Write, Grep, Glob, Bash, Task
+allowed-tools: Read, Write, Grep, Glob, Bash, Task, Agent
 ---
 
 Polish the code quality of: $ARGUMENTS (if empty: the project's main source
@@ -42,24 +42,38 @@ No adjectives.
    correctness, simplification, test-coverage, consistency.
    Each gets: the scope paths, its lens, nothing else — independent contexts
    are the point; do not share one reviewer's findings with another.
-2. Collect findings. Deduplicate against `.loop/polish-seen.md` (every finding
-   ever reported this run, keyed `file:line|summary`). Append fresh ones to the
-   seen file. Dedup against SEEN, not against confirmed — otherwise refuted
-   findings resurface every round and the loop never converges.
-   (Known noise, accepted by design: after a fix round shifts line numbers, an
-   already-seen finding can re-enter as "fresh" at its new line and cost one
-   extra verifier pass — the verifier absorbs it. Keying without the line was
-   rejected: two genuinely distinct findings in one file can share a summary,
-   and line-less dedup would silently drop one. Noise is acceptable; losing a
-   real finding is not.)
+2. Collect findings. Deduplicate against TWO ledgers:
+   - `.loop/polish-seen.md` — every finding ever reported this run, keyed
+     `file:line|summary`. Append fresh ones. Dedup against SEEN, not against
+     confirmed — otherwise refuted findings resurface every round and the loop
+     never converges.
+     (Known noise, accepted by design: after a fix round shifts line numbers, an
+     already-seen finding can re-enter as "fresh" at its new line and cost one
+     extra verifier pass — the verifier absorbs it. Keying without the line was
+     rejected: two genuinely distinct findings in one file can share a summary,
+     and line-less dedup would silently drop one. Noise is acceptable; losing a
+     real finding is not.)
+   - `.loop/polish-deferred.md` — findings handed to the human under the
+     public-contract stop rule, keyed `file|summary` **without the line**.
+     A deferred finding is never fixed, so nothing ever moves it out of the
+     code; with a line in the key it re-entered as "fresh" after every fix
+     round that shifted lines above it, was re-verified into the same CONFIRMED
+     verdict, and was deferred again. That costs a verifier pass per round AND
+     keeps the loop alive on a finding it has already decided not to act on —
+     the one class for which line-less dedup cannot lose a real finding, since
+     the outcome is fixed in advance. Record each deferral here the moment it
+     is made, and skip anything matching on the next round.
 3. For each fresh finding, dispatch loop-verifier (one finding per dispatch,
    parallel). Only `VERDICT: CONFIRMED` findings with impact `correctness` or
    `requirement` enter the fix queue. Confirmed `optional` findings go to the
    report's "Optional (not queued)" list — they are the human's call, not the
-   loop's.
-4. **Dry-round check**: if zero fresh findings were confirmed this round →
-   the loop has converged → go to Wrap-up (fresh `optional`-only rounds count
-   as dry — optional findings never keep the loop alive).
+   loop's. A confirmed finding that the public-contract stop rule below forbids
+   fixing goes to `.loop/polish-deferred.md` and the human list, not the queue.
+4. **Dry-round check**: if no fresh finding entered the FIX QUEUE this round →
+   the loop has converged → go to Wrap-up. Queued, not merely confirmed: a
+   confirmed finding that is `optional`, or deferred as a public-contract
+   change, is one the loop will never act on, so counting it as round activity
+   keeps the loop running with nothing left to do.
 
 ## Phase 3 — Fix round
 
@@ -93,7 +107,8 @@ No adjectives.
 - 3 macro rounds exhausted → stop, report what remains in the queue.
 - Regression that cannot be reverted cleanly → stop immediately, report.
 - Any finding whose fix would change public API/contract, schema, or behavior
-  users depend on → do NOT fix; list it for the human. Polish is
+  users depend on → do NOT fix; record it in `.loop/polish-deferred.md`
+  (keyed `file|summary`, no line) and list it for the human. Polish is
   behavior-preserving by definition.
 - Deleting or renaming any EXPORTED symbol counts as a public-contract change,
   even when Grep finds zero internal references — external consumers are

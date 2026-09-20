@@ -1,7 +1,7 @@
 ---
 description: Drive a bounded task to completion via an autonomous builder/checker loop. Use when the user wants hands-off execution to a machine-verifiable finish line — "keep going until tests pass", "don't stop until it's done", unattended/挂机/无人值守/自动跑完/修到全绿 — or hands over a bugfix/refactor with binary pass-fail checks. Rounds repeat until ALL GREEN or a stop rule fires (max 5); a Stop hook blocks premature quitting. Not an interval timer.
 argument-hint: <task>
-allowed-tools: Read, Write, Grep, Glob, Bash, Task
+allowed-tools: Read, Write, Grep, Glob, Bash, Task, Agent
 ---
 
 Execute this task as a closed loop: $ARGUMENTS
@@ -126,7 +126,12 @@ Arm the stop-gate (mechanism-layer enforcement, if the loop-eng hooks are
 loaded in this project):
 - Write `.loop/criteria.tsv`: one line per acceptance criterion,
   TAB-separated: `<id>	<description>	<verify command>`. Use the contract's
-  fast verify commands. This file is fixed WHILE THE LOOP IS ARMED (while
+  fast verify commands — write this file FROM that table, so the two say the
+  same thing. They are two statements of one contract and only this one runs:
+  the stop-gate executes it, and `all_green` is computed from it alone. If they
+  ever disagree, THIS FILE is the contract and `.loop/contract.md` is stale
+  prose — fix the prose, and say so in the wrap-up.
+  This file is fixed WHILE THE LOOP IS ARMED (while
   `.loop/active` exists) — the evidence-gate hook denies rewrites for the
   duration of the loop, because weakening a check to pass it is a red line.
   After the loop ends (`.loop/active` removed) the next contract may rewrite
@@ -166,19 +171,36 @@ falls back to it when criteria.tsv is absent.)
    EXPECTED-RED, so round 1 legitimately reports `ALL GREEN` while items 2..N
    have not been built — taking it as "the loop is done" would stop after one
    item and report a diff for a backlog barely started. So:
+   - FIRST reconcile the report against the machine ledger, BEFORE ticking
+     anything. Run
+     `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/run-contract.sh"`
+     (dogfood fallback: Step 0) and read the refreshed `.loop/results.json`.
+     The checker's report is a claim; the ledger is a run. **When they disagree
+     the ledger wins** — it was produced by executing the armed contract, and it
+     is the file the stop-gate will consult on your stop attempt anyway, so a
+     disagreement discovered here is one you would otherwise meet as a block
+     with no round left to fix it in.
+     - Any criterion belonging to THIS round's item that is `"passes": false`
+       → the round is FAILED, whatever the report said. Forward those criteria
+       to the builder verbatim (id, cmd, exit, and the `evidence` log path) and
+       go to 1. Do NOT tick the box.
+     - Criteria belonging to items not yet built are EXPECTED-RED and are not
+       this round's failure — the same scoping rule the checker follows.
+     - A `"malformed_lines"` field or an `"error"` field means the contract was
+       only partly parsed or could not run at all. That is never a green round:
+       fix `.loop/criteria.tsv` — which needs a human, since the evidence-gate
+       locks it while armed (`LOOP_ENG_DISABLE_EVIDENCE_GATE=1`) — and say so.
    - tick the current item's backlog line `- [x]`;
    - if any `- [ ]` line remains and the round budget is not exhausted, go to 1
      with the next item;
    - only when no `- [ ]` line remains (or there was no backlog at all) is the
      loop finished — then do the wrap-up below.
 
-   Wrap-up, once the loop is finished: first REFRESH the
-   machine ledger so it reflects the fixed tree — run
-   `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/run-contract.sh"`
-   (dogfood fallback: Step 0)
-   (the builder and checker run the raw verify commands, NOT run-contract, so
-   `.loop/results.json` is still the pre-fix run and would show a stale
-   `all_green: false` until it is re-run). Then show me the full diff
+   Wrap-up, once the loop is finished: the reconcile step above has just
+   refreshed the machine ledger, so it already reflects the fixed tree — that
+   refresh is why it is there. (The builder and checker run the raw verify
+   commands, NOT run-contract, so without it `.loop/results.json` would still
+   be the pre-fix run and show a stale `all_green: false`.) Then show me the full diff
    (`git diff <baseline>..HEAD`, the baseline ref recorded in Step 0) and each
    check's proof line.
    Cite the just-refreshed `.loop/results.json` (`all_green: true`) as the

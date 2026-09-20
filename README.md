@@ -391,7 +391,8 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 
 | Principle | Enforcement |
 |---|---|
-| Verifier ≠ implementer | checker/reviewer/verifier agents have no Write/Edit tools (they keep Bash — they must run the checks — so this is a whitelist, not a sandbox) |
+| Verifier ≠ implementer | checker/reviewer/verifier agents have no Write/Edit tools (they keep Bash — they must run the checks — so this is a whitelist, not a sandbox: their prompts carry the "Bash is not for writing" red line for the rest) |
+| Orchestrator writes only `.loop/` | enforcement is the **prompt**, not the tool list: `/autoloop` and `/polish` run in your own session with `Write` and `Bash`, because they must author the contract and arm the gate. What is mechanical is the evidence ledger — `results.json`, `evidence/`, and the armed `criteria.tsv` are denied to the orchestrator by the same PreToolUse hook as to everyone else, so the files that decide "done" are out of reach of the one agent that could otherwise reach them |
 | Done = machine signal | contracts allow only binary criteria with verify commands |
 | Done = machine-written fact | results.json/evidence written only by run-contract.sh; PreToolUse gate denies model writes |
 | Never weaken a check to pass it | red line in every agent + orchestrator |

@@ -104,4 +104,38 @@ has   commands/autoloop.md "TOTAL budget for the invocation, not a per-item allo
 # does not have — an instruction that cannot be carried out is not a mitigation.
 hasnt commands/autoloop.md "set \`run_in_background:false\`" "dispatch guidance does not name a nonexistent tool parameter"
 
+# P2-13. `allowed-tools` is a PRE-AUTHORIZATION list, and the subagent tool is
+# now named Agent; `Task` is the old name. Listing only the old one costs a
+# permission prompt on every dispatch in interactive mode (bypass mode hides
+# it), and `claude plugin validate` does not check tool names, so nothing else
+# would catch the drift. Both are listed until the alias is proven dead.
+for c in commands/autoloop.md commands/polish.md; do
+  has "$c" "Task, Agent" "$c pre-authorizes both the old and current subagent tool name"
+done
+
+# P2-11. "No write access by design" was stronger than the mechanism. These
+# three agents have no Write/Edit — that part is real, enforced by the tool
+# whitelist — but they all have Bash, which writes. The claim had to come down
+# to what is actually true, and the red line it was standing in for had to be
+# stated as a red line.
+for a in agents/loop-checker.md agents/loop-reviewer.md agents/loop-verifier.md; do
+  hasnt "$a" "no write access by design" "$a no longer claims a guarantee its Bash tool breaks"
+  has   "$a" "no Write or Edit tool" "$a states the part the tool whitelist actually enforces"
+  has   "$a" "not for writing"       "$a states the Bash red line instead of implying it is impossible"
+done
+
+# P2-12. The template's FAST subset is what the stop-gate runs on every stop
+# attempt under a 100s budget, and it shipped with `npm test` in it — a typical
+# JS suite overruns, the gate blocks as a fail-closed timeout, three of those
+# reach the ceiling, and ALL GREEN can never be machine-confirmed. The full
+# suite belongs in the block that says "final round".
+has   skills/loop-eng/templates/contract.md "Full suite (final round)" "the template still has a full-suite block"
+hasnt skills/loop-eng/templates/contract.md "1	All tests pass	npm test" "the fast subset no longer ships an unscoped whole-suite command"
+
+# P2-10. The verify commands had two sources of truth — contract.md for the
+# checker, criteria.tsv for the gate — both model-written, with nothing binding
+# them. criteria.tsv is the one that RUNS, so it is the one that decides.
+has agents/loop-checker.md ".loop/criteria.tsv" "the checker reads the contract the gate actually executes"
+has commands/autoloop.md "the ledger wins" "step 3 has a branch for a green report over a red ledger"
+
 report "test-packaging"

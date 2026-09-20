@@ -43,6 +43,51 @@ discipline — the assertion that would have caught it first, then the fix.
   `LOOP_ENG_MAX_ITEM_SESSIONS` sessions (default 2) on the same item. Set it to
   `0` for an item that legitimately spans sessions.
 
+- **`/polish` converges on deferred findings instead of re-confirming them
+  every round.** A finding deferred under the public-contract stop rule is by
+  definition never fixed, so nothing moves it out of the code — and with a line
+  number in the dedup key it re-entered as "fresh" after every fix round that
+  shifted lines above it, was re-verified into the same CONFIRMED verdict, and
+  was deferred again. It burned a verifier pass per round and kept the loop
+  alive on a finding it had already decided not to act on. Deferrals now go to
+  `.loop/polish-deferred.md` keyed `file|summary` without the line — the one
+  class where line-less dedup cannot lose a real finding, because the outcome
+  is fixed in advance. The dry-round test now asks whether anything entered the
+  FIX QUEUE rather than whether anything was confirmed, which is what the stop
+  rules already said and Phase 2 did not.
+- **The checker now reads `.loop/criteria.tsv`, the contract that actually
+  runs.** Verify commands had two sources of truth — `contract.md` for the
+  checker, `criteria.tsv` for the gate — both model-written, with nothing
+  binding them, so a round could go green against one while the other decided
+  otherwise. `criteria.tsv` wins because it is the file the stop-gate executes
+  and `all_green` is computed from it alone; a disagreement is now itself a
+  reportable finding.
+- **`/autoloop` step 3 reconciles the report against the ledger before ticking
+  a box.** A checker report is a claim and `results.json` is a run; there was
+  no branch for "report green, ledger red", so the disagreement would surface
+  as a blocked stop with no round left to fix it in. Step 3 now refreshes the
+  ledger, treats any red criterion belonging to the current item as a failed
+  round whatever the report said, and treats `malformed_lines` or `error` as
+  never-green. The wrap-up's separate refresh is gone — it is this one.
+- **The contract template's fast subset no longer ships `npm test`.** The
+  stop-gate runs that subset on every stop attempt under a 100s budget; a
+  typical JS suite overruns it, three fail-closed timeouts reach the 3-block
+  ceiling, and ALL GREEN can then never be machine-confirmed at all. The
+  examples are scoped commands, and the unscoped one sits in the block already
+  labelled "final round".
+- **The three judgment agents no longer claim "no write access by design".**
+  They have no Write or Edit tool — that half is real and enforced by the tool
+  whitelist — but they all have Bash, which writes. The prompts now say the
+  enforced part as enforcement and the rest as the red line it always was.
+  README's safety table gains the orchestrator row it was missing: it runs in
+  your session with `Write` and `Bash`, and what is mechanical about it is that
+  the evidence ledger is denied to it by the same hook as to everyone else.
+- **`allowed-tools` lists `Agent` alongside `Task`.** The subagent tool's
+  current name is `Agent`; `allowed-tools` is a pre-authorization list, so
+  naming only the old one costs a permission prompt on every dispatch in
+  interactive mode. `claude plugin validate` does not check tool names, so
+  nothing else would have caught it.
+
 ### Fixed
 
 - **A failed update check now backs off for an hour instead of retrying every
