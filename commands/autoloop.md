@@ -160,7 +160,19 @@ falls back to it when criteria.tsv is absent.)
    round re-buys assurance the fast subset already gives and multiplies
    checker wall-clock by the round count (2026-07-14 dogfood: 5 rounds of
    full sweeps caught nothing the fast subset would have missed).
-3. If the checker's report starts with `ALL GREEN`: stop. First REFRESH the
+3. If the checker's report starts with `ALL GREEN`, that verdict is about THIS
+   round's item, not about the loop. On a multi-item backlog the checker judges
+   only the current item (its criteria plus the suite) and lists the rest as
+   EXPECTED-RED, so round 1 legitimately reports `ALL GREEN` while items 2..N
+   have not been built — taking it as "the loop is done" would stop after one
+   item and report a diff for a backlog barely started. So:
+   - tick the current item's backlog line `- [x]`;
+   - if any `- [ ]` line remains and the round budget is not exhausted, go to 1
+     with the next item;
+   - only when no `- [ ]` line remains (or there was no backlog at all) is the
+     loop finished — then do the wrap-up below.
+
+   Wrap-up, once the loop is finished: first REFRESH the
    machine ledger so it reflects the fixed tree — run
    `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/run-contract.sh"`
    (dogfood fallback: Step 0)
@@ -183,13 +195,26 @@ falls back to it when criteria.tsv is absent.)
    loses line numbers and stack traces.
 5. Go to 1.
 
-Dispatch both subagents synchronously — await each one's result within the
-same turn (where the harness offers the knobs, set `run_in_background:false`
-and give it no teammate name). An async dispatch ends the orchestrator's turn
-while the subagent is still working, and every such turn-end hits the armed
-stop-gate on a still-red contract, so the wait itself burns spurious gate
-blocks; the builder's report can then also arrive as a duplicate late message
-after the loop has already closed.
+Dispatch both subagents synchronously — await each one's result within the same
+turn, and give the dispatch no teammate name. Do NOT rely on a
+`run_in_background: false` parameter: the current Agent tool has no such input,
+so "set it to false" is not an instruction you can carry out. What you control
+is the shape of the dispatch — one subagent per dispatch, awaited before you do
+anything else, no parallel fan-out.
+
+This matters because an async dispatch ends the orchestrator's turn while the
+subagent is still working, and every such turn-end hits the armed stop-gate on a
+still-red contract. With two dispatches per round against a 3-block ceiling,
+that reaches the ceiling inside round 2 — and a headless run then exits with the
+gate still armed, which is the stale-`.loop/active` state Step 0 exists to clean
+up. The builder's report can also arrive as a duplicate late message after the
+loop has closed, and the block text will prompt you to "keep fixing" while a
+builder is still mid-edit, inviting a second builder into the same files.
+
+Observed rather than assumed: on Claude Code CLI 2.1.278 the dispatch is
+synchronous and a full round completed to `all_green: true` (0.14.0 smoke). If
+your harness dispatches subagents in the background, expect the spurious blocks
+above; that is a harness property this prompt cannot override.
 
 Lost-report fallback: if a subagent exits without delivering its report,
 re-dispatch it once. If the report is lost again, run the contract's verify
@@ -201,10 +226,23 @@ running the contract's commands.
 
 ## Round management
 
-- Maximum 5 rounds. Announce "Cycle N/5" at the start of every round.
-- After every round, update `.loop/state.md`: round number, what changed,
-  check results, next action. This file is the loop's memory across context
-  compaction and sessions.
+- **5 rounds is the TOTAL budget for the invocation, not a per-item allowance.**
+  One backlog item may take several rounds — that is the normal case, since the
+  builder fixes one root cause per round — and a five-item backlog may well not
+  finish. Announce "Cycle N/5" at the start of every round, counting every round
+  of every item in one sequence.
+- Each round takes exactly ONE backlog item (micro-items may share a round, see
+  the triage rule above), and an item is finished when the checker reports
+  `ALL GREEN` for it, not when its first round ends.
+- When the budget runs out with items unticked, stop per the escalation
+  protocol and say which items are left. The checkboxes persist, so the user
+  re-invokes `/autoloop` to continue, or schedules `unattended-autoloop.sh` to
+  consume the remainder across fresh sessions.
+- Stop rules 3 and 5 reset at each item boundary (see the multi-item section
+  above); the round counter does NOT.
+- After every round, update `.loop/state.md`: round number, current item, what
+  changed, check results, next action. This file is the loop's memory across
+  context compaction and sessions.
 
 ## Cost management (per-round model tiering)
 
@@ -227,13 +265,25 @@ safety:
 
 ## Stop rules (any one of these stops the loop immediately)
 
-1. ALL GREEN — stop with proof of every check.
+1. ALL GREEN — every `- [ ]` backlog item is ticked (or there was no backlog and
+   the single task's criteria all pass). Stop with proof of every check.
 2. Rounds exhausted (5) — stop and report per the escalation protocol.
-3. Same failure two rounds in a row — the builder is guessing, not fixing. Stop.
+3. Same root cause two rounds in a row — the builder is guessing, not fixing.
+   Stop. Judge this by the builder's `Root cause:` line, NOT by the failure.
+   The builder fixes ONE root cause per round by design, so a criterion with two
+   independent causes behind it is still red after the first is fixed: the
+   failure repeats while the work is progressing. A repeated *failure* is
+   therefore not evidence of guessing; a repeated *named cause* is. `Root cause:
+   not identified` two rounds running counts as a repeat.
 4. Regression — a fix broke a previously passing check. Stop, state what change
    caused it.
-5. No progress — failure count did not decrease for 2 consecutive rounds.
-   The task is probably too large; stop and propose a split.
+5. No progress — the number of RED criteria in `.loop/results.json` did not
+   decrease for 2 consecutive rounds. The task is probably too large; stop and
+   propose a split. Count from the ledger, not from the checker's failure list:
+   the checker merges failures per file for readability (`loop-checker.md`), so
+   its list length tracks how the defects are distributed across files rather
+   than how many there are. Refresh the ledger with `run-contract.sh` before
+   comparing if the round did not already.
 6. Capability boundary — failures trace to external dependencies or environment
    issues the builder cannot reach. Stop and report the blocker.
 

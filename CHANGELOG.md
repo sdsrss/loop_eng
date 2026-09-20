@@ -150,6 +150,50 @@ repo at `03:00` today, re-run the installer for one of them with a different
 `--time`. Two *different* repos at `03:00`, and the same repo at different
 times, are both still allowed — the latter is how you run both.
 
+**Two stop rules could stop a loop that was working, and a third could stop it
+after one backlog item.** These live only in Markdown, so nothing caught the
+contradictions.
+
+*Stop rule 3* fired on a repeated **failure**, while `loop-builder.md` tells the
+builder to fix exactly ONE root cause per round. A criterion with two
+independent causes behind it is still red after the first is fixed — the failure
+repeats while the work progresses — so the loop stopped saying "the builder is
+guessing" about a builder that was not. "Same failure" also had no definition:
+`file:line` moves with every edit above it, so the same defect reads as a new
+failure and two defects at one line read as one. The rule now keys on the
+builder's `Root cause:` line, a new required field in its report; the checker
+prefixes each failure with the contract criterion id it came from, and
+identifies failures within a criterion by the normalized assertion line.
+
+*Stop rule 5* counted the checker's failure list, which `loop-checker.md`
+instructs to merge per file — so the count tracked how defects were distributed
+across files, not how many there were. It now counts RED criteria in
+`.loop/results.json`, which is machine-written and unmerged.
+
+*Step 3* said "if the checker reports `ALL GREEN`: stop", while the multi-item
+section says the checker judges only the current round's item and lists the rest
+as EXPECTED-RED. Read literally, round 1 of a five-item backlog ended the loop
+and printed a wrap-up diff. It now ticks the item and moves to the next, and
+finishes only when no `- [ ]` line remains. The round budget said four different
+things across the file; it is now stated once: **5 rounds is the total for the
+invocation, one item may take several, and the counter does not reset at item
+boundaries** (stop rules 3 and 5 still do).
+
+**The synchronous-dispatch mitigation named a parameter that does not exist.**
+The prompt told the orchestrator to set `run_in_background: false`; the Agent
+tool has no such input, so the instruction could not be carried out. It now
+describes the dispatch shape the orchestrator actually controls — one subagent
+per dispatch, awaited before anything else, no fan-out — states the cost when a
+harness backgrounds them anyway (two dispatches per round against a 3-block
+ceiling reaches it inside round 2, exiting with the gate still armed), and cites
+the one harness where it was measured to be synchronous (CLI 2.1.278, the 0.14.0
+smoke). Deliberately **not** fixed by teaching the stop-gate to skip blocks while
+a marker file exists: that marker would be prompt-writable, and a bypass the
+model can create is not a mechanism.
+
+Nine grep assertions in `tests/test-packaging.sh` now pin these decisions — they
+cannot prove a prompt works, only that these specific contradictions stay fixed.
+
 **Three ordinary ways of typing a write slipped past the evidence-gate's Bash
 pattern.** None is an evasion: `rm -rf .loop/evidence` (the trailing slash was
 *required*, so the plain directory name — how anyone writes an `rm` — matched
@@ -223,7 +267,7 @@ stranding a loop over bookkeeping would be the worse trade. `commands/autoloop.m
 Step 0 checks `git ls-files .loop` for the tracked case, and README's loop-state
 bullet now describes the guarantee instead of asserting the outcome.
 
-Suite 542 → 591 assertions. Three pre-existing install-timer fixtures that
+Suite 542 → 600 assertions. Three pre-existing install-timer fixtures that
 happened to stack both modes on one repo at `03:00` now pass `--time 04:00`;
 they were testing uninstall symmetry and unit contents, not collisions.
 

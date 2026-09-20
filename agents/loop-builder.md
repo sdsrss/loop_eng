@@ -54,7 +54,18 @@ Then report exactly:
 
 ```
 What changed: <one sentence>
+Root cause: <the cause you fixed this round, named — not the symptom>
 Files: <file1>, <file2>, ...
 Commit: <hash or "not committed because <reason>">
 Local check result: <pass/fail, with the command and its key output line>
 ```
+
+`Root cause` is load-bearing, not narration. You fix ONE root cause per round,
+so a criterion with two independent causes behind it stays red after you fixed
+the first one — which, judged by the failure alone, is indistinguishable from
+having fixed nothing. The orchestrator's "the builder is guessing" stop rule
+compares this line across rounds: naming a DIFFERENT cause each time is what
+tells it you are progressing. Name the same cause twice and it will stop the
+loop, which is the correct outcome — that is what guessing looks like. If you
+could not locate a cause, say `Root cause: not identified` rather than
+restating the failure.

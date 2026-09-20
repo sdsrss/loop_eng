@@ -48,10 +48,21 @@ ticked item going red IS a failure (regression) — report it.
   not proof; if a command has no numeric summary, quote its final status line
   and the exit code (`tsc --noEmit: exit 0, no output`).
 - Any failure → first line exactly `FAILED`, then one line per failure:
-  `file:line - what broke - which check caught it`
+  `[<criterion-id>] file:line - what broke - which check caught it`
   followed by the relevant raw output block for each failure.
   Merge multiple failures in the same file into one entry; mark failures that
   look like they share a root cause.
+
+`<criterion-id>` is the id column of the contract criterion whose verify command
+surfaced the failure — read it from `.loop/criteria.tsv`, or from the `"id"`
+fields in `.loop/results.json`. Use `-` when the failing check is not a contract
+criterion at all. It is not decoration: the orchestrator's stop rules compare
+failures across rounds, and `file:line` is not an identity — it moves with every
+edit above it, so the same defect looks like a new failure and two different
+defects at the same line look like one. Within a criterion, identify a failure by
+the first line of the failing assertion with absolute paths, line numbers,
+timestamps and hex addresses dropped, so a round that fixed one of two root
+causes behind the same criterion is not misread as no progress.
 
 ## Red lines
 

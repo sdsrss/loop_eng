@@ -56,4 +56,52 @@ while IFS= read -r hookcmd; do
   esac
 done < <(grep -o '"command": "[^"]*"' hooks/hooks.json | sed 's/"command": "//; s/"$//')
 
+# --- prompt invariants the mechanism layer cannot enforce -------------------
+# The stop rules, the round budget and the failure-identity contract live only
+# in Markdown, so nothing catches a re-edit that reintroduces a contradiction.
+# These are shallow grep assertions on purpose — they cannot prove the prompt
+# WORKS, only that the four specific contradictions the audit found stay fixed.
+# Same technique as the README-derived checks above: pin the text that carries
+# a decision, so changing the decision is a visible test failure rather than a
+# silent drift between two files that must agree.
+
+has() { # $1=file $2=fixed-string $3=label
+  if grep -qF -- "$2" "$1"; then PASS=$((PASS+1)); else
+    FAIL=$((FAIL+1)); echo "  FAIL: $3 — $1 no longer contains [$2]" >&2; fi
+}
+hasnt() { # $1=file $2=fixed-string $3=label
+  if grep -qF -- "$2" "$1"; then
+    FAIL=$((FAIL+1)); echo "  FAIL: $3 — $1 still contains [$2]" >&2
+  else PASS=$((PASS+1)); fi
+}
+
+# Stop rule 3 keys on the builder's named root cause, not on the failure. Keyed
+# on the failure it fired on a builder that WAS progressing: the builder fixes
+# one root cause per round by design, so a criterion with two causes behind it
+# repeats its failure after the first is fixed.
+has   commands/autoloop.md "Same root cause two rounds in a row" "stop rule 3 keys on the root cause"
+hasnt commands/autoloop.md "Same failure two rounds in a row"    "stop rule 3 no longer keys on the failure"
+has   agents/loop-builder.md "Root cause: <the cause you fixed this round" "the builder reports the root cause stop rule 3 compares"
+
+# Stop rule 5 counts RED criteria from the machine ledger. The checker merges
+# failures per file for readability, so its list length tracks how defects are
+# distributed across files, not how many there are.
+has commands/autoloop.md "number of RED criteria in \`.loop/results.json\`" "stop rule 5 counts from the ledger, not the checker's list"
+
+# A failure needs an identity that survives an edit. file:line does not: it
+# moves with every line inserted above it.
+has agents/loop-checker.md '[<criterion-id>] file:line' "checker failures carry the criterion id"
+
+# Step 3 must not read a per-item ALL GREEN as "the loop is done" — on a
+# multi-item backlog round 1 legitimately reports ALL GREEN for item 1.
+has   commands/autoloop.md "that verdict is about THIS" "step 3 scopes ALL GREEN to the current item"
+hasnt commands/autoloop.md "If the checker's report starts with \`ALL GREEN\`: stop." "step 3 no longer stops the loop on the first item's ALL GREEN"
+
+# The round budget is total, not per item.
+has   commands/autoloop.md "TOTAL budget for the invocation, not a per-item allowance" "round budget is stated as total"
+
+# The synchronous-dispatch instruction must not name a parameter the Agent tool
+# does not have — an instruction that cannot be carried out is not a mitigation.
+hasnt commands/autoloop.md "set \`run_in_background:false\`" "dispatch guidance does not name a nonexistent tool parameter"
+
 report "test-packaging"
