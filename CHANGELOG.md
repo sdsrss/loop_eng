@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The unattended section says how far to trust itself.** Closing the audit's
+  six `--allow-write` blockers moved that path from "not production-grade" to
+  usable, and every guard is now documented mechanism by mechanism — but the
+  README stated no posture at all, so the only readiness verdict a reader could
+  find was the one in the audit report, which is untracked and was written
+  against 0.14.0. The new paragraph says what backs the write path (a test
+  suite and a live-install smoke) and what does not (a record of long
+  unattended write runs), and keeps report-only as the mode to schedule first.
+  Deliberately no assertion count: the README cites none anywhere, and a
+  hard-coded one goes stale the next time a suite grows.
+
 ## 0.16.0 — 2026-09-20
 
 Closing out the 2026-09-20 production-readiness audit: 0.15.0 took every P0 and

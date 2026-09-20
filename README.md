@@ -295,6 +295,17 @@ the two registration sites cannot drift apart unnoticed.
 
 ## Unattended runs
 
+**How far to trust this.** Report-only is what this is built for and what to
+schedule first: nothing writes, and a run that fails says so with a
+distinguishable exit code rather than a silent zero. `--auto-fix` and
+`--allow-write` are **guarded, not field-proven.** Every guard below — the
+per-repo driver lock (69), the signal handling that takes the session down with
+the driver (143), the after-the-fact tree check (70), both arms of the circuit
+breaker — exists because it was once missing, and a test now fails without it.
+That is the evidence behind them: a test suite and a live-install smoke, not a
+record of long unattended write runs. Start report-only, read a week of logs,
+then grant writes on a repo you can revert.
+
 ```
 skills/loop-eng/scripts/unattended-polish.sh <repo> [scope] [--auto-fix]
 ```
