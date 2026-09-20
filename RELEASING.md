@@ -62,6 +62,15 @@ this family in these two steps. If you need to smoke an unpushed commit, push it
 to a branch and add `owner/repo` anyway, or accept that you are testing the
 source tree and say so in the CHANGELOG note.
 
+**Better: order the release so the question never comes up.** `marketplace add
+owner/repo` can only take the default branch, so land the version bump on `main`
+and wait for CI green BEFORE smoking, then tag afterwards. The smoke then runs on
+a genuine git source carrying the release's own content, and no source-type
+disclosure is owed. 0.13.0 had to disclose a local-path install because it smoked
+pre-push; 0.14.0 did it in this order and did not. The only thing between the
+smoked commit and the tag is then the commit recording the smoke itself, which
+§3's `diff -r` check settles.
+
 1. **Throwaway project**
    ```
    mkdir -p ~/tmp/loop-smoke && cd ~/tmp/loop-smoke
@@ -165,4 +174,17 @@ source tree and say so in the CHANGELOG note.
 
 - [ ] Re-run the live-install smoke against the RELEASED version if step 1 was
       run against a pre-release commit.
+- [ ] Prove the artifact users get IS the tag, in one command — install into a
+      second, fresh `CLAUDE_CONFIG_DIR`, then:
+      ```
+      git archive v0.14.0 --prefix=tagtree/ | tar -x -C /tmp
+      diff -r --exclude=.git /tmp/tagtree \
+        "$CFG/plugins/cache/loop-eng/loop-eng/0.14.0"
+      ```
+      Expect exactly one difference: `Only in …/0.14.0: .in_use`, a marker the
+      platform writes. Anything else means the install is not the tag. This is
+      cheaper than re-running all six steps and answers a different question
+      than they do — they test behavior, this tests identity, which is what
+      makes an abbreviated post-ship defensible when §1 already passed on the
+      same content.
 - [ ] Save a ship-runbook memory entry if anything deviated from this file.

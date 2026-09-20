@@ -88,6 +88,16 @@ inside the command markdown. That session's own closing summary asserted
 `.loop/active` was "still armed"; the disk said it was gone. The disk is the
 authority here, which is the point of the plugin.
 
+**Post-ship smoke** (RELEASING.md §3, against the RELEASED v0.14.0 in a second,
+fresh `CLAUDE_CONFIG_DIR` with no instrumentation): PASS. The installed cache tree
+is byte-for-byte identical to the `v0.14.0` tag — `diff -r` between
+`git archive v0.14.0` and `plugins/cache/loop-eng/loop-eng/0.14.0/` reports only
+the platform's own `.in_use` marker — so what a user installs is the tag, not a
+neighbouring commit. On that untouched copy: a model write to
+`.loop/evidence/postship.log` did not land, `arm-contract` armed from the new
+cache path, and a red contract produced `generated_by: run-contract.sh` /
+`all_green: false` with `.loop/evidence/red.log` written by the runner.
+
 **Pre-ship review** (independent reviewer, fresh context, over `dcf2745..9b9f62f`):
 every numeric claim above re-measured, including under a real 3.2.57; no blocking
 finding; six accepted repairs. Two were load-bearing. The new UNBOUNDED warning
