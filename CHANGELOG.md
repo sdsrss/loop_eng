@@ -18,8 +18,38 @@ discipline — the assertion that would have caught it first, then the fix.
   loop is over the single command goes through unchanged. Humans keep
   `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
 
+- **`install-timer.sh` now runs `claude --version` under the unit's own PATH
+  before writing anything.** Resolving the binary was never the same as proving
+  it runs: `command -v` searches the installing shell's PATH while the unit
+  hardcodes a minimal one, so an npm/nvm `#!/usr/bin/env node` shim resolved
+  cleanly and exited 127 at 03:00 with the error only in `cron.log`. A failed
+  probe refuses the install and prints the exact command to reproduce it.
+  `LOOP_ENG_TIMER_SKIP_PROBE=1` is the way past it for a binary whose
+  environment the probe cannot reproduce.
+- **`unattended-polish.sh --auto-fix` now exits 70 instead of 0 when its result
+  is not trustworthy.** `claude -p` exits 0 whether the session converged,
+  stopped on a regression, or ran out of turns mid-edit. The driver now
+  establishes the two facts it can for itself: the tree must be clean
+  afterwards, and an optional project command in the new `LOOP_ENG_POST_CHECK`
+  must pass. 70 is `EX_SOFTWARE`, distinct from the session's own status, which
+  is still passed through untouched. The tree is left exactly as the session
+  left it — reverting a half-applied fix would destroy the evidence on the one
+  run that needs looking at. Report-only is exempt.
+- **The autoloop driver's circuit breaker grew a second arm.** The existing one
+  is keyed to commits, which answers "did anything happen" and not "did the
+  backlog move": a session that commits real work and leaves its line unticked
+  reset the counter, so one item could consume the entire session cap with
+  every session logged as progress (reproduced at 8/8). It now also stops after
+  `LOOP_ENG_MAX_ITEM_SESSIONS` sessions (default 2) on the same item. Set it to
+  `0` for an item that legitimately spans sessions.
+
 ### Fixed
 
+- **`uninstall-timer.sh` now stops the `.service`, not only the `.timer`.**
+  systemd's `--now` applies to the unit it is given, so uninstalling at 03:05
+  removed the schedule and left that night's `bypassPermissions` session running
+  against the tree the operator had just unscheduled. The timer is still
+  disabled first, so nothing can trigger a fresh run in the gap.
 - **A double-registered Stop hook no longer costs two blocks per stop attempt.**
   Listing the loop-eng hooks in a project's `.claude/settings.json` while the
   plugin is also installed fires the gate twice, serially, and each invocation

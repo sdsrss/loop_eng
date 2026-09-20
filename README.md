@@ -293,6 +293,17 @@ skills/loop-eng/scripts/unattended-polish.sh <repo> [scope] [--auto-fix]
   terminate the `claude` session and exit **143** (128+SIGTERM), so a
   `systemctl stop`, a cron `kill`, or a Ctrl-C cannot leave an unattended write
   session running with nobody watching it.
+- **`--auto-fix` is checked after the fact, not taken on trust.** `claude -p`
+  exits 0 whether the session converged, stopped on a regression, or ran out of
+  turns halfway through applying a fix, so the driver establishes the two facts
+  it can: the tree must be **clean** afterwards (a session that left
+  uncommitted edits did not finish, and its leftovers make every later run
+  refuse the tree), and an optional project command named in
+  `LOOP_ENG_POST_CHECK` must pass. Either failing exits **70**
+  (`EX_SOFTWARE`) — the run happened, its result is not one the driver will
+  vouch for — and the tree is left exactly as the session left it, because
+  reverting a half-applied fix would destroy the evidence. Report-only runs are
+  exempt: they change nothing.
 
 Cross-session building (fresh context per backlog item — compaction is not
 a recovery strategy):
@@ -304,7 +315,14 @@ skills/loop-eng/scripts/unattended-autoloop.sh <repo> [max-sessions]
 - Requires `LOOP_ENG_ALLOW_AUTOBUILD=1`; refuses dirty trees and non-git targets.
 - One fresh `claude -p` session per `.loop/backlog.md` item; each session
   starts from `.loop/state.md` + `git log` handoff.
-- Circuit breaker: 2 consecutive sessions with no new commits → stop.
+- Circuit breaker, two arms. **No new commits** in 2 consecutive sessions →
+  stop. **The same backlog item** for `LOOP_ENG_MAX_ITEM_SESSIONS` sessions
+  (default 2) without its box being ticked → stop. The second arm exists
+  because the first answers "did anything happen", not "did the backlog move":
+  a session that commits real work and leaves its line unticked resets the
+  commit counter, so without it one item could consume the whole session cap
+  while every session logged as progress. Set it to `0` for an item that
+  legitimately spans sessions.
   Session cap (default 8), wall-clock budget (`LOOP_ENG_MAX_MINUTES`,
   default 240), one usage-limit wait then exit 75.
 
@@ -363,8 +381,11 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 | `LOOP_ENG_GATE_TIMEOUT` | `hooks/stop-gate.sh` | `100` (seconds) | Internal budget for re-running the contract on each stop attempt, kept below the hook's own timeout in `hooks.json` (120s) so the gate fails closed by design instead of being killed by the platform. |
 | `LOOP_ENG_LIMIT_WAIT_MIN` | `unattended-autoloop.sh` | `60` (minutes) | Wait once and retry after a session log indicates a provider usage/rate limit; a second hit stops the driver (exit 75). |
 | `LOOP_ENG_LOOP_DIR` | `arm-contract.sh`, `run-contract.sh` | `.loop` | **TEST-ONLY.** The stop-gate and evidence-gate hooks are fixed to `.loop/`; pointing a production loop at a custom dir with this var silently removes it from both hooks' protection. |
+| `LOOP_ENG_MAX_ITEM_SESSIONS` | `unattended-autoloop.sh` | `2` | Second arm of the circuit breaker: stop after this many sessions on the same `.loop/backlog.md` item without its box being ticked. Catches the "commits every session, never finishes the item" shape the commit-keyed arm reads as progress. `0` disables this arm. |
+| `LOOP_ENG_POST_CHECK` | `unattended-polish.sh` | unset | A shell command run after an `--auto-fix` session (never in report-only). Non-zero makes the driver exit `70` — the driver cannot know a project's test command, so the operator names one. |
 | `LOOP_ENG_MAX_MINUTES` | `unattended-polish.sh`, `unattended-autoloop.sh` | `120` (polish) / `240` (autoloop) | Wall-clock budget for the unattended run, enforced via `timeout` or `gtimeout` (both drivers probe in that order; with neither on `PATH` the run is uncapped and says so). `0` is a config error (would disable the timeout) and falls back to the script's default. |
 | `LOOP_ENG_TIMER_NO_SYSTEMCTL` | `install-timer.sh`, `uninstall-timer.sh` | unset (`0`) | Set to `1` to write the systemd unit files without calling `systemctl` — used by the test suite, also useful on a box with no user D-Bus. |
+| `LOOP_ENG_TIMER_SKIP_PROBE` | `install-timer.sh` | unset (`0`) | Set to `1` to skip the install-time probe that runs `claude --version` under the unit's own minimal `PATH`. The probe catches an npm/nvm `#!/usr/bin/env node` shim that resolves in your shell and exits 127 at first trigger; skip it if your binary needs environment the probe cannot reproduce. |
 
 ## Safety model
 

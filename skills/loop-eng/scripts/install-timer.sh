@@ -88,6 +88,33 @@ CLAUDE_IN="${LOOP_ENG_CLAUDE_BIN:-claude}"
 CLAUDE_ABS="$(command -v "$CLAUDE_IN")" \
   || die "claude CLI not found (looked for: $CLAUDE_IN). Install it, or set LOOP_ENG_CLAUDE_BIN to the binary the scheduled run should use."
 
+# The unit's PATH, declared once and used twice: written into the unit below,
+# and used right now to prove the binary can actually RUN under it.
+UNIT_PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Resolving the binary is not the same as proving it runs. `command -v` searches
+# the INSTALLING shell's PATH; the unit hardcodes the minimal one above. A
+# claude installed by npm or nvm is an `#!/usr/bin/env node` shim, so it
+# resolves here and exits 127 at 03:00 with the error only in cron.log — the
+# same "enables cleanly, breaks at first trigger" family as the whitespace and
+# percent guards above, and the reason those all fail at install time instead.
+#
+# `env -i` plus the variables a `systemd --user` service reliably gets. Not a
+# bare `env -i`: that is stricter than reality, and a probe that refuses
+# installs systemd would have run is worse than no probe. A binary whose
+# environment this still cannot reproduce is what LOOP_ENG_TIMER_SKIP_PROBE is
+# for — the probe is a guard, not a gate the operator cannot open.
+if [ "${LOOP_ENG_TIMER_SKIP_PROBE:-0}" != 1 ]; then
+  if ! env -i HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
+         LANG="${LANG:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
+         PATH="$UNIT_PATH" "$CLAUDE_ABS" --version >/dev/null 2>&1; then
+    die "the claude CLI at $CLAUDE_ABS does not run under the unit's PATH, so the scheduled run would fail at its first trigger with the error only in $REPO/.loop/cron.log.
+Reproduce it with:
+  env -i HOME=\"\$HOME\" PATH=\"$UNIT_PATH\" $CLAUDE_ABS --version
+This is what an npm/nvm \`#!/usr/bin/env node\` shim looks like: it resolves in your shell and finds no interpreter in the unit's minimal PATH. Fix it by pointing LOOP_ENG_CLAUDE_BIN at a wrapper that sets up the interpreter, or by putting the interpreter somewhere on that PATH. If the probe is wrong about your setup, re-run with LOOP_ENG_TIMER_SKIP_PROBE=1."
+  fi
+fi
+
 # systemd ExecStart is whitespace-delimited and both paths below are injected
 # unquoted; a space in the repo OR the plugin path yields a unit that passes
 # `systemctl enable` but fails at first trigger (error only in the journal).
@@ -200,7 +227,7 @@ TMR="$UNIT_DIR/$UNIT.timer"
   echo
   echo "[Service]"
   echo "Type=oneshot"
-  echo "Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+  echo "Environment=PATH=$UNIT_PATH"
   echo "Environment=LOOP_ENG_CLAUDE_BIN=$CLAUDE_ABS"
   [ -n "$ENV_LINES" ] && echo "$ENV_LINES"
   echo "ExecStart=$RUNNER $EXEC_ARGS"

@@ -290,6 +290,48 @@ if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 124 ] \
   exit 75
 fi
 
+# Post-run truth check — write mode only.
+#
+# `claude -p` exits 0 whether the session converged, stopped on a regression it
+# could not fix, or ran out of --max-turns halfway through applying one. The
+# driver passed that 0 straight through, so an operator watching exit codes
+# could not tell a completed nightly fix run from one that abandoned the tree
+# mid-edit — and the abandoned one poisons every later run, which refuses a
+# dirty tree by design. Nothing here inspects what the session *decided*; these
+# are the two facts the driver can establish for itself.
+#
+# 70 = EX_SOFTWARE, joining the sysexits vocabulary the drivers already speak
+# (64 usage, 69 busy, 75 provider limit, 78 config). It says the run finished
+# but its result is not one this driver will vouch for — distinct from the
+# session's own non-zero status, which is passed through untouched below.
+#
+# The tree is deliberately LEFT as the session left it. Reverting a half-applied
+# fix behind the operator's back would destroy the only evidence of what
+# happened, on the one run that most needs looking at.
+#
+# report-only is exempt: it changes nothing, so there is nothing to vet, and its
+# exit code is the session's by design.
+if [ -z "$MODE" ]; then
+  if git status --porcelain | grep -vq '^?? \.loop/'; then
+    echo "$STAMP mode=auto-fix scope=$SCOPE exit=$STATUS UNTRUSTWORTHY: the session ended with uncommitted changes in the tree — it did not finish applying its fixes (--max-turns exhausted mid-edit is the usual cause). The tree is left as it was found; review \`git status\` and either commit or revert. log=$LOG" \
+      | tee -a "$LOG_DIR/unattended.log" >&2
+    tail -40 "$LOG"
+    exit 70
+  fi
+  # The driver cannot know a project's test command, so the operator names one.
+  # Unset (the default) means no project check ran — which is honest, not green.
+  if [ -n "${LOOP_ENG_POST_CHECK:-}" ]; then
+    POST_STATUS=0
+    bash -c "$LOOP_ENG_POST_CHECK" >> "$LOG" 2>&1 </dev/null || POST_STATUS=$?
+    if [ "$POST_STATUS" -ne 0 ]; then
+      echo "$STAMP mode=auto-fix scope=$SCOPE exit=$STATUS UNTRUSTWORTHY: the post-check exited $POST_STATUS (LOOP_ENG_POST_CHECK=$LOOP_ENG_POST_CHECK) — the session committed, and the project is red after it. log=$LOG" \
+        | tee -a "$LOG_DIR/unattended.log" >&2
+      tail -40 "$LOG"
+      exit 70
+    fi
+  fi
+fi
+
 echo "$STAMP mode=${MODE:-auto-fix} scope=$SCOPE exit=$STATUS log=$LOG" >> "$LOG_DIR/unattended.log"
 tail -40 "$LOG"
 exit "$STATUS"

@@ -43,6 +43,13 @@ fi
 if [ "${LOOP_ENG_TIMER_NO_SYSTEMCTL:-0}" != 1 ] && command -v systemctl >/dev/null 2>&1; then
   # disable --now may warn if already inactive/absent; that's fine, keep going.
   systemctl --user disable --now "$UNIT.timer" 2>/dev/null || true
+  # ...and then the SERVICE, by name. `--now` applies to the unit it is given,
+  # so disabling the timer stops the timer and leaves a oneshot .service that is
+  # already running exactly where it was: uninstalling at 03:05 removed the
+  # schedule and left that night's bypassPermissions session working on the tree
+  # the operator had just unscheduled. Timer first, deliberately — unschedule
+  # before stopping, so nothing can trigger a fresh run in the gap.
+  systemctl --user stop "$UNIT.service" 2>/dev/null || true
 fi
 
 rm -f "$TMR" "$SVC"

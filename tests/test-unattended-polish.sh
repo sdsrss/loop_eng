@@ -57,6 +57,12 @@ case "${STUB_MODE:-ok}" in
   ok)    echo "polish report: 0 findings"; exit 0 ;;
   fail)  echo "boom"; exit 3 ;;
   limit) echo "${STUB_LIMIT_MSG:-Claude AI usage limit reached}"; exit 1 ;;
+  # An auto-fix session that edits the tree and never commits — what
+  # --max-turns exhaustion mid-fix leaves behind. `claude -p` still exits 0,
+  # which is the whole problem: the driver reported success for a run whose
+  # changes are unattributable and which will make every later run refuse the
+  # tree as dirty.
+  dirty) echo "applied a fix"; echo "half-applied" > leftover-fix.txt; exit 0 ;;
 esac
 EOF
 chmod +x "$STUB"
@@ -431,5 +437,51 @@ assert_file_contains "$TD/err-none" "UNBOUNDED" "a dropped wall-clock budget is 
 # is written for, leaving a plain `exit=0` behind for an uncapped run.
 assert_file_contains "$SB/.loop/unattended.log" "UNBOUNDED" "the warning survives a cron line that discards stderr"
 assert_eq 0 "$(wc -c < "$TD/record" | tr -d ' ')" "nothing wrapped the session when neither binary exists"
+
+# --- P2-8: --auto-fix had no post-run truth check ---
+# Whatever the session did — converged, stopped on a regression, or ran out of
+# --max-turns halfway through applying a fix — the driver's exit was `claude
+# -p`'s, which is 0 in all three cases. An operator watching exit codes could
+# not tell a completed nightly fix run from one that abandoned the tree
+# mid-edit, and the abandoned one poisons every later run (dirty tree, refusing).
+SBF=$(mk_sandbox_repo)
+mkdir -p "$SBF/src"; printf '#!/usr/bin/env bash\ntrue\n' > "$SBF/src/a.sh"
+(cd "$SBF" && git add -A >/dev/null && git commit -qm "src")
+STUB_MODE=dirty LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SBF" src/ --auto-fix >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 70 "$rc" "an auto-fix run that leaves the tree dirty exits 70, not 0"
+assert_file_contains "$SBF/.loop/unattended.log" "uncommitted changes" "the log says what the exit code means"
+# The tree is deliberately left as the session left it — deleting a half-applied
+# fix behind the operator's back would destroy the only evidence of what
+# happened. Clean it here so the assertions below start from a committed tree.
+(cd "$SBF" && git checkout -- . >/dev/null 2>&1; git clean -qfd >/dev/null 2>&1)
+
+# A clean auto-fix run is still a plain exit 0 — the check must not turn every
+# write-mode run red.
+STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SBF" src/ --auto-fix >/dev/null 2>&1
+assert_eq 0 $? "an auto-fix run that leaves the tree clean still exits 0"
+
+# report-only never gets the check: it is not supposed to write, and the exit
+# code it passes through is `claude -p`'s by design.
+STUB_MODE=dirty LOOP_ENG_CLAUDE_BIN="$STUB" bash "$SCRIPT" "$SBF" src/ >/dev/null 2>&1
+assert_eq 0 $? "report-only passes the session's own exit through, unchecked"
+(cd "$SBF" && git checkout -- . >/dev/null 2>&1; git clean -qfd >/dev/null 2>&1)
+
+# LOOP_ENG_POST_CHECK is the other half: the driver cannot know a project's test
+# command, so the operator names one and a red one makes the run red.
+STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  LOOP_ENG_POST_CHECK='exit 4' bash "$SCRIPT" "$SBF" src/ --auto-fix >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 70 "$rc" "a failing LOOP_ENG_POST_CHECK turns a clean-looking auto-fix run red"
+assert_file_contains "$SBF/.loop/unattended.log" "post-check" "the log names the post-check as the cause"
+STUB_MODE=ok LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  LOOP_ENG_POST_CHECK='true' bash "$SCRIPT" "$SBF" src/ --auto-fix >/dev/null 2>&1
+assert_eq 0 $? "a passing LOOP_ENG_POST_CHECK leaves the run green"
+# ...and it is auto-fix-scoped too: a report-only run changes nothing, so there
+# is nothing for a project check to vet.
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" LOOP_ENG_POST_CHECK='exit 4' \
+  bash "$SCRIPT" "$SBF" src/ >/dev/null 2>&1
+assert_eq 0 $? "LOOP_ENG_POST_CHECK does not run in report-only mode"
+rm -rf "$SBF"
 
 report "test-unattended-polish"

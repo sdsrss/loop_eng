@@ -81,6 +81,11 @@ _num_or_default() { # $1=name $2=value $3=default -> echoes a base-10 integer
 MAX_SESSIONS=$(_num_or_default max-sessions "$MAX_SESSIONS" 8)
 MAX_MINUTES=$(_num_or_default LOOP_ENG_MAX_MINUTES "$MAX_MINUTES" 240)
 LIMIT_WAIT_MIN=$(_num_or_default LOOP_ENG_LIMIT_WAIT_MIN "$LIMIT_WAIT_MIN" 60)
+# Second arm of the circuit breaker — see the same-item note at the loop head.
+# 0 disables it, which is a LEGITIMATE lowest value here (unlike the budget
+# knobs above, where 0 silently removes a guard): an item that genuinely needs
+# more than one session is a real shape, and this is its off switch.
+MAX_ITEM_SESSIONS=$(_num_or_default LOOP_ENG_MAX_ITEM_SESSIONS "${LOOP_ENG_MAX_ITEM_SESSIONS:-2}" 2)
 # 0 is a valid digit string but means "no budget at all": DEADLINE=now, and —
 # worse — a 0-second per-session `timeout` DISABLES the timeout entirely (GNU
 # semantics), the exact opposite of what a budget knob should do on its lowest
@@ -174,6 +179,8 @@ DEADLINE=$(( $(date +%s) + MAX_MINUTES * 60 ))
 no_progress=0
 limit_hits=0
 session=0
+last_item=""
+same_item=0
 
 note() { echo "$(date +%Y%m%d-%H%M%S) autoloop-driver $*" | tee -a "$LOG_MAIN" >&2; }
 
@@ -264,12 +271,39 @@ while :; do
     note "wall-clock budget (${MAX_MINUTES}m) exhausted, $remaining item(s) left"; break; fi
   if [ "$no_progress" -ge 2 ]; then
     note "circuit breaker OPEN: 2 consecutive sessions with no new commits"; break; fi
+
+  item=$(grep -m1 '^- \[ \]' "$BACKLOG" | sed 's/^- \[ \] //')
+
+  # Second arm of the circuit breaker: the same item, session after session.
+  #
+  # The commit-keyed arm above answers "did anything happen", which is the right
+  # question and the wrong one for "did the backlog move". A session that does
+  # real work, commits it, and leaves its line unticked resets no_progress to 0
+  # — so the next session is handed the SAME item, commits again, resets again,
+  # and the driver spends its entire cap on one backlog entry. Reproduced at 8
+  # sessions on one item, every one of them logged as progress.
+  #
+  # Two sessions is the threshold for the same reason the commit arm uses two:
+  # each session is itself a whole /autoloop run (up to 5 rounds, 150 turns), so
+  # a second one that still cannot tick the box is not "nearly there". The
+  # counter resets the moment the item changes, so the healthy path — one item
+  # per session, ticked, next — never approaches it.
+  if [ "$item" = "$last_item" ]; then
+    same_item=$((same_item + 1))
+  else
+    same_item=1
+    last_item="$item"
+  fi
+  if [ "$MAX_ITEM_SESSIONS" -gt 0 ] && [ "$same_item" -gt "$MAX_ITEM_SESSIONS" ]; then
+    note "circuit breaker OPEN: $MAX_ITEM_SESSIONS sessions on the same backlog item without it being checked off — \"$item\". Commits were made, so the commit-keyed arm saw progress; the backlog did not move. Split the item, or raise LOOP_ENG_MAX_ITEM_SESSIONS if it legitimately spans sessions."
+    break
+  fi
+
   if git status --porcelain | grep -vq '^?? \.loop/'; then
     note "dirty tree, refusing to continue"; exit 1; fi
 
   session=$((session + 1))
   head_before=$(git rev-parse HEAD)
-  item=$(grep -m1 '^- \[ \]' "$BACKLOG" | sed 's/^- \[ \] //')
   STAMP=$(date +%Y%m%d-%H%M%S)
   SLOG=".loop/unattended-session-$STAMP.log"
   note "session $session/$MAX_SESSIONS starting: $item"

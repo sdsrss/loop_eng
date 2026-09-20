@@ -250,4 +250,67 @@ run_install autoloop "$SB2" >/dev/null && rc=0 || rc=$?
 assert_eq 0 "$rc" "re-installing the same mode on the same repo is an overwrite, not a collision"
 run_uninstall autoloop >/dev/null; run_uninstall polish >/dev/null
 
+# --- P2-7: resolving the claude binary is not the same as proving it RUNS ---
+# The unit hardcodes a minimal PATH, and the installer only checked that
+# `command -v claude` found something. A claude installed by npm or nvm is an
+# `#!/usr/bin/env node` shim: it resolves fine in the installing shell and exits
+# 127 at 03:00, with the error only in cron.log — the exact "installed but
+# silently never runs" trap every other guard in this script exists to kill.
+# The stub below reproduces that shape faithfully: it needs a helper that lives
+# on the AMBIENT path and not on the unit's.
+NODEISH="$XDG/nodeish"; mkdir -p "$NODEISH"
+printf '#!/bin/sh\nexit 0\n' > "$NODEISH/nodeish" && chmod +x "$NODEISH/nodeish"
+SHIM_CLAUDE="$XDG/shim-claude"
+printf '#!/bin/sh\ncommand -v nodeish >/dev/null 2>&1 || { echo "env: node: No such file or directory" >&2; exit 127; }\nexit 0\n' \
+  > "$SHIM_CLAUDE" && chmod +x "$SHIM_CLAUDE"
+err=$(PATH="$NODEISH:$PATH" XDG_CONFIG_HOME="$XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 \
+  LOOP_ENG_CLAUDE_BIN="$SHIM_CLAUDE" bash "$INSTALL" polish "$SB" 2>&1 >/dev/null) && rc=0 || rc=$?
+assert_eq 1 "$rc" "install refuses a claude that resolves but cannot RUN under the unit's PATH"
+case "$err" in
+  *"unit's PATH"*|*"unit PATH"*) PASS=$((PASS+1)) ;;
+  *) FAIL=$((FAIL+1)); echo "  FAIL: the probe refusal does not name the unit PATH as the cause: $err" >&2 ;;
+esac
+assert_eq no "$(exists "$UNIT_DIR/loop-eng-polish.service")" "the refused install writes no unit files"
+
+# The escape hatch: a claude whose environment the probe cannot reproduce must
+# not be un-installable.
+PATH="$NODEISH:$PATH" XDG_CONFIG_HOME="$XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 \
+  LOOP_ENG_TIMER_SKIP_PROBE=1 LOOP_ENG_CLAUDE_BIN="$SHIM_CLAUDE" \
+  bash "$INSTALL" polish "$SB" >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 0 "$rc" "LOOP_ENG_TIMER_SKIP_PROBE=1 installs anyway"
+run_uninstall polish >/dev/null
+
+# --- P3-3: `disable --now <unit>.timer` does not stop a RUNNING oneshot service ---
+# systemd's --now applies to the unit named. Uninstalling at 03:05, while that
+# night's run is still going, removed the schedule and left a bypassPermissions
+# session running against the tree the operator just unscheduled. The service
+# has to be stopped by name. Asserted through a systemctl stub that records its
+# argv — the suite must never touch real systemd.
+FAKEBIN="$XDG/fakebin"; mkdir -p "$FAKEBIN"
+SYSTEMCTL_LOG="$XDG/systemctl.log"
+cat > "$FAKEBIN/systemctl" <<'EOS'
+#!/bin/sh
+printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
+exit 0
+EOS
+chmod +x "$FAKEBIN/systemctl"
+: > "$SYSTEMCTL_LOG"
+XDG_CONFIG_HOME="$XDG" PATH="$FAKEBIN:$PATH" SYSTEMCTL_LOG="$SYSTEMCTL_LOG" \
+  LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" bash "$INSTALL" polish "$SB" >/dev/null 2>&1
+: > "$SYSTEMCTL_LOG"
+XDG_CONFIG_HOME="$XDG" PATH="$FAKEBIN:$PATH" SYSTEMCTL_LOG="$SYSTEMCTL_LOG" \
+  bash "$UNINSTALL" polish >/dev/null 2>&1
+assert_file_contains "$SYSTEMCTL_LOG" "--user disable --now loop-eng-polish.timer" "uninstall still disables the timer"
+assert_file_contains "$SYSTEMCTL_LOG" "--user stop loop-eng-polish.service" "uninstall also stops the service that may be mid-run"
+# Order is load-bearing: unschedule first, so the timer cannot start a new run
+# in the gap between stopping the service and deleting the unit files.
+dis_ln=$(grep -n -- '--user disable --now loop-eng-polish.timer' "$SYSTEMCTL_LOG" | head -1 | cut -d: -f1)
+stop_ln=$(grep -n -- '--user stop loop-eng-polish.service' "$SYSTEMCTL_LOG" | head -1 | cut -d: -f1)
+if [ -n "$dis_ln" ] && [ -n "$stop_ln" ] && [ "$dis_ln" -lt "$stop_ln" ]; then
+  PASS=$((PASS+1))
+else
+  FAIL=$((FAIL+1))
+  echo "  FAIL: the timer must be disabled (line ${dis_ln:-none}) before the service is stopped (line ${stop_ln:-none})" >&2
+fi
+
 report "test-install-timer"

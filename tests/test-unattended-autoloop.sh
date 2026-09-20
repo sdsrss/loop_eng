@@ -70,6 +70,17 @@ case "${STUB_MODE:-progress}" in
   stall)
     echo "no progress made"
     ;;
+  commit-no-tick)
+    # The shape the commit-keyed breaker cannot see: real work, a real commit,
+    # and the backlog line left unticked. HEAD moves, so no_progress resets to
+    # 0 every session and the SAME item is handed to the next one — for as many
+    # sessions as the cap allows. $$-unique for the same BSD-date reason as the
+    # progress mode above.
+    echo "worked on it" > "wip-$$.txt"
+    git add -A >/dev/null
+    git commit -qm "stub: committed work, box left unticked"
+    echo "still working on it"
+    ;;
   nuke-backlog)
     # simulates a session that deletes the backlog mid-run: the driver must
     # treat "backlog gone" as 0 pending and stop, not keep launching sessions
@@ -497,5 +508,47 @@ STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
   bash "$DRIVER" "$NOGIT_AL" 2 >/dev/null 2>"$SD/nogit-al-err" && rc=0 || rc=$?
 assert_eq 1 "$rc" "non-git target refused with the driver's own exit 1, not git's 128"
 assert_file_contains "$SD/nogit-al-err" "not a git repository" "refusal says the target is not a git repository"
+
+# --- P2-5: a session that COMMITS but never ticks its box must still stop the
+#     driver. ---
+# The circuit breaker is keyed to commits, which is the right signal for "did
+# anything happen" and the wrong one for "did the backlog move". A session that
+# does real work, commits it, and leaves the line unticked resets no_progress to
+# 0 — so the next session gets the SAME item, commits again, resets again, and
+# the driver spends its entire cap on one backlog entry. Reproduced pre-fix at 8
+# sessions on "only item" with `grep -c 'starting: only item'`.
+SBW=$(mk_sandbox_repo)
+mkdir -p "$SBW/.loop"
+printf -- '- [ ] item A\n- [ ] item B\n' > "$SBW/.loop/backlog.md"
+STUB_MODE=commit-no-tick LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SBW" 8 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "commits without a tick end in a give-up exit 1"
+assert_eq 2 "$(grep -c 'session .* starting' "$SBW/.loop/unattended.log")" "the same item gets 2 sessions, not the whole 8-session cap"
+assert_file_contains "$SBW/.loop/unattended.log" "same backlog item" "the stop reason names what actually stalled"
+assert_file_contains "$SBW/.loop/unattended.log" "item A" "the stop reason quotes the item"
+rm -rf "$SBW"
+
+# An item that legitimately needs more than one session is the reason the arm
+# has an off switch; 0 restores the pre-fix behavior exactly.
+SBW0=$(mk_sandbox_repo)
+mkdir -p "$SBW0/.loop"
+printf -- '- [ ] only item\n' > "$SBW0/.loop/backlog.md"
+STUB_MODE=commit-no-tick LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  LOOP_ENG_MAX_ITEM_SESSIONS=0 bash "$DRIVER" "$SBW0" 3 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "MAX_ITEM_SESSIONS=0 still gives up with the item pending"
+assert_eq 3 "$(grep -c 'session .* starting' "$SBW0/.loop/unattended.log")" "MAX_ITEM_SESSIONS=0 disables the same-item arm (runs to the cap)"
+rm -rf "$SBW0"
+
+# Ticking the box resets the counter — the healthy path must not trip the arm.
+# Three items, three sessions, default MAX_ITEM_SESSIONS=2: with a counter that
+# never reset, session 3 would be "the third on the same item" and break early.
+SBW3=$(mk_sandbox_repo)
+mkdir -p "$SBW3/.loop"
+printf -- '- [ ] one\n- [ ] two\n- [ ] three\n' > "$SBW3/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SBW3" 5 >/dev/null 2>&1
+assert_eq 0 $? "three different items in a row do not trip the same-item arm"
+assert_eq 0 "$(grep -c '^- \[ \]' "$SBW3/.loop/backlog.md")" "all three items consumed"
+rm -rf "$SBW3"
 
 report "test-unattended-autoloop"
