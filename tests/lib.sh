@@ -48,5 +48,16 @@ assert_file_contains() { # file needle label
 
 report() { # test-name
   echo "$1: $PASS passed, $FAIL failed"
+  # A suite that ran ZERO assertions is not green — it is unrun. Two suites bail
+  # out early when the host has no JSON parser (test-manifest needs python3,
+  # test-hooks-json needs jq or python3), and on such a host each printed
+  # "0 passed, 0 failed", exited 0, and run-all.sh printed ALL GREEN for a run
+  # in which nothing about the manifests or hooks.json was checked. That is this
+  # plugin's own failure mode one level up: a green report nobody earned. The
+  # counts are still printed first, so the reason is visible either way.
+  if [ "$PASS" -eq 0 ] && [ "$FAIL" -eq 0 ]; then
+    echo "  FAIL: $1 ran no assertions at all — a suite that checked nothing is not green" >&2
+    return 1
+  fi
   [ "$FAIL" -eq 0 ]
 }

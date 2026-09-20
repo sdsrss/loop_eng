@@ -44,10 +44,32 @@ assert_file_contains .loop/err4 'ceiling' "ceiling message on stderr"
 assert_file_contains .loop/err4 'rm .loop/active' "ceiling message gives the manual disarm command (audit M5)"
 
 # --- green criteria: allows and lifts the gate ---
-rm -f .loop/gate-count; touch .loop/active
+# The green path removes THREE files and only the first had a guard: dropping
+# "$SHA_LOCK" and "$COUNT_FILE" from that one `rm` left this suite at 33 passed
+# / 0 failed. Both leftovers are load-bearing. A stale criteria.sha256 locks a
+# contract that no longer exists, so the NEXT loop's arm writes a criteria.tsv
+# the old hash does not match and every stop after it exits 77 "tampered"; a
+# stale gate-count starts that loop partway to the 3-block ceiling.
+#
+# Both files must therefore EXIST before the green run. The first attempt at
+# these assertions asserted absence over files the setup had already deleted
+# (`rm -f .loop/gate-count`) or never armed — they passed against the mutation
+# they were written to catch.
 printf '1\tgreen\ttrue\n' > .loop/criteria.tsv
+echo 2 > .loop/gate-count
+touch .loop/active
+GREEN_SHA=$(sha_of .loop/criteria.tsv)
+if [ -n "$GREEN_SHA" ]; then
+  printf '%s\n' "$GREEN_SHA" > .loop/criteria.sha256
+else
+  echo "  SKIP: no SHA-256 tool — the hash-lock half of the green path is not exercised" >&2
+fi
 run_gate /dev/null; assert_eq 0 $? "green criteria allows"
 [ ! -f .loop/active ]; assert_eq 0 $? "gate lifted (.loop/active removed)"
+[ ! -f .loop/gate-count ]; assert_eq 0 $? "green path clears the block counter (next loop starts at 0, not at 2/3)"
+if [ -n "$GREEN_SHA" ]; then
+  [ ! -f .loop/criteria.sha256 ]; assert_eq 0 $? "green path clears the hash-lock (next loop's arm is not 'tampered')"
+fi
 
 # --- timeout: a contract slower than the budget fails CLOSED (blocks) ---
 if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then

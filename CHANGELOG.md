@@ -23,6 +23,30 @@ the two mutations above now fail 1 and 2 assertions respectively.
 No runtime script changed here — this is the gate that was missing, not a
 behavior fix.
 
+**A suite that ran no assertions is no longer reported green.**
+`tests/test-manifest.sh` needs `python3` and `tests/test-hooks-json.sh` needs
+`jq` or `python3`; on a host with neither, each printed `0 passed, 0 failed`,
+exited 0, and `run-all.sh` printed ALL GREEN for a run that checked nothing
+about the two manifests or about `hooks.json`. Reproduced with a PATH holding
+neither parser. `lib.sh`'s `report()` now fails when `PASS` and `FAIL` are both
+zero, and the new `tests/test-harness.sh` pins that contract — including that an
+all-red suite (`PASS=0`, `FAIL>0`) still fails for the ordinary reason — plus
+the consequence itself: both parser-dependent suites are run under that
+restricted PATH and asserted to exit non-zero. **Upgrade note for contributors:**
+on a box without `python3`/`jq` those two suites now go red instead of quietly
+passing. Install either one; CI already has both on all three legs.
+
+**The stop-gate's green path clears three files, and only one was watched.**
+Removing `"$SHA_LOCK"` and `"$COUNT_FILE"` from `hooks/stop-gate.sh`'s green
+`rm` kept `tests/test-stop-gate.sh` at 33 passed / 0 failed. Both leftovers bite
+the *next* loop: a stale `criteria.sha256` locks a contract that no longer
+exists, so the next arm's `criteria.tsv` fails the hash check and every stop
+after it exits 77 "tampered"; a stale `gate-count` starts that loop partway to
+the 3-block ceiling. The green-path test now arms both files first — the first
+draft asserted their absence over files the setup had already deleted, so it
+passed against the very mutation it was written to catch — and asserts all three
+are gone. Suite 490 → 504 assertions across 13 suites.
+
 ## 0.14.0 — 2026-09-20
 
 Two gaps this repo had already written down and left open: a wall-clock budget

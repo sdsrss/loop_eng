@@ -65,7 +65,9 @@ EOF
 }
 
 if [ "$(json_get '.hooks')" = "SKIP" ]; then
-  echo "  SKIP: neither jq nor python3 available — cannot validate hooks.json" >&2
+  # Not a benign skip: with no parser nothing here reads hooks.json at all, and
+  # report() now refuses to call that green. Install jq or python3 to run it.
+  echo "  neither jq nor python3 available — hooks.json cannot be parsed, so nothing here was checked" >&2
   report "test-hooks-json"
   exit $?
 fi

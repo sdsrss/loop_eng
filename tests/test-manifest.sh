@@ -17,7 +17,10 @@ set -u
 cd "$PLUGIN_ROOT"
 
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "test-manifest: python3 not available, skipping (JSON path parsing needs it)" >&2
+  # Not a benign skip: with no parser this suite checks nothing about the two
+  # manifests, and report() now refuses to call that green. Install python3 to
+  # run it — a host that cannot read the manifests cannot vouch for them.
+  echo "test-manifest: python3 not available — the manifests cannot be parsed, so nothing here was checked" >&2
   report "test-manifest"
   exit $?
 fi
