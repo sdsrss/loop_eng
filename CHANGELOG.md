@@ -37,6 +37,34 @@ Revert path: pin `0.14.0` in your marketplace entry. Every new behavior above is
 in the drivers, the installer or the test harness — no `.loop/` on-disk format
 changed, so moving between the two versions needs no migration.
 
+**Live-install smoke: PASS** (Claude Code 2.1.278, headless, throwaway
+`CLAUDE_CONFIG_DIR`, GitHub-source marketplace install of this release's own
+content on `main` — so no source-type disclosure is owed). Each step asserted on
+state the mechanism writes, with the live **cache** copies instrumented so the
+verdicts are machine facts rather than model reports:
+
+- **evidence-gate**: the instrumented `deny()` fired (`EGDENY: raw evidence under
+  .loop/evidence/`), the file was not created, and the denial names the real
+  absolute runner path under `plugins/cache/.../0.15.0/` rather than the
+  `<loop-eng plugin root>` placeholder — so `hooks.json` auto-loaded and
+  `CLAUDE_PLUGIN_ROOT` reaches hook processes.
+- **arm-contract**: `armed from …/plugins/cache/loop-eng/loop-eng/0.15.0/…`, the
+  version-pinned copy that enforces, not the `plugins/marketplaces/` clone.
+- **stop-gate**: exactly three `SGBLOCK` markers (= `MAX_BLOCKS`) on a red
+  contract, and `.loop/results.json` machine-written by `run-contract.sh` with
+  `"all_green": false`.
+- **`${CLAUDE_PLUGIN_ROOT}` in command bodies**: `/loop-eng:autoloop` armed,
+  reached ALL GREEN in cycle 1/5, lifted the gate itself, and left a two-criteria
+  ledger with `"all_green": true`.
+
+One observation worth keeping, and the reason the dispatch guidance above was
+rewritten rather than deleted: on this run **both subagent dispatches detached to
+the background** despite the synchronous request, costing two extra turns and
+producing one duplicate (read-only) checker dispatch. The 0.14.0 smoke saw
+synchronous dispatch on this same CLI version, so it is not a stable property.
+It did not produce a false green — the ledger stayed machine-written throughout,
+which is the guarantee that does not depend on dispatch semantics.
+
 **Test blind spot: a safety default could be deleted and the suite stayed
 green.** Both unattended drivers hand `claude` an argv that *is* their entire
 contract with the session, and the stub in each suite ignored it. Measured, not
