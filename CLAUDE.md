@@ -112,7 +112,7 @@ machine-written fact, never a model claim. Three layers, all in `hooks/` +
 1. `arm-contract.sh` writes `.loop/criteria.tsv` (binary criteria + verify
    commands) and records `.loop/criteria.sha256` (a hash-lock), then drops
    `.loop/active`.
-2. `hooks/evidence-gate.sh` (PreToolUse on Write/Edit/Bash) **denies model writes**
+2. `hooks/evidence-gate.sh` (PreToolUse on Write/Edit/MultiEdit/NotebookEdit/Bash) **denies model writes**
    to `.loop/results.json`, `.loop/evidence/`, the armed `criteria.tsv` and the
    legacy `.loop/verify.sh` (the contract of a loop armed without a
    `criteria.tsv`, and the one gate input with no hash-lock behind it) while

@@ -1,11 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.17.0 — 2026-09-20
 
 The completion invariant had one input a model could still write, and one branch
 order that let the wrong script answer for a contract. Both are closed, and the
 three arms that a mutation could delete without turning the suite red are now
 pinned.
+
+**Minor, not a patch, on purpose.** Nothing here adds a feature; the reason for
+the bump is that a released artifact now *refuses* something it used to accept,
+and a version string is the only signal a user on `^0.16` gets before their
+next loop behaves differently. It is the same call 0.15.0 made when
+`install-timer.sh` began rejecting an install it had accepted. To revert the
+new denial without downgrading, set `LOOP_ENG_DISABLE_EVIDENCE_GATE=1` (which
+turns the whole PreToolUse gate off — it is the human escape hatch, not a
+per-rule switch); to revert the release, pin `0.16.1`.
 
 ### Upgrade
 
@@ -18,6 +27,16 @@ pinned.
   `verify.sh` mid-loop, it will now get an `evidence-gate DENIED` instead: split
   it (`rm .loop/active` first), or use the documented human escape hatch
   `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
+- **A broken install now blocks the stop instead of quietly allowing it.** If
+  `.loop/criteria.tsv` is present but `run-contract.sh` cannot be found — an
+  interrupted `/plugin update`, or a Stop hook registered by a path outside the
+  plugin root — the gate now fails closed even when a legacy `verify.sh` sits
+  beside it. Previously a green `verify.sh` answered in its place: the stop was
+  allowed and `.loop/active` removed, so the loop ended looking finished. If you
+  hit the new block, its stderr names the runner path it looked for — reinstall
+  with `/plugin update loop-eng`, or re-register the Stop hook by the plugin's
+  own path. To end such a loop without verifying it, `rm .loop/active`, as
+  before.
 
 ### Fixed
 
@@ -30,9 +49,14 @@ pinned.
   distinguish from an earned one. That is the exact claim this plugin exists to
   make impossible. Severity is high and reachability is low: the current
   `/autoloop` and `/polish` always arm with a `criteria.tsv`, so the exposed
-  shape is a hand-armed or leftover `.loop/`. Nine assertions now cover it,
+  shape is a hand-armed or leftover `.loop/`. Twelve assertions now cover it,
   including the one that must NOT flip — `bash .loop/verify.sh` is still
-  allowed, because a frozen gate still has to run.
+  allowed, because a frozen gate still has to run. The close is not total, and
+  the asymmetry is worth knowing: `criteria.tsv` has run-contract's hash
+  re-derivation behind the gate, `verify.sh` has nothing behind it, so the Bash
+  verbs outside the gate's conservative pattern — `ln`, `install`, an
+  interpreter one-liner, a path held in a variable — still reach it. Arming with
+  a `criteria.tsv` is the shape that gets the full guarantee.
 - **A green legacy script could answer for a red contract, and disarm the loop
   on its way out.** The stop-gate resolved its contract source in the order
   `criteria.tsv` → legacy `verify.sh` → missing-runner-fail-closed, so a tree

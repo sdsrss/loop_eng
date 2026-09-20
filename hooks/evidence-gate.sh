@@ -133,9 +133,12 @@ the command pass; the next stop attempt ticks the box for you."
         # completion claim typed rather than earned, exactly what results.json is
         # guarded against, and it has no hash-lock behind it to catch the drift.
         # Armed-scoped like criteria.tsv: authoring the script BEFORE arming is
-        # the legitimate case and stays writable. Create as well as overwrite —
-        # handing the gate a verify.sh it did not have is the same hijack as
-        # replacing the one it had.
+        # the legitimate case and stays writable. Create as well as overwrite,
+        # for symmetry with criteria.tsv rather than for the same reason: a
+        # verify.sh created mid-loop cannot weaken anything (a criteria.tsv, if
+        # present, wins the source decision; if absent, the gate was already
+        # allowing the stop), so denying the create keeps ONE rule over the
+        # whole protected set instead of a per-file exception to remember.
         if [ -e "$(dirname "$FILE")/active" ]; then
           deny "the armed contract script .loop/verify.sh (loop is active)"
         fi ;;

@@ -150,6 +150,15 @@ can never pass *silently*; a fully adversarial model with arbitrary Bash that
 rewrites both `criteria.tsv` and its hash-lock in lockstep is out of scope, left
 to the red lines in the prompts and human review of the diff.
 
+**The hash-lock covers `criteria.tsv` only.** A legacy loop's `verify.sh` has no
+second layer — `arm-contract.sh` writes no hash for it — so its protection is
+the evidence-gate alone: mechanically closed through Write/Edit/MultiEdit/
+NotebookEdit, best-effort through Bash, using the same conservative verb pattern
+whose limits the header of `hooks/evidence-gate.sh` states. Verbs outside that
+pattern still reach it (`ln`, `install`, an interpreter one-liner, a path held in
+a variable). Both shipped loops arm with a `criteria.tsv`, which is the shape
+that gets the full guarantee.
+
 A *missing* hash-lock used to be the quiet corner of that guarantee: with no
 `criteria.sha256` beside it, `run-contract.sh` simply skipped the integrity
 check, and a lockless run looked exactly like a locked one. It no longer does.
