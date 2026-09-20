@@ -377,12 +377,20 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
       # the item every round. Widening here rather than narrowing the gate is
       # deliberate — a narrower gate leaves such a line unlocked AND unrun, i.e.
       # a box a model can type, which is the one thing this runner exists to
-      # prevent. Substring compare, not a case pattern: `- [ ]` read as a glob
-      # makes `[ ]` a bracket expression matching one space, which silently
-      # matches the wrong prefix.
+      # prevent. Substring compare, not a case pattern: `[ ]` read as a glob is
+      # a bracket expression matching one space, which silently matches the
+      # wrong prefix.
+      #
+      # All three markdown bullet markers, because the gate's probe does not
+      # read the marker at all: a `*` item locks the file exactly as a `-` one
+      # does. Ordered-list markers (`1.`, `1)`) are a KNOWN boundary — locked,
+      # not ticked — pinned by tests on both sides rather than left silent.
       bindent="${bline%%[![:space:]]*}"
       brest="${bline#"$bindent"}"
-      if [ "${brest:0:5}" = "- [ ]" ]; then
+      # quoted so the `*` arm is the literal character, not the catch-all glob
+      bmark="${brest:0:1}"
+      case "$bmark" in -|'*'|+) : ;; *) bmark="" ;; esac
+      if [ -n "$bmark" ] && [ "${brest:1:4}" = " [ ]" ]; then
         # Pipe by pipe, taking the FIRST whose tail is whitespace + `verify:`:
         # the item text may itself contain a pipe, so the first pipe on the line
         # is not necessarily the separator.
@@ -410,9 +418,11 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
       bstatus=0
       bash -c "$bcmd" >/dev/null 2>&1 </dev/null || bstatus=$?
       if [ "$bstatus" -eq 0 ]; then
-        # Keeps the line's indentation: a nested item is nested on purpose, and
-        # re-emitting it at column 0 would reparent it in the rendered list.
-        printf -- '%s- [x] %s | verify: %s\n' "$bindent" "$bitem" "$bcmd" >> "$BACK_TMP"
+        # Keeps the line's indentation AND its bullet marker: a nested item is
+        # nested on purpose, and re-emitting it at column 0 — or as a `-` when
+        # its author wrote `*` — would reparent it in the rendered list. Ticking
+        # a box is not reformatting someone's markdown.
+        printf -- '%s%s [x] %s | verify: %s\n' "$bindent" "$bmark" "$bitem" "$bcmd" >> "$BACK_TMP"
         bchanged=1
         bdone=true
       else

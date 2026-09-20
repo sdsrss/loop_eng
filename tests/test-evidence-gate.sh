@@ -96,6 +96,13 @@ gate "${B/CMD/sed -i s/x/y/ .loop/backlog.md}";   assert_eq 2 $? "Bash sed -i on
 gate "${B/CMD/echo x > .loop/backlog.md}";        assert_eq 2 $? "Bash redirect into a machine-ticked backlog denied when armed"
 printf '%s' "${W/FILE/.loop/backlog.md}" | bash "$GATE" 2>.loop/err3 || true
 assert_file_contains .loop/err3 'verify:' "the backlog deny names what made the file machine-ticked"
+# This gate's opt-in probe is FILE-level, so an ORDERED-list item locks the
+# whole backlog while run-contract ticks only `-`/`*`/`+` bullets. A deliberate
+# boundary, not an oversight: pinned on both sides (the runner half lives in
+# tests/test-run-contract.sh) so the residual stays a known, tested state.
+printf -- '1. [ ] ordered item | verify: true\n' > .loop/backlog.md
+gate "${W/FILE/.loop/backlog.md}";                assert_eq 2 $? "an ordered-list verify line locks the backlog, though the runner cannot tick it"
+printf -- '- [ ] machine item | verify: true\n' > .loop/backlog.md
 
 # --- results.json/evidence: always denied, armed or not ---
 gate "${W/FILE/.loop/results.json}";              assert_eq 2 $? "results.json denied while armed"

@@ -541,6 +541,34 @@ assert_file_contains .loop/backlog.md '- [ ] still red |verify: false' "a red to
 assert_file_contains .loop/results.json '"item": "indented", "verify": "true", "exit": 0, "done": true' "the ledger records the item without its indentation"
 assert_file_contains .loop/results.json '"item": "tabbed", "verify": "true", "exit": 0, "done": true' "the ledger records a TAB-spaced item's command without the TAB"
 
+# --- alternative bullet markers, kept as the author wrote them ---------------
+# The gate's lock is FILE-level, so `* [ ] x | verify: true` locks the whole
+# backlog and must therefore be tickable here too — same locked-must-imply-
+# tickable rule as the spacing shapes above. The marker is PRESERVED rather
+# than normalized to `-`: ticking a box is not reformatting someone's markdown,
+# and inside a nested list the marker can change how the item renders.
+rm -f .loop/backlog.md .loop/results.json
+{
+  printf -- '- [ ] dash | verify: true\n'
+  printf -- '* [ ] star | verify: true\n'
+  printf -- '+ [ ] plus | verify: true\n'
+  printf -- '  * [ ] nested star |verify: true\n'
+  printf -- '* [ ] red star | verify: false\n'
+  printf -- '1. [ ] ordered | verify: true\n'
+} > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "a mixed-bullet backlog does not change the contract's own verdict"
+assert_file_contains .loop/backlog.md '- [x] dash | verify: true' "a dash bullet still ticks (control)"
+assert_file_contains .loop/backlog.md '* [x] star | verify: true' "a star bullet ticks, and keeps its marker"
+assert_file_contains .loop/backlog.md '+ [x] plus | verify: true' "a plus bullet ticks, and keeps its marker"
+assert_file_contains .loop/backlog.md '  * [x] nested star | verify: true' "an indented star bullet keeps both its indent and its marker"
+assert_file_contains .loop/backlog.md '* [ ] red star | verify: false' "a failing star bullet stays unticked, byte for byte as written"
+assert_file_contains .loop/results.json '"item": "star", "verify": "true", "exit": 0, "done": true' "the ledger records a star item without its marker"
+# Ordered-list markers are a DELIBERATE boundary, not an oversight: the gate
+# locks a backlog carrying this line (pinned in tests/test-evidence-gate.sh) and
+# the runner leaves it alone, so the residual is a known, tested state.
+assert_file_contains .loop/backlog.md '1. [ ] ordered | verify: true' "an ordered-list item is left exactly as written"
+assert_eq 0 "$(grep -c '"item": "ordered"' .loop/results.json)" "an ordered-list item is not in the backlog ledger either"
+
 # No backlog, or a backlog nobody opted in: no backlog block at all, and the
 # old model-ticked contract is untouched.
 rm -f .loop/backlog.md
