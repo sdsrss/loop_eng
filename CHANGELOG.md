@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0 — 2026-09-20
 
 Closing out the 2026-09-20 production-readiness audit: 0.15.0 took every P0 and
 P1, this entry takes the P2 and P3 remainder. Each item keeps the project's own
