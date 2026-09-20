@@ -8,8 +8,9 @@
 #   - auto-fix requires BOTH the --auto-fix flag AND LOOP_ENG_ALLOW_AUTOFIX=1,
 #     so a stray flag alone can never enable writes
 #   - refuses to run on a dirty tree (unattended changes must be attributable)
-#   - wall-clock budget: LOOP_ENG_MAX_MINUTES (default 120) via `timeout`
-#     when available (GNU coreutils; absent on stock macOS -> no hard cap)
+#   - wall-clock budget: LOOP_ENG_MAX_MINUTES (default 120) via `timeout`,
+#     or `gtimeout` (the macOS coreutils name); with neither on PATH the run
+#     is uncapped and says so on stderr rather than dropping the cap silently
 #   - provider-limit aware: a failed run whose log mentions a usage/rate
 #     limit exits 75 (EX_TEMPFAIL) and is marked in .loop/unattended.log,
 #     so schedulers can distinguish "try again later" from real failures
@@ -149,9 +150,21 @@ if git status --porcelain | grep -vq '^?? \.loop/'; then
   exit 1
 fi
 
+# `timeout` is GNU coreutils; on macOS with Homebrew coreutils the binary is
+# installed as `gtimeout`. Probing only the one name made this driver the sole
+# budget-wrapping script in the plugin that ran UNBOUNDED on that host — its
+# autoloop sibling and the stop-gate both fall back — and it did so silently,
+# which is how the gap survived long enough to be documented instead of fixed.
+# Absence still degrades rather than refuses (a scheduled report-only review is
+# worth running uncapped), but it is now said out loud on stderr, where the
+# scheduler's own log will keep it.
 TIMEOUT_CMD=()
 if command -v timeout >/dev/null 2>&1; then
   TIMEOUT_CMD=(timeout "${MAX_MINUTES}m")
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD=(gtimeout "${MAX_MINUTES}m")
+else
+  echo "warning: no timeout(1)/gtimeout — this run is UNBOUNDED; LOOP_ENG_MAX_MINUTES=$MAX_MINUTES cannot be enforced" >&2
 fi
 
 STATUS=0

@@ -164,4 +164,59 @@ else
 fi
 assert_file_contains "$SB/.loop/unattended.log" "TAIL-MARKER-SURVIVES" "truncation keeps the tail (marker survives)"
 
+# --- wall-clock budget: WHICH binary wraps the session, and what a host with
+# neither is told. `timeout` is GNU coreutils; on macOS-with-Homebrew-coreutils
+# it is installed as `gtimeout`, which this driver alone among its three
+# budget-wrapping siblings did not probe — so a scheduled polish on that host
+# ran UNBOUNDED while autoloop did not, and nothing on any stream said so.
+#
+# Both "absent" arms need a PATH holding no timeout of either name, which the
+# real PATH cannot provide, so build a minimal bin dir with symlinks to exactly
+# what the driver and the stub exec. A missing entry here would look like a
+# driver bug, so each one is asserted rather than assumed.
+TD=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-polishto.XXXXXX")
+trap 'rm -rf "$SB" "$SD" "$TD"' EXIT
+mkdir -p "$TD/bin"
+for b in bash git grep mkdir rm find wc tail cat date tee; do
+  bp=$(command -v "$b" 2>/dev/null) || bp=""
+  if [ -n "$bp" ]; then ln -sf "$bp" "$TD/bin/$b"; else
+    FAIL=$((FAIL+1)); echo "  FAIL: test prerequisite '$b' is not on PATH" >&2; fi
+done
+
+# A fake timeout/gtimeout records the name it was called by, then execs the
+# wrapped command — the wiring is verified without waiting out a real budget.
+mk_fake_timeout() { # $1: binary name to install
+  cat > "$TD/bin/$1" <<'FAKE'
+#!/usr/bin/env bash
+echo "$0 $*" >> "$TIMEOUT_RECORD"
+shift 1   # the <N>m budget
+exec "$@"
+FAKE
+  chmod +x "$TD/bin/$1"
+}
+run_restricted() { # $1: stderr file -> exit status of the driver
+  STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" TIMEOUT_RECORD="$TD/record" PATH="$TD/bin" \
+    bash "$SCRIPT" "$SB" src/ >/dev/null 2>"$1" && return 0 || return $?
+}
+
+# both present -> GNU `timeout` wins (probe order), and the harness is sound
+mk_fake_timeout timeout; mk_fake_timeout gtimeout
+: > "$TD/record"
+run_restricted "$TD/err-both" && rc=0 || rc=$?
+assert_eq 0 "$rc" "restricted-PATH run completes (the minimal bin dir is sufficient)"
+assert_file_contains "$TD/record" "/timeout 120m" "with both installed, GNU timeout wraps the session"
+
+# gtimeout only (the macOS-with-coreutils shape) -> budget still enforced
+rm -f "$TD/bin/timeout"; : > "$TD/record"
+run_restricted "$TD/err-gt" && rc=0 || rc=$?
+assert_eq 0 "$rc" "gtimeout-only run completes"
+assert_file_contains "$TD/record" "/gtimeout 120m" "no timeout(1): the session falls back to gtimeout"
+
+# neither -> degrade (run unwrapped) but SAY so; silence is what hid this
+rm -f "$TD/bin/gtimeout"; : > "$TD/record"
+run_restricted "$TD/err-none" && rc=0 || rc=$?
+assert_eq 0 "$rc" "no timeout of either name: the run still happens (degrade, not refuse)"
+assert_file_contains "$TD/err-none" "UNBOUNDED" "a dropped wall-clock budget is announced on stderr"
+assert_eq 0 "$(wc -c < "$TD/record" | tr -d ' ')" "nothing wrapped the session when neither binary exists"
+
 report "test-unattended-polish"

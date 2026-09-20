@@ -35,7 +35,7 @@ where it lived before.
 | `jq` **or** `python3` | `evidence-gate.sh` | the gate goes **inert** — it cannot parse the hook event, so it allows every write and says so on stderr (`no jq or python3 available`). See the note below. |
 | `sha256sum` / `shasum` / `openssl` | `arm-contract.sh`, `run-contract.sh` | the contract arms **without a hash-lock**, so post-arm drift no longer fails closed. `arm-contract.sh` warns at arm time. |
 | `timeout` / `gtimeout` | `stop-gate.sh`, `arm-contract.sh`, `unattended-autoloop.sh` | the contract runs **unbounded** on each stop attempt; the near-timeout fail-closed guard is inactive and the gate says so. Keep `criteria.tsv` fast. |
-| `timeout` (only) | `unattended-polish.sh` | its wall-clock budget is **unbounded**. Note the asymmetry: unlike its three siblings this one does not fall back to `gtimeout`, so on macOS-with-coreutils a scheduled polish runs uncapped while autoloop does not. Known, not yet fixed. |
+| `timeout` / `gtimeout` | `unattended-polish.sh` | its wall-clock budget is **unbounded** and the run says so on stderr, where the scheduler's log keeps it. `LOOP_ENG_MAX_MINUTES` then has no effect. |
 | `curl` | `update-notify.sh` | no update-available notices. Silent by design. |
 | `systemctl --user` | `install-timer.sh`, `uninstall-timer.sh` | scheduling is unavailable; use cron, or `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` to write (and remove) the unit files only. |
 | `claude` CLI | `install-timer.sh`, `unattended-*.sh` | `install-timer.sh` **refuses outright** — this is the one hard dependency in the table, not a degrade. Point `LOOP_ENG_CLAUDE_BIN` at the binary if it is not on `PATH`. |
