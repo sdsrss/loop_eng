@@ -172,12 +172,16 @@ green contract lets the stop-gate exit 0, which discards hook output — so
 Platform note: Claude Code force-allows a stop after 8 consecutive
 Stop-hook blocks; loop-eng's ceiling (3) stays safely under it.
 
-Bash compatibility: the hooks (`stop-gate.sh`, `evidence-gate.sh`) and their
-scripts (`arm-contract.sh`, `run-contract.sh`) run on stock macOS bash 3.2 —
-this is tested in CI, not asserted: a dedicated `test-bash32` job runs the
-hooks suites through macOS's `/bin/bash` (3.2) on every push. The unattended
-runners are the exception — they need bash ≥ 4.4 (empty-array expansion under
-`set -u`) and say so in their headers.
+Bash compatibility: five scripts run on stock macOS bash 3.2 — the three hooks
+(`stop-gate.sh`, `evidence-gate.sh`, `update-notify.sh`) and the two contract
+scripts (`arm-contract.sh`, `run-contract.sh`). This is tested in CI, not
+asserted: a dedicated `test-bash32` job runs their suites through macOS's
+`/bin/bash` (3.2) on every push and syntax-checks those same five files.
+`update-notify.sh` belongs on that list for the plainest reason — it is a
+SessionStart hook, so on a stock macOS box bash 3.2 is what runs it in every
+real session. The unattended runners are the exception: they need bash ≥ 4.4
+(empty-array expansion under `set -u`), check it at run time, and exit 78
+rather than dying partway through.
 
 Scope notes:
 
@@ -405,6 +409,7 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 | `LOOP_ENG_LIMIT_WAIT_MIN` | `unattended-autoloop.sh` | `60` (minutes) | Wait once and retry after a session log indicates a provider usage/rate limit; a second hit stops the driver (exit 75). |
 | `LOOP_ENG_LOOP_DIR` | `arm-contract.sh`, `run-contract.sh` | `.loop` | **TEST-ONLY.** The stop-gate and evidence-gate hooks are fixed to `.loop/`; pointing a production loop at a custom dir with this var silently removes it from both hooks' protection. |
 | `LOOP_ENG_MAX_ITEM_SESSIONS` | `unattended-autoloop.sh` | `2` | Second arm of the circuit breaker: stop after this many sessions on the same `.loop/backlog.md` item without its box being ticked. Catches the "commits every session, never finishes the item" shape the commit-keyed arm reads as progress. `0` disables this arm. |
+| `LOOP_ENG_PLUGIN_CACHE_DIR` | `scripts/sync-local.sh` | `~/.claude/plugins` | **Dev-only**, and not part of the plugin's runtime: where `sync-local.sh` looks for an installed copy so it can warn that the marketplace cache may be serving a different version than the repo you just edited. The test suite points it at a fixture. |
 | `LOOP_ENG_POST_CHECK` | `unattended-polish.sh` | unset | A shell command run after an `--auto-fix` session (never in report-only). Non-zero makes the driver exit `70` — the driver cannot know a project's test command, so the operator names one. |
 | `LOOP_ENG_MAX_MINUTES` | `unattended-polish.sh`, `unattended-autoloop.sh` | `120` (polish) / `240` (autoloop) | Wall-clock budget for the unattended run, enforced via `timeout` or `gtimeout` (both drivers probe in that order; with neither on `PATH` the run is uncapped and says so). `0` is a config error (would disable the timeout) and falls back to the script's default. |
 | `LOOP_ENG_TIMER_NO_SYSTEMCTL` | `install-timer.sh`, `uninstall-timer.sh` | unset (`0`) | Set to `1` to write the systemd unit files without calling `systemctl` — used by the test suite, also useful on a box with no user D-Bus. |
@@ -480,9 +485,17 @@ production or external side effects.
 .claude-plugin/   plugin.json + marketplace.json
 commands/         /autoloop, /polish orchestrators
 agents/           loop-builder, loop-checker, loop-reviewer, loop-verifier
-hooks/            stop-gate.sh + evidence-gate.sh + hooks.json
-skills/loop-eng/  skill entry, contract/state templates, unattended runner
+hooks/            hooks.json + stop-gate.sh, evidence-gate.sh, update-notify.sh
+skills/loop-eng/  SKILL.md, contract/state templates, and scripts/:
+                    arm-contract.sh, run-contract.sh
+                    unattended-polish.sh, unattended-autoloop.sh
+                    install-timer.sh, uninstall-timer.sh
+scripts/          sync-local.sh (dev: repo root -> .claude/ dogfood copy)
+tests/            run-all.sh + one test-*.sh per script or hook
 ```
+
+`tests/run-all.sh` collects scripts with `git ls-files '*.sh'`, so a new script
+must be `git add`ed before shellcheck covers it.
 
 ## Design provenance
 

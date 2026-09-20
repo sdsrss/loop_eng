@@ -138,4 +138,54 @@ hasnt skills/loop-eng/templates/contract.md "1	All tests pass	npm test" "the fas
 has agents/loop-checker.md ".loop/criteria.tsv" "the checker reads the contract the gate actually executes"
 has commands/autoloop.md "the ledger wins" "step 3 has a branch for a green report over a red ledger"
 
+# --- P3-5 / P2-15: documentation that DERIVES from the tree, not from memory --
+# Three README sections restate facts the repo already knows, and all three had
+# drifted: the env-var table was missing a variable, the layout block named two
+# of the four hooks and called six unattended scripts "unattended runner", and
+# two different paragraphs disagreed about how many scripts hold the bash-3.2
+# floor. Each assertion below reads the source of truth and compares, so the
+# next addition is covered the day it lands rather than the day someone
+# remembers — the same reasoning as the README-derived exec-bit scan above.
+
+# Every LOOP_ENG_* a shipped script reads must be in the README table, and every
+# row in the table must name a variable some script reads.
+CODE_VARS=$(grep -ohE 'LOOP_ENG_[A-Z_]+' $(git ls-files '*.sh') | sort -u)
+DOC_VARS=$(grep -oE '^\| `LOOP_ENG_[A-Z_]+`' README.md | tr -d '|` ' | sort -u)
+undocumented=$(comm -23 <(printf '%s\n' "$CODE_VARS") <(printf '%s\n' "$DOC_VARS") | tr '\n' ' ')
+phantom=$(comm -13 <(printf '%s\n' "$CODE_VARS") <(printf '%s\n' "$DOC_VARS") | tr '\n' ' ')
+assert_eq "" "${undocumented% }" "every LOOP_ENG_* the scripts read has a README row"
+assert_eq "" "${phantom% }"      "every README env row names a variable some script reads"
+assert_eq "" "$(printf '%s\n' "$CODE_VARS" | grep -c '^$' | grep -v '^0$')" "the env-var scan matched something (pattern not rotted)"
+
+# The layout block must name every tracked hook script. It named two of four.
+LAYOUT=$(sed -n '/^## Repository layout$/,/^## /p' README.md)
+for h in $(git ls-files 'hooks/*.sh'); do
+  case "$LAYOUT" in
+    *"$(basename "$h")"*) PASS=$((PASS+1)) ;;
+    *) FAIL=$((FAIL+1)); echo "  FAIL: README layout block does not name $h" >&2 ;;
+  esac
+done
+# ...and must not describe the six unattended/skill scripts in the singular.
+case "$LAYOUT" in
+  *"unattended runner"*) FAIL=$((FAIL+1)); echo "  FAIL: layout block still says 'unattended runner' (singular) for $(git ls-files 'skills/loop-eng/scripts/*.sh' | wc -l | tr -d ' ') scripts" >&2 ;;
+  *) PASS=$((PASS+1)) ;;
+esac
+
+# The bash-3.2 floor is a CI fact: whatever test.yml syntax-checks under
+# /bin/bash IS the list, and the README must not name a different number.
+FLOOR=$(sed -n '/Syntax-check the hooks-only scripts/,$p' .github/workflows/test.yml \
+          | grep -oE '(hooks|skills/loop-eng/scripts)/[a-z-]+\.sh' | sort -u)
+floor_n=$(printf '%s\n' "$FLOOR" | grep -c '[^[:space:]]')
+assert_eq 5 "$floor_n" "the bash-3.2 CI leg covers five scripts"
+for f in $FLOOR; do
+  b=$(basename "$f")
+  if grep -q "$b" <(sed -n '/^Bash compatibility:/,/^$/p' README.md); then PASS=$((PASS+1)); else
+    FAIL=$((FAIL+1)); echo "  FAIL: README's Bash-compatibility paragraph omits $b, which the test-bash32 job covers" >&2; fi
+done
+
+# P3-9. /polish has four stop rules and three macro rounds; SKILL.md described
+# both loops with /autoloop's six-and-five.
+hasnt skills/loop-eng/SKILL.md "Six stop rules bound every loop at 5 rounds max" "SKILL.md no longer gives both loops /autoloop's caps"
+has   skills/loop-eng/SKILL.md "three macro rounds" "SKILL.md states /polish's own round cap"
+
 report "test-packaging"

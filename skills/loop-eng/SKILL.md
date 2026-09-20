@@ -42,7 +42,11 @@ BAD fits (do NOT loop these — handle interactively):
 2. Maker/checker separation is enforced by tool whitelists, not trust:
    loop-builder can write, loop-checker cannot.
 3. State lives on disk (`.loop/state.md`), not in the context window.
-4. Six stop rules bound every loop at 5 rounds max.
+4. Every loop is bounded, and the two are bounded differently:
+   `/autoloop` — six stop rules, 5 rounds max.
+   `/polish` — four stop rules, three macro rounds.
+   A single set of numbers for both was wrong about whichever one it was not
+   describing.
 5. Never weaken a check to make it pass.
 6. Loop output is a proposal: always end with the diff for human review.
 7. Completion evidence is machine-written: `run-contract.sh` produces

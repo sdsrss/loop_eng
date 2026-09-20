@@ -100,6 +100,20 @@ discipline — the assertion that would have caught it first, then the fix.
   README's safety table gains the orchestrator row it was missing: it runs in
   your session with `Write` and `Bash`, and what is mechanical about it is that
   the evidence ledger is denied to it by the same hook as to everyone else.
+- **Three README sections that restate repo facts now derive from them.** The
+  env-var table was missing `LOOP_ENG_PLUGIN_CACHE_DIR`; the layout block named
+  two of four `hooks/` files and called six `skills/loop-eng/scripts/` entries
+  "unattended runner"; and two paragraphs disagreed about how many scripts hold
+  the bash-3.2 floor (four in one, five in the Requirements table — five is
+  right, and `update-notify.sh` was the one going unmentioned even though a
+  SessionStart hook is precisely what stock macOS bash 3.2 runs in every real
+  session). `test-packaging.sh` now reads the source of truth for each —
+  `git ls-files`, the scripts' own `LOOP_ENG_*` reads, and the list
+  `test.yml`'s bash-3.2 leg syntax-checks — so the next addition is covered the
+  day it lands rather than the day someone remembers.
+- **`SKILL.md` gave both loops `/autoloop`'s bounds.** "Six stop rules bound
+  every loop at 5 rounds max" was wrong about `/polish`, which has four stop
+  rules and three macro rounds.
 - **`.loop/state.md` says out loud that nothing reads it.** Its `Status:` line
   looked like a completion signal and is prose — no hook, script or gate has
   ever read this file. It is now labelled advisory, with the machine answer
