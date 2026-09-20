@@ -37,6 +37,15 @@ for c in bash sh env grep sed head date mkdir cat rm printf ln; do
   p=$(command -v "$c" 2>/dev/null) && ln -sf "$p" "$NOBIN/$c"
 done
 
+# WHICH bash runs the hook is load-bearing, because CI's macOS test-bash32 leg
+# runs this suite through /bin/bash (3.2) to prove the hook works there. A `bash`
+# resolved from PATH could be a 5.x build that happens to be installed, and the
+# leg would then report a 3.2 claim it never tested. $BASH is the interpreter
+# running THIS suite, so the hook is always checked under the bash the caller
+# chose — including the NOBIN arm, whose symlink is overridden for the same reason.
+SUITE_BASH="${BASH:-$(command -v bash)}"
+ln -sf "$SUITE_BASH" "$NOBIN/bash"
+
 STUB_COUNT="$WORK/curl-count"
 
 # A sandbox HOME so the "never writes into ~/.claude" guarantee is checkable
@@ -51,7 +60,7 @@ run_hook() {
   if [ "$nocurl" = "1" ]; then path="$NOBIN"; else path="$BIN:$PATH"; fi
   CLAUDE_PLUGIN_ROOT="$PROOT" XDG_CACHE_HOME="$cache" HOME="$FHOME" \
     STUB_TAG="$tag" STUB_COUNT="$STUB_COUNT" PATH="$path" \
-    bash "$HOOK" </dev/null 2>"$WORK/err"
+    "$SUITE_BASH" "$HOOK" </dev/null 2>"$WORK/err"
 }
 
 count_calls() { [ -f "$STUB_COUNT" ] && wc -c < "$STUB_COUNT" | tr -d ' ' || echo 0; }

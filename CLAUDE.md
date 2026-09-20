@@ -33,7 +33,8 @@ docker run --rm -v "$PWD":/repo:ro bash:3.2 sh -c '
   git config --global user.email t@t; git config --global user.name t
   for t in tests/test-arm-contract.sh tests/test-evidence-gate.sh \
            tests/test-run-contract.sh tests/test-stop-gate.sh \
-           tests/test-hooks-json.sh; do /usr/local/bin/bash "$t"; done'
+           tests/test-hooks-json.sh tests/test-update-notify.sh; \
+    do /usr/local/bin/bash "$t"; done'
 ```
 
 `bash:3.2` is a real 3.2.57 — the same release stock macOS ships — so this

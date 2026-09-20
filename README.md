@@ -24,8 +24,9 @@ After a marketplace install the commands may resolve namespace-prefixed —
 ### Requirements
 
 Bash and git are the baseline. Everything below is probed at run time, and the
-table says which way each probe falls: most degrade on a documented path, but
-four of them quietly **weaken a guard** (rows 1-3 and 5), and two **refuse
+table says which way each probe falls: most degrade on a documented path, four
+of them **weaken a guard** (rows 1-4 — each says so on the stream it has, which
+is the whole difference between a degrade and a silent one), and two **refuse
 outright** rather than degrade (the `claude` CLI, and bash ≥ 4.4 for the
 unattended drivers). None of this belongs only in a script comment, which is
 where it lived before.
@@ -39,7 +40,7 @@ where it lived before.
 | `curl` | `update-notify.sh` | no update-available notices. Silent by design. |
 | `systemctl --user` | `install-timer.sh`, `uninstall-timer.sh` | scheduling is unavailable; use cron, or `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` to write (and remove) the unit files only. |
 | `claude` CLI | `install-timer.sh`, `unattended-*.sh` | `install-timer.sh` **refuses outright** — this is the one hard dependency in the table, not a degrade. Point `LOOP_ENG_CLAUDE_BIN` at the binary if it is not on `PATH`. |
-| bash ≥ 4.4 | `unattended-*.sh` only | the drivers **refuse to start** (exit 78) rather than dying partway through — checked at run time, not just stated in a header. The hooks and their contract scripts (`stop-gate.sh`, `evidence-gate.sh`, `arm-contract.sh`, `run-contract.sh`) run on stock macOS bash 3.2; that set is what the `test-bash32` CI job covers, and `update-notify.sh` is not in it. |
+| bash ≥ 4.4 | `unattended-*.sh` only | the drivers **refuse to start** (exit 78) rather than dying partway through — checked at run time, not just stated in a header. The hooks and their contract scripts (`stop-gate.sh`, `evidence-gate.sh`, `update-notify.sh`, `arm-contract.sh`, `run-contract.sh`) run on stock macOS bash 3.2, and all five are what the `test-bash32` CI job covers — it runs their suites, and syntax-checks the scripts, through `/bin/bash` explicitly. |
 
 An inert evidence-gate does **not** forfeit the completion invariant. The gate
 is defense-in-depth on the write path; the stop-gate is the load-bearing one,
