@@ -613,6 +613,59 @@ assert_file_contains .loop/results.json '"item": "star", "verify": "true", "exit
 assert_file_contains .loop/backlog.md '1. [ ] ordered | verify: true' "an ordered-list item is left exactly as written"
 assert_eq 0 "$(grep -c '"item": "ordered"' .loop/results.json)" "an ordered-list item is not in the backlog ledger either"
 
+# --- both redirects on the backlog verify command ---------------------------
+# `bash -c "$bcmd" >/dev/null 2>&1 </dev/null`. The criteria loop carries the
+# identical pair and both halves are pinned there (the stdin-reader above, and
+# every ledger-shape assertion in this file); the backlog loop's were not, so a
+# mutant dropping either one kept the whole suite green. Neither failure mode
+# announces itself: both leave the runner exiting 0 and the stop-gate allowing
+# the stop.
+#
+# </dev/null — the loop reads the backlog itself (`done < "$BACKLOG"`), so a
+# verify command that reads stdin consumes the remaining ITEMS. They vanish
+# from the ledger AND from the rewritten file, unrecoverably: .loop/ is
+# gitignored, the rewrite is in place, and the evidence-gate denies model
+# writes to a backlog carrying verify commands.
+rm -f .loop/backlog.md .loop/results.json
+{
+  printf -- '- [ ] reads stdin | verify: cat\n'
+  printf -- '- [ ] after the reader | verify: true\n'
+  printf -- '- [ ] red after the reader | verify: false\n'
+} > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "a stdin-reading verify command does not change the contract's own verdict"
+assert_eq 3 "$(grep -c '| verify:' .loop/backlog.md)" "a stdin-reading verify command swallows no backlog line"
+assert_file_contains .loop/backlog.md '- [x] reads stdin | verify: cat' "the stdin-reading item itself ticks (control)"
+assert_file_contains .loop/backlog.md '- [x] after the reader | verify: true' "the item after a stdin-reader is still verified, and ticked"
+assert_file_contains .loop/backlog.md '- [ ] red after the reader | verify: false' "the item after a stdin-reader survives the rewrite unticked"
+assert_file_contains .loop/results.json '"item": "after the reader", "verify": "true", "exit": 0, "done": true' "the item after a stdin-reader reaches the ledger"
+assert_file_contains .loop/results.json '"item": "red after the reader", "verify": "false", "exit": 1, "done": false' "the red item after a stdin-reader reaches the ledger too"
+
+# >/dev/null 2>&1 — this block's stdout IS results.json (the enclosing
+# `{ … } > "$TMP"` group), so a verify command that PRINTS writes its output
+# into the middle of the ledger and results.json stops parsing, while the run
+# still exits 0. Printing is the normal case, not the exotic one: README's only
+# backlog example is `verify: npx vitest run …`, a full test report.
+rm -f .loop/backlog.md .loop/results.json
+{
+  printf -- '- [ ] noisy | verify: echo "Test Files  1 passed (1)"\n'
+  printf -- '- [ ] noisy on stderr | verify: sh -c "echo stderr-noise >&2; true"\n'
+} > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>.loop/rc-backlog-noise; assert_eq 0 $? "a printing verify command does not change the contract's own verdict"
+assert_file_contains .loop/backlog.md '- [x] noisy | verify: echo "Test Files  1 passed (1)"' "a printing verify command still ticks its box"
+assert_eq 0 "$(grep -c '^Test Files' .loop/results.json)" "a verify command's stdout does not leak into the ledger"
+# ...and the 2>&1 half: the runner's own stderr is the stop-gate's block reason,
+# so a chatty verify command must not crowd out the criteria that actually failed
+# (same rule as the green-contract-stays-quiet assertion at the top of this file).
+assert_eq 0 "$(wc -c < .loop/rc-backlog-noise | tr -d ' ')" "a verify command's stderr does not reach the runner's own stderr"
+if command -v jq >/dev/null 2>&1; then
+  jq . .loop/results.json >/dev/null 2>&1; assert_eq 0 $? "results.json stays valid JSON when a verify command prints"
+elif command -v python3 >/dev/null 2>&1; then
+  python3 -c 'import json,sys; json.load(open(".loop/results.json"))' 2>/dev/null; assert_eq 0 $? "results.json stays valid JSON when a verify command prints"
+else
+  echo "  SKIP: no jq/python3 — printing-verify JSON validity not checked (1 assertion)" >&2
+fi
+rm -f .loop/rc-backlog-noise
+
 # No backlog, or a backlog nobody opted in: no backlog block at all, and the
 # old model-ticked contract is untouched.
 rm -f .loop/backlog.md
