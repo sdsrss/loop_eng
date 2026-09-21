@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.18.1 — 2026-09-21
+
+0.18.0 widened the backlog grammar in code and left the instructions the model
+reads still spelling out the narrow one. Nothing executes differently in this
+release; what changes is that the orchestrator's own completion test no longer
+disagrees with the machine's.
+
+### Fixed
+
+- **`/autoloop`'s completion prose judged by the literal `- [ ]` spelling.**
+  0.18.0 taught the runner, `count_pending` and the item picker to recognize an
+  unfinished item on a `-`, `*` or `+` bullet with optional indentation, but
+  `commands/autoloop.md` — shipped, model-facing routing instructions — still
+  decided "is this loop done?" against the narrow grammar at five separate
+  sites. Read literally, it would call a loop complete while an unfinished
+  `* [ ]` or indented item was still pending. The machine gate already caught
+  that case, so no loop could actually end unverified; the defect was that the
+  instructions and the mechanism gave different answers, and only one of them
+  was right. The five completion sites now turn on "unfinished item", defined
+  once and descriptively, while the two sites that teach which shape to *write*
+  still say `- [ ]` — recommending one spelling while tolerating more is
+  deliberate. Stop rule 1 reads "no unfinished backlog item remains" rather
+  than "every item is ticked": the latter would be stricter than the code,
+  since an ordered-list `1. [ ]` item is a documented boundary — locked by the
+  gate, never ticked — and that phrasing would make the rule unsatisfiable on
+  such a backlog. No script, test or behavior changed; the suite is unmoved at
+  942 assertions.
+
 ## 0.18.0 — 2026-09-21
 
 The backlog half of a loop accepted less than it locked. The evidence-gate has
