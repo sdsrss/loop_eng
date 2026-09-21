@@ -82,6 +82,29 @@ red, and two in the README that cost a user a wasted night each.
   files; `SKILL.md` carried the same overclaim and was outside that sweep. The
   ban now covers it, with a positive assertion beside it.
 
+### Live-install smoke
+
+Passed on Claude Code 2.1.278 against a real marketplace install of 0.19.0 from
+the GitHub source into a throwaway `CLAUDE_CONFIG_DIR`, hooks instrumented in
+the cache copy so each verdict is a machine fact. Required: this release touches
+all four trigger paths (`hooks/`, `commands/`, `skills/`, `.claude-plugin/`).
+
+- `armed from …/plugins/cache/loop-eng/loop-eng/0.19.0/…` — the version-pinned
+  cache copy under test, not the marketplace clone.
+- evidence-gate denied `echo hello > .loop/evidence/smoke.log`: exit 2, file
+  absent, marker `EGDENY`.
+- stop-gate on a RED contract: three blocks, **all four exit sites labelled
+  separately** and all three recorded `SGBLOCK-contract` — none on
+  missing-runner, dedup-replay or timeout — then `ceiling (3) reached` released
+  the fourth. On disk: `generated_by: run-contract.sh`, `all_green: false`.
+- the control held: on a GREEN contract the stop was allowed, `all_green: true`,
+  `.loop/active` lifted by the gate itself, and the marker log stayed **empty**
+  — the same instrumentation that recorded four markers under the RED contract
+  recorded none here.
+- post-ship identity diff against a SECOND, uninstrumented config dir:
+  `git archive v0.19.0` vs the installed cache differ by exactly one line,
+  `Only in …/0.19.0: .in_use`.
+
 ## 0.18.1 — 2026-09-21
 
 0.18.0 widened the backlog grammar in code and left the instructions the model
