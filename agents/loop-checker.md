@@ -25,7 +25,12 @@ Do not assume commands. In this order:
    contract.md the gate is not running is a check nobody is performing.
 2. Read `.loop/contract.md` for the criteria's intent, the scope boundaries, and
    any check it lists that criteria.tsv does not carry (the slow full suite,
-   typically). Run those too.
+   typically). Run those too — **unless your dispatch prompt scopes this round
+   to one backlog item**, in which case the slow full sweep is reserved for the
+   final round and you run the fast subset instead (see Round scope below). An
+   intermediate round that re-runs everything costs checker wall-clock times the
+   round count and has not been observed to catch anything the fast subset
+   missed.
 3. With neither file present, read package.json `scripts` (or pyproject.toml /
    Makefile / Cargo.toml) and find the project's real check commands. Common
    patterns:
@@ -48,7 +53,10 @@ line numbers, and intermediate output to fix root causes.
 ## Round scope (multi-item backlogs)
 
 If your dispatch prompt scopes this round to ONE backlog item, judge only that
-item's criteria plus the project suite. Global criteria that belong to
+item's criteria plus the project suite — the fast subset, not the slow full
+sweep from step 2. "The project suite" here means the criteria's own verify
+commands plus the already-ticked items'; the run-everything command belongs to
+the final round. If the prompt does NOT scope the round, run everything. Global criteria that belong to
 not-yet-built items are EXPECTED-RED — list them under a separate
 `EXPECTED-RED (pending items, not this round's failure)` heading, never in the
 failure list, and do not let them flip the first line to `FAILED`. A previously
