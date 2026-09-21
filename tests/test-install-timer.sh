@@ -168,6 +168,48 @@ case "$nerr" in
   *) assert_eq "a message naming max-sessions" "[$nerr]" "non-numeric max-sessions is refused for ITS OWN cause, not the write-mode gate" ;;
 esac
 
+# --- max-sessions 0: a digit string that installs a unit which can never run ---
+# The digit-class case above accepts `0`, and `0` is not a smaller budget — it
+# is no budget. unattended-autoloop.sh sets session=0 and its loop head reads
+# `[ "$session" -ge "$MAX_SESSIONS" ]`, so 0 -ge 0 breaks on the first
+# iteration: the driver exits 1 with sessions=0 having launched nothing, on
+# every trigger, forever. That is verbatim the outcome the --allow-write gate
+# one line below already refuses, so it is refused here too and for its OWN
+# cause — WITH --allow-write so the gate cannot be what answers, and with a
+# --time that does not collide with the polish timer on this repo so the
+# collision check cannot answer either. Without both, this install SUCCEEDS:
+# rc=0 and `ExecStart=… unattended-autoloop.sh <repo> 0`.
+zerr=$(run_install autoloop "$SB" 0 --allow-write --time 04:00 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "max-sessions 0 refused"
+case "$zerr" in
+  *max-sessions*) assert_eq 0 0 "the 0 refusal names max-sessions, not the write-mode gate" ;;
+  *) assert_eq "a message naming max-sessions" "[$zerr]" "the 0 refusal names max-sessions, not the write-mode gate" ;;
+esac
+# A refusal must leave the machine as it found it. An autoloop unit from the
+# 5-session install above is on disk, so "wrote nothing" is asserted as "did
+# not overwrite" — the shape that would actually bite a user re-running with a
+# typo'd count on top of a working timer.
+assert_file_contains "$UNIT_DIR/loop-eng-autoloop.service" "unattended-autoloop.sh $SB 5" "the refused 0 install left the previous unit's max-sessions intact"
+
+# `00` is the same zero wearing a digit string the obvious check trips over:
+# bash `test -eq` evaluates its operands as arithmetic, where a leading zero is
+# octal — so a zero test written as `[ "$MAX_SESSIONS" -eq 0 ]` dies on `08`
+# ("value too great for base") under set -e instead of refusing anything. Both
+# arms are pinned: 00 refused, 08 accepted as 8.
+z2err=$(run_install autoloop "$SB" 00 --allow-write --time 04:00 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "max-sessions 00 refused — a zero cap written with a leading zero is still a zero cap"
+case "$z2err" in
+  *max-sessions*) assert_eq 0 0 "the 00 refusal names max-sessions" ;;
+  *) assert_eq "a message naming max-sessions" "[$z2err]" "the 00 refusal names max-sessions" ;;
+esac
+# 08 is a legitimate count (the driver normalizes with 10#), so the zero check
+# must not reject it and must not crash on it.
+run_install autoloop "$SB" 08 --allow-write --time 04:00 >/dev/null && rc=0 || rc=$?
+assert_eq 0 "$rc" "a leading-zero but nonzero max-sessions still installs"
+assert_file_contains "$UNIT_DIR/loop-eng-autoloop.service" "unattended-autoloop.sh $SB 08" "the leading-zero count reaches ExecStart unchanged"
+# Restore the 5-session unit the rest of this file was written against.
+run_install autoloop "$SB" 5 --allow-write --time 04:00 >/dev/null
+
 # --- argv beats the machine, in both directions, pinned by cause ---
 # The rule the argv-only block encodes: a fault the command line already shows
 # is reported before anything that inspects the machine. Nothing pinned the
@@ -186,6 +228,16 @@ assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "no-write autoloop on a nonexistent repo is
 case "$gerr" in
   *--allow-write*) assert_eq 0 0 "argv wins: the write-mode gate answers before the repo is looked for" ;;
   *) assert_eq "a message naming --allow-write" "[$gerr]" "argv wins: the write-mode gate answers before the repo is looked for" ;;
+esac
+# Same rule for the zero cap, against the one refusal that is NOT argv-only:
+# the collision check reads $UNIT_DIR, and a polish timer holds 03:00 on this
+# repo, so a 0-session install at the default time is refusable two ways. The
+# number the user can see must be the one they hear about.
+cerr=$(run_install autoloop "$SB" 0 --allow-write 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "max-sessions 0 at a colliding time is refused"
+case "$cerr" in
+  *max-sessions*) assert_eq 0 0 "argv wins: max-sessions 0 answers before the unit dir is read for a collision" ;;
+  *) assert_eq "a message naming max-sessions" "[$cerr]" "argv wins: max-sessions 0 answers before the unit dir is read for a collision" ;;
 esac
 
 # --- repo path containing whitespace: refused (systemd ExecStart is unquoted) ---

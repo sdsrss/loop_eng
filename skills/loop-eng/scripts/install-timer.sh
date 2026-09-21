@@ -16,7 +16,8 @@
 #   driver has no report-only mode, so an autoloop install without it is
 #   refused (see the gate further down).
 #     polish    arg = scope passed to unattended-polish.sh   (default src/)
-#     autoloop  arg = max-sessions for unattended-autoloop.sh (default 8)
+#     autoloop  arg = max-sessions for unattended-autoloop.sh (default 8, min 1
+#                     — 0 is no budget, not a small one; see the check below)
 #     --time HH:MM   OnCalendar daily trigger time            (default 03:00)
 #     --allow-write  opt into the mode's write path (OFF by default):
 #                      polish   -> ExecStart gets --auto-fix + LOOP_ENG_ALLOW_AUTOFIX=1
@@ -98,6 +99,23 @@ esac
 if [ "$MODE" = autoloop ]; then
   MAX_SESSIONS="${ARG:-8}"
   case "$MAX_SESSIONS" in ''|*[!0-9]*) die "autoloop max-sessions must be an integer: $MAX_SESSIONS" ;; esac
+  # ...and at least 1. A digit-class check alone accepts 0, which is not a
+  # smaller budget but no budget: unattended-autoloop.sh opens at session=0 and
+  # its loop head reads `[ "$session" -ge "$MAX_SESSIONS" ]`, so 0 -ge 0 breaks
+  # before the first session starts. The unit then exits 1 on every trigger
+  # having launched nothing — the same harm the --allow-write gate below
+  # refuses, reached through a number instead of a missing flag.
+  #
+  # Tested by glob, not by `[ "$MAX_SESSIONS" -eq 0 ]`: test's operands are
+  # evaluated as arithmetic, where a leading zero is octal, so the arithmetic
+  # form dies on a legitimate `08` ("value too great for base") under set -e
+  # instead of refusing anything. The value is already known non-empty and
+  # all-digits here, so "contains no non-zero digit" is exactly "is zero" —
+  # and it catches 00 and 000 the same way it catches 0. Nonzero leading-zero
+  # counts pass through unchanged; the driver normalizes them with 10#.
+  case "$MAX_SESSIONS" in *[!0]*) ;;
+    *) die "autoloop max-sessions must be at least 1, got: $MAX_SESSIONS. Zero is not a smaller budget, it is no budget: unattended-autoloop.sh checks the session cap before starting a session, so a cap of 0 breaks out of the loop immediately and the driver exits 1 with sessions=0 and the backlog untouched — no work, a status=1/FAILURE record in the journal on every trigger, every night, and the sentence explaining why buried in the repo's .loop/cron.log. Pass the number of sessions one nightly run may use (default 8)." ;;
+  esac
   [ "$ALLOW_WRITE" = 1 ] || die "autoloop has no report-only mode, so this timer could never do anything: unattended-autoloop.sh refuses to build unless LOOP_ENG_ALLOW_AUTOBUILD=1 is set, and the unit would exit 1 on every trigger, every night — no work, a status=1/FAILURE record in the journal, and the sentence explaining why buried in the repo's .loop/cron.log. Re-run with --allow-write to schedule real unattended builds — they modify and commit to the target repo with no human in the loop — or install a polish timer instead, whose no-flag mode is report-only and does useful work."
 fi
 # ---------------------------------------------------------------------------
@@ -209,8 +227,10 @@ if [ "$MODE" = polish ]; then
   DESC="loop-eng nightly report-only polish (dogfood)"
   [ "$ALLOW_WRITE" = 1 ] && DESC="loop-eng nightly auto-fix polish (dogfood)"
 else
-  # MAX_SESSIONS was parsed and range-checked in the argv-only block above, next
-  # to the gate that makes this branch reachable ONLY in write mode.
+  # MAX_SESSIONS was parsed and range-checked (integer, >= 1) in the argv-only
+  # block above, next to the gate that makes this branch reachable ONLY in write
+  # mode. "Range-checked" was aspirational while that block only ran a digit
+  # class: 0 passed it and produced a unit that exited 1 at every trigger.
   EXEC_ARGS="$REPO $MAX_SESSIONS"
   # Description and env are unconditional, because that gate already refused
   # every no-write shape. A second arm here used to read "report-only: refuses
