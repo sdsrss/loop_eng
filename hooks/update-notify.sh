@@ -51,7 +51,14 @@ installed=$(extract_version version <"$manifest")
 case "$installed" in ''|*[!0-9.]*) exit 0 ;; esac
 
 # --- 1. throttle: reuse a fresh cached latest instead of hitting the network -
-cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/loop-eng"
+# HOME is guarded because this file runs under `set -u` and promises above to
+# never exit nonzero. Bash evaluates this fallback only when XDG_CACHE_HOME is
+# unset or empty, and a bare $HOME there is fatal when HOME is UNSET (an empty
+# HOME expands fine) — so a SessionStart in an environment that strips HOME
+# killed the hook at this line instead of failing open. With the guard the dir
+# resolves to an unwritable /.cache, and write_state's `mkdir -p … || return 0`
+# takes it from there, which is the fail-open path every other failure uses.
+cache_dir="${XDG_CACHE_HOME:-${HOME:-}/.cache}/loop-eng"
 state="$cache_dir/update-check.json"
 now=$(date +%s 2>/dev/null || echo 0)
 [ -n "$now" ] || now=0

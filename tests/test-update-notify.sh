@@ -275,4 +275,31 @@ C14="$WORK/cache14"; : > "$STUB_COUNT"
 out=$(run_hook "$C14" 1.2 0)
 assert_eq "" "$out" "case14: a two-segment tag BELOW the installed version stays silent"
 
+# ============================================================================
+# 9. HOME unset: the one env shape that broke the fail-open contract.
+# ============================================================================
+# The hook runs `set -u` and derives its cache dir from
+# `${XDG_CACHE_HOME:-$HOME/.cache}`. Bash only evaluates that fallback when
+# XDG_CACHE_HOME is unset or empty — so an UNSET HOME (not an empty one, which
+# expands fine) made the line itself an unbound-variable fatal: exit 1 from a
+# SessionStart hook whose header promises it "never exits nonzero — fail-open
+# by construction". Every other case in this file sets both vars, which is why
+# nothing reached it.
+#
+# Driven through the no-curl PATH on purpose: the hook returns at the
+# `command -v curl` guard BEFORE any mkdir, so this case asserts the contract
+# without creating a cache dir anywhere — including under `/` when the suite
+# runs as root, which the documented bash-3.2 docker recipe does.
+: > "$STUB_COUNT"
+out=$(env -u HOME -u XDG_CACHE_HOME \
+        CLAUDE_PLUGIN_ROOT="$PROOT" STUB_TAG=1.3.0 STUB_COUNT="$STUB_COUNT" \
+        PATH="$NOBIN" "$SUITE_BASH" "$HOOK" </dev/null 2>"$WORK/err15"); rc=$?
+assert_eq 0 "$rc" "case15: an UNSET HOME still exits 0 (fail-open contract)"
+assert_eq "" "$out" "case15: and says nothing"
+if grep -q 'unbound variable' "$WORK/err15" 2>/dev/null; then
+  assert_eq "no unbound-variable fatal" "$(cat "$WORK/err15")" "case15: stderr carries no unbound-variable fatal"
+else
+  assert_eq 0 0 "case15: stderr carries no unbound-variable fatal"
+fi
+
 report "test-update-notify"
