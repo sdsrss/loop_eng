@@ -278,15 +278,24 @@ if [ -f "$OTHER_SVC" ] && [ -f "$OTHER_TMR" ]; then
   fi
 fi
 
-# Past the last refusal — now the directory may be created. (Named at $UNIT_DIR
-# above; see the note there for why the mkdir waits until here.)
-mkdir -p "$UNIT_DIR"
-
+# Past the last refusal — now directories may be created. Repo-local FIRST, and
+# the user-global one last, on purpose.
+#
+# "A refused install leaves nothing behind" holds for every `die` above, because
+# nothing has been created yet. It did NOT hold for a `set -e` abort BETWEEN the
+# two mkdirs: with $UNIT_DIR created first, a failure creating $REPO/.loop left
+# ~/.config/systemd/user behind on a box that never had one. The window is one
+# statement wide, which is why this is ordering rather than a trap — and the
+# ordering makes the residue, if any, land in the repo's own gitignored
+# bookkeeping dir instead of the user's home.
+#
 # The unit's StandardOutput/Error append to $REPO/.loop/cron.log; systemd opens
 # that file BEFORE ExecStart runs, so the directory must already exist at first
 # trigger. The runner's own `mkdir -p .loop` happens inside ExecStart — too late
 # for that first run's log redirect. Create it now so the first run isn't lost.
 mkdir -p "$REPO/.loop"
+
+mkdir -p "$UNIT_DIR"
 
 SVC="$UNIT_DIR/$UNIT.service"
 TMR="$UNIT_DIR/$UNIT.timer"

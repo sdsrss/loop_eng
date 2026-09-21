@@ -488,7 +488,21 @@ printf 'not a directory\n' > .loop/evidence
 bash "$RUNNER" 2>.loop/rc-err-nowrite; assert_eq 73 $? "unusable evidence dir fails closed, exit 73 (EX_CANTCREAT)"
 assert_file_contains .loop/rc-err-nowrite 'cannot write' "the refusal states it could not write, not a bash internal"
 assert_eq "" "$(grep -c 'unbound variable' .loop/rc-err-nowrite 2>/dev/null | grep -v '^0$')" "no bash internals leak into the refusal"
+# With no previous ledger on disk there is nothing stale to warn about.
+assert_eq "" "$(grep -c 'is now stale' .loop/rc-err-nowrite 2>/dev/null | grep -v '^0$')" "no stale-ledger note when no results.json exists"
 rm -f .loop/evidence .loop/rc-err-nowrite
+
+# ...and with one on disk, the refusal must say the file is NOT this run's
+# verdict. Exit 73 already protects the machine (the stop-gate re-runs this
+# script and reads the status); the note is for the human or model who opens
+# results.json after a failed publish and finds the previous round's green.
+rm -rf .loop/evidence
+printf '{"all_green": true, "note": "previous round"}\n' > .loop/results.json
+printf 'not a directory\n' > .loop/evidence
+bash "$RUNNER" 2>.loop/rc-err-stale; assert_eq 73 $? "failed write with an older ledger present still exits 73"
+assert_file_contains .loop/rc-err-stale 'is now stale' "the refusal names the leftover ledger as stale, not current"
+assert_file_contains .loop/results.json 'previous round' "the stale ledger is left in place, not deleted on the error path"
+rm -f .loop/evidence .loop/rc-err-stale .loop/results.json
 
 # Same invariant via the other door: a .loop/ the process cannot write at all.
 # chmod cannot take write access away from root, so this half is skipped there.

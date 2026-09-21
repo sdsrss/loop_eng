@@ -29,6 +29,13 @@ BACKLOG="$LOOP_DIR/backlog.md"
 # (64 EX_USAGE, 75 EX_TEMPFAIL, 78 EX_CONFIG).
 cannot_write() { # $1 = what, $2 = why
   echo "run-contract: cannot write $1 ($2) — refusing to run (fail closed). results.json and evidence/ ARE the completion record the harness trusts, so a contract whose result cannot be recorded has not been verified. Check permissions and free space under $LOOP_DIR/." >&2
+  # Exit 73 protects every MACHINE consumer: the stop-gate re-runs this script
+  # and reads the status, so a failed publish can never be mistaken for a green
+  # contract. What it cannot protect is a human or a model reading the file, and
+  # a failed publish leaves the PREVIOUS round's ledger sitting there looking
+  # current. Deleting it was rejected — erasing a completion record on the way
+  # out of an error path is worse than a stale one — so say it instead.
+  [ -f "$RESULTS" ] && echo "run-contract: NOTE — $RESULTS on disk is from an EARLIER round and is now stale. It is not this run's verdict; nothing here updated it." >&2
   exit 73
 }
 mkdir -p "$EVID" 2>/dev/null || cannot_write "$EVID" "mkdir failed"

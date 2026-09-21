@@ -117,6 +117,21 @@ XDG_CONFIG_HOME="$FRESH_XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 LOOP_ENG_CLAUDE_BIN="
 assert_eq 1 "$rc" "refused autoloop install exits 1 on a never-used config home too"
 assert_eq no "$(exists "$FRESH_XDG/systemd")" "the refused install creates no systemd config dir"
 
+# The same invariant one statement later: an ACCEPTED install still creates two
+# directories, and under `set -euo pipefail` a failure between them aborts. The
+# repo-local one goes first, so the abort cannot leave a user-global
+# ~/.config/systemd/user on a box that never had one. Reproduced by making the
+# repo-local mkdir fail — a FILE where .loop/ must go.
+FRESH_XDG2=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-xdg-fresh2.XXXXXX")
+SB_BLOCKED=$(mk_sandbox_repo)
+trap 'rm -rf "$SB" "$XDG" "$FRESH_XDG" "$FRESH_XDG2" "$SB_BLOCKED"' EXIT
+printf 'not a directory\n' > "$SB_BLOCKED/.loop"
+XDG_CONFIG_HOME="$FRESH_XDG2" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" \
+  bash "$INSTALL" polish "$SB_BLOCKED" >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq "1" "$([ "$rc" -ne 0 ] && echo 1)" "an install that cannot create the repo's .loop/ fails"
+assert_eq no "$(exists "$FRESH_XDG2/systemd")" "that failure leaves no user-global systemd dir behind"
+rm -f "$SB_BLOCKED/.loop"
+
 # --- autoloop --allow-write: max-sessions + autobuild env ---
 # --time 04:00: a polish timer already holds 03:00 on this repo, and two modes
 # on one repo at the same minute are refused (see the collision block at the
@@ -404,7 +419,7 @@ run_install autoloop "$SB" --allow-write --time 04:00 >/dev/null && rc=0 || rc=$
 assert_eq 0 "$rc" "same repo at a DIFFERENT time is allowed (this is how you run both)"
 assert_file_contains "$UNIT_DIR/loop-eng-autoloop.timer" "OnCalendar=*-*-* 04:00:00" "the allowed install wrote its own time"
 run_uninstall autoloop >/dev/null
-SB2=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$XDG" "$FRESH_XDG"' EXIT
+SB2=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$XDG" "$FRESH_XDG" "$FRESH_XDG2" "$SB_BLOCKED"' EXIT
 run_install autoloop "$SB2" --allow-write >/dev/null && rc=0 || rc=$?
 assert_eq 0 "$rc" "a DIFFERENT repo at the same time is allowed (different tree, different lock)"
 # re-installing the SAME mode is an overwrite, not a collision
