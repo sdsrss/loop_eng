@@ -175,9 +175,16 @@ assert_eq 0 "$rc" "case5: second run exits 0"
 assert_eq 1 "$(count_calls)" "case5: THROTTLE — second run did NOT call the network (counter still 1)"
 assert_file_contains <(printf '%s' "$out2") 'update available: v1.3.0' "case5: second run reuses the cached notice"
 
-# Proof B: remove the stub entirely; a throttled run still emits the cached notice
+# Proof B: remove the stub entirely; a throttled run still emits the cached notice.
+# The third argument selects the PATH: `1` is $NOBIN, the curl-free one. It used
+# to be `0`, which is "$BIN:$PATH" — deleting the stub from $BIN then left the
+# REAL /usr/bin/curl reachable, so the label below ("no curl reachable") was
+# false and a throttle regression would have had this suite fetch
+# api.github.com. Measured at the time: `before rm: $BIN/curl` →
+# `after rm: /usr/bin/curl`. The suite's own "no real network" promise must not
+# depend on the feature under test still working.
 rm -f "$BIN/curl"
-out3=$(run_hook "$C5" 1.3.0 0); rc=$?
+out3=$(run_hook "$C5" 1.3.0 1); rc=$?
 assert_eq 0 "$rc" "case5: throttled run with stub removed exits 0"
 assert_file_contains <(printf '%s' "$out3") 'update available: v1.3.0' "case5: cached notice survives with no curl reachable (network truly skipped)"
 
