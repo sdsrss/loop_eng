@@ -83,17 +83,24 @@ for f in "$PLUGIN_ROOT"/tests/test-*.sh; do
   # and without the comment filter it failed against the sentence describing the
   # anchor.
   traps=$(grep -vE '^[[:space:]]*#' "$f" | grep -E '(^|;[[:space:]]*)trap .+EXIT' || true)
-  # Every sandbox-MAKING form lib.sh offers has to be listed here, or a suite's
-  # newest fixtures are the ones the scan cannot see: mk_wide_sandbox_repo
-  # builds a 4000-file repo, which is the most expensive dir in $TMPDIR to leak
-  # and was invisible to the `mk_sandbox_repo` alternative (different name).
-  vars=$(grep -oE '^[[:space:]]*[A-Z_][A-Za-z0-9_]*=\$\((mktemp -d|mk_sandbox_repo|mk_wide_sandbox_repo)' "$f" \
-           | sed -E 's/^[[:space:]]*//; s/=\$\(.*//' | sort -u)
+  # Match the SHAPE, not a list of spellings. The pattern used to require an
+  # uppercase name, a bare `=$(`, and the literal `mktemp -d` — so four ordinary
+  # ways of making a scratch dir were invisible to both halves of this scan:
+  # `LEAK="$(mktemp -d)"` (quoted), `leak=$(mktemp -d)` (lowercase),
+  # `export LEAK=$(mktemp -d)`, and `LEAK=$(mktemp)` (a scratch FILE, which also
+  # needs removing). Injecting all four into a copy of test-sync-local.sh left
+  # this suite at 98 passed, 0 failed. It also meant every new `mk_*sandbox*`
+  # helper had to be remembered here by hand, and the list had already been
+  # short once (mk_wide_sandbox_repo builds the most expensive dir in $TMPDIR to
+  # leak and was added only after it existed). Now: any assignment whose value
+  # comes from `mktemp` or from a helper named `mk_…sandbox…`, however spelled.
+  vars=$(grep -oE '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*="?\$\((mktemp|mk_[A-Za-z0-9_]*sandbox[A-Za-z0-9_]*)' "$f" \
+           | sed -E 's/^[[:space:]]*//; s/^export[[:space:]]+//; s/="?\$\(.*//' | sort -u)
   for v in $vars; do
     case "$traps" in
       *"\$$v"*|*"\${$v}"*) PASS=$((PASS+1)) ;;
       *) FAIL=$((FAIL+1))
-         echo "  FAIL: $base creates \$$v (mktemp -d / mk_sandbox_repo / mk_wide_sandbox_repo) but no EXIT trap removes it" >&2 ;;
+         echo "  FAIL: $base creates \$$v (mktemp / mk_*sandbox* helper) but no EXIT trap removes it" >&2 ;;
     esac
   done
   # ...and the LAST trap must name them all. Two suites re-install a longer trap
