@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.19.0 — 2026-09-21
+
+One refusal, and the documentation catching up with the machine. The refusal is
+small and the docs are large: a report-only review of the 1858 lines of prose
+that had never entered a review lens found 34 claims the code does not support,
+including two in the release checklist whose only job is to stop a release on
+red, and two in the README that cost a user a wasted night each.
 
 ### Upgrade
 
@@ -28,6 +34,53 @@
   nothing removes it for you, and `uninstall-timer.sh autoloop` is the way out.
   **To keep the old behaviour, pin `0.18.1`.** `polish` is unchanged in every
   mode.
+
+### Fixed
+
+- **A SessionStart hook could exit non-zero.** `hooks/update-notify.sh` runs
+  under `set -u` and promises in its own header never to exit non-zero, but
+  derived its cache dir from `${XDG_CACHE_HOME:-$HOME/.cache}` — fatal when
+  `HOME` is *unset* (an empty one expands fine). Guarded; the dir then resolves
+  to an unwritable `/.cache` and the existing fail-open path takes over.
+
+- **The release checklist prescribed a CI check that reports the wrong run.**
+  Both steps in `RELEASING.md` whose job is "do not publish on red" used
+  `gh run list --limit 1`. For ~15s after a push GitHub has not registered the
+  new run, so on `main` that returns the commit *before* the one being released,
+  and after a tag push it returns the *previous* tag's gate run — already green.
+  This project had caught both shapes in the field (0.16.0 and 0.16.1) and
+  written the rule down only in a private note, while the authoritative
+  checklist kept prescribing the broken form. Both steps now select by sha and
+  by tag.
+
+- **README's `LOOP_ENG_ALLOW_AUTOFIX` row had the failure mode backwards.** It
+  said `--auto-fix` without the variable "stays report-only"; the driver
+  refuses and exits 1, so a cron line missing the variable does nothing at all,
+  every night, while the table promised nightly review. Report-only is what
+  omitting the FLAG gives you.
+
+- **README's documented hand-resume was denied by this plugin's own gate.**
+  `rm -f .loop/active .loop/gate-count .loop/criteria.sha256` as one call exits
+  2: the evidence-gate is PreToolUse, so it reads the whole command string while
+  `active` still exists. Now documented as the two calls it has always required.
+
+- **Thirty more claims across `README.md`, `CLAUDE.md`, `RELEASING.md`,
+  `commands/` and `agents/`**, each verified against the code rather than
+  against another document. The ones that changed what an orchestrating model
+  would do: `/autoloop` told it to tick a backlog line the evidence-gate denies
+  (the lock is file-wide, not per-line); it presented
+  `LOOP_ENG_DISABLE_EVIDENCE_GATE=1` as the whole route to a mid-loop contract
+  change, when the hash-lock is a second layer that exits 77 on every later stop
+  until `arm-contract.sh` re-pins it; `loop-builder` was pointed at
+  `.loop/contract.md` as the definition of "done", which is `.loop/criteria.tsv`;
+  `loop-checker` was told to run the slow full suite every round, against a
+  design that reserves it for the last; and `/polish`'s degraded mode described
+  applying fixes with no agent present that may apply one.
+
+- **One class of prose defect is now machine-caught.** `tests/test-packaging.sh`
+  already banned an overclaim about the read-only agents across the three agent
+  files; `SKILL.md` carried the same overclaim and was outside that sweep. The
+  ban now covers it, with a positive assertion beside it.
 
 ## 0.18.1 — 2026-09-21
 
