@@ -124,6 +124,16 @@ for a in agents/loop-checker.md agents/loop-reviewer.md agents/loop-verifier.md;
   has   "$a" "not for writing"       "$a states the Bash red line instead of implying it is impossible"
 done
 
+# ...and the same overclaim, in the file the sweep above did not cover. SKILL.md
+# said "loop-checker cannot [write]" for as long as the agent files said "no
+# write access by design", and survived the round that removed it from them —
+# a ban is only worth what its scope covers. The positive assertion is what
+# stops the short version coming back as a "simplification".
+hasnt skills/loop-eng/SKILL.md "loop-checker cannot" \
+  "SKILL.md does not claim the checker cannot write — it has Bash"
+has   skills/loop-eng/SKILL.md "no Write or Edit tool" \
+  "SKILL.md states the whitelist claim in the same terms the agent files do"
+
 # P2-12. The template's FAST subset is what the stop-gate runs on every stop
 # attempt under a 100s budget, and it shipped with `npm test` in it — a typical
 # JS suite overruns, the gate blocks as a fail-closed timeout, three of those

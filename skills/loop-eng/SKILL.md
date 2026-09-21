@@ -16,8 +16,10 @@ Two entry points:
   plugin) for the full protocol.
 - `/polish [scope]` — iterative quality improvement: numeric baseline →
   4 independent review lenses → adversarial verification of every finding →
-  fix queue → full regression → repeat until a dry round (no fresh confirmed
-  findings). Behavior-preserving by definition; public-contract changes are
+  fix queue → full regression → repeat until a dry round (no fresh finding
+  entered the FIX QUEUE — not merely none confirmed: a confirmed finding that
+  is `optional`, or deferred as a public-contract change, is one the loop will
+  never act on, so counting it keeps a converged loop running). Behavior-preserving by definition; public-contract changes are
   listed for the human, never applied. See `commands/polish.md` (in this plugin).
 
 ## Which tasks fit a loop
@@ -40,8 +42,14 @@ BAD fits (do NOT loop these — handle interactively):
    `.loop/criteria.tsv` (binary verify commands, fixed while the loop is
    armed) for the machine.
 2. Maker/checker separation is enforced by tool whitelists, not trust:
-   loop-builder can write, loop-checker cannot.
-3. State lives on disk (`.loop/state.md`), not in the context window.
+   loop-builder has Write and Edit; loop-checker, loop-reviewer and
+   loop-verifier have no Write or Edit tool. They do have Bash, which writes —
+   the whitelist removes the writing TOOLS, and the red line against using Bash
+   for writing is stated in each agent's own file. Claiming they cannot write
+   at all would be stronger than the mechanism.
+3. State lives on disk, not in the context window — `.loop/state.md` for
+   `/autoloop`, `.loop/polish-state.md` (plus `polish-seen.md` and
+   `polish-deferred.md`) for `/polish`.
 4. Every loop is bounded, and the two are bounded differently:
    `/autoloop` — six stop rules, 5 rounds max.
    `/polish` — four stop rules, three macro rounds.
@@ -62,7 +70,7 @@ repo at a time: `.loop/` is shared state.
 ## Contract quality caps loop quality
 
 The loop's output quality is capped by the contract's spec quality: builder
-and checker faithfully execute the spec, including its holes. Three authoring
+and checker faithfully execute the spec, including its holes. Four authoring
 rules, learned from live pilots:
 
 1. Every target criterion must be RED before arming — a criterion already
