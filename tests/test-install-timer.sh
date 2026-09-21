@@ -125,6 +125,13 @@ assert_eq no "$(exists "$FRESH_XDG/systemd")" "the refused install creates no sy
 FRESH_XDG2=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-xdg-fresh2.XXXXXX")
 SB_BLOCKED=$(mk_sandbox_repo)
 trap 'rm -rf "$SB" "$XDG" "$FRESH_XDG" "$FRESH_XDG2" "$SB_BLOCKED"' EXIT
+# The scope check (install-timer.sh:221) runs ~75 lines BEFORE either mkdir, and
+# `mk_sandbox_repo` ships no `src/`, so without this line the install dies at
+# "polish scope not found" and both assertions below pass for the wrong reason —
+# rc=1 from the scope refusal, and no systemd dir because NEITHER mkdir ran.
+# Caught by the pre-ship review: with this line missing, reverting the fix under
+# test left the suite at 107 passed, 0 failed. The mutant has to die.
+mkdir -p "$SB_BLOCKED/src"
 printf 'not a directory\n' > "$SB_BLOCKED/.loop"
 XDG_CONFIG_HOME="$FRESH_XDG2" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" \
   bash "$INSTALL" polish "$SB_BLOCKED" >/dev/null 2>&1 && rc=0 || rc=$?

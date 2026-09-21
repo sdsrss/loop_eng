@@ -59,7 +59,10 @@ done
 # :26-32, missing here.
 HOOKCMDS=$(grep -oE '"command"[[:space:]]*:[[:space:]]*"[^"]*"' hooks/hooks.json \
              | sed -E 's/^"command"[[:space:]]*:[[:space:]]*"//; s/"$//')
-declared=$(grep -cE '"type"[[:space:]]*:[[:space:]]*"command"' hooks/hooks.json || true)
+# -o | wc -l, not -c: `grep -c` counts matching LINES, and `jq -c` puts the whole
+# file on one line — so the guard against a reformat went red on the very
+# reformat its comment names (declared=1, found=3). Occurrences are the unit.
+declared=$(grep -oE '"type"[[:space:]]*:[[:space:]]*"command"' hooks/hooks.json | wc -l | tr -d '[:space:]')
 found=$(printf '%s\n' "$HOOKCMDS" | grep -c '[^[:space:]]' || true)
 if [ "$declared" -eq 0 ]; then
   FAIL=$((FAIL+1))
