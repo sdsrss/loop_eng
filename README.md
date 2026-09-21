@@ -28,9 +28,11 @@ table says which way each probe falls: most degrade on a documented path, four
 of them **weaken a guard** (rows 1-4, and each says so on the stream it has —
 the difference between a degrade and a silent one; the one exception is
 `arm-contract.sh`'s advisory per-criterion red-check in row 3, which simply runs
-unbounded), and two **refuse outright** rather than degrade (the `claude` CLI,
-and bash ≥ 4.4 for the unattended drivers). None of this belongs only in a
-script comment, which is where it lived before.
+unbounded), and two **refuse outright** rather than degrade — but each in one
+place only: a missing `claude` CLI stops `install-timer.sh`, not the drivers
+(they resolve it lazily and fail at run time), and bash < 4.4 stops the
+unattended drivers, not the hooks. None of this belongs only in a script
+comment, which is where it lived before.
 
 | Tool | Used by | Absent → |
 |---|---|---|
@@ -40,7 +42,7 @@ script comment, which is where it lived before.
 | `timeout` / `gtimeout` | `unattended-polish.sh` | its wall-clock budget is **unbounded** and the run says so on stderr, where the scheduler's log keeps it. `LOOP_ENG_MAX_MINUTES` then has no effect. |
 | `curl` | `update-notify.sh` | no update-available notices. Silent by design. |
 | `systemctl --user` | `install-timer.sh`, `uninstall-timer.sh` | scheduling is unavailable; use cron, or `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` to write (and remove) the unit files only. |
-| `claude` CLI | `install-timer.sh`, `unattended-*.sh` | `install-timer.sh` **refuses outright** — this is the one hard dependency in the table, not a degrade. Point `LOOP_ENG_CLAUDE_BIN` at the binary if it is not on `PATH`. |
+| `claude` CLI | `install-timer.sh` (checked), `unattended-*.sh` (not checked) | `install-timer.sh` **refuses outright** — it resolves the binary at install time and probes it under the unit's own minimal `PATH`, so this is a hard dependency there, not a degrade. The drivers do **not** check: they take `${LOOP_ENG_CLAUDE_BIN:-claude}` and fail when they try to run it. Point `LOOP_ENG_CLAUDE_BIN` at the binary if it is not on `PATH`. |
 | bash ≥ 4.4 | `unattended-*.sh` only | the drivers **refuse to start** (exit 78) rather than dying partway through — checked at run time, not just stated in a header. The hooks and their contract scripts (`stop-gate.sh`, `evidence-gate.sh`, `update-notify.sh`, `arm-contract.sh`, `run-contract.sh`) run on stock macOS bash 3.2, and all five are what the `test-bash32` CI job covers — it runs their suites, and syntax-checks the scripts, through `/bin/bash` explicitly. |
 
 An inert evidence-gate does **not** forfeit the completion invariant. The gate
@@ -66,7 +68,7 @@ contract (binary acceptance criteria, verify commands)
 - **Builder** and **checker** are separate subagents. The checker has no
   Write/Edit tools — separation is enforced by tool whitelists, not trust.
 - Every claim of "done" is a checker report, never the builder's opinion.
-- Six stop rules bound the loop: ALL GREEN · rounds exhausted · same failure
+- Six stop rules bound the loop: ALL GREEN · rounds exhausted · same root cause
   twice in a row · regression · no progress for 2 rounds · capability boundary.
   Any non-green stop escalates with what was tried and why more rounds won't help.
 - State lives in `.loop/state.md` and per-round git commits — the loop survives
@@ -130,9 +132,11 @@ guarantees the gate can never deadlock a session, and the gate lifts itself
 the moment the contract passes.
 
 A companion PreToolUse hook (`hooks/evidence-gate.sh`) denies model writes
-to `.loop/results.json`, `.loop/evidence/`, and the armed `criteria.tsv` (plus
+to `.loop/results.json`, `.loop/evidence/`, the armed `criteria.tsv` (plus
 its `criteria.sha256` hash-lock and, for a legacy loop, the `verify.sh` that
-*is* its contract) while the loop is armed (`.loop/active`
+*is* its contract) and a `.loop/backlog.md` that carries any `| verify:` line —
+that last lock is **file-wide, not per-line**: one such line freezes every line
+in the file, ordered-list `1. [ ]` items included — while the loop is armed (`.loop/active`
 present) — via the Write/Edit tools this path is mechanically closed, so
 "passes: true" can only be produced by running the command, never typed. While
 armed it also denies a Bash `rm`/`mv` aimed at the whole `.loop` directory,
@@ -187,7 +191,8 @@ Bash compatibility: five scripts run on stock macOS bash 3.2 — the three hooks
 (`stop-gate.sh`, `evidence-gate.sh`, `update-notify.sh`) and the two contract
 scripts (`arm-contract.sh`, `run-contract.sh`). This is tested in CI, not
 asserted: a dedicated `test-bash32` job runs their suites through macOS's
-`/bin/bash` (3.2) on every push and syntax-checks those same five files.
+`/bin/bash` (3.2) on every push to `main` and every pull request, and
+syntax-checks those same five files.
 `update-notify.sh` belongs on that list for the plainest reason — it is a
 SessionStart hook, so on a stock macOS box bash 3.2 is what runs it in every
 real session. The unattended runners are the exception: they need bash ≥ 4.4
@@ -280,8 +285,16 @@ Scope notes:
   detects the leftover before each session, says `previous session left the gate
   armed`, and clears `active` / `gate-count` / `criteria.sha256`; the driver is
   the human-authorized outer layer, so disarming is its job, not the model's.
-  Resuming by hand: `rm -f .loop/active .loop/gate-count .loop/criteria.sha256`
-  (in that order — removing `active` first is what the evidence-gate requires).
+  Resuming by hand takes **two** Bash calls, not one line:
+  ```
+  rm -f .loop/active .loop/gate-count      # first call
+  rm -f .loop/criteria.sha256              # second call
+  ```
+  Order *within* a single command does not help: the evidence-gate is a
+  PreToolUse hook, so it sees the whole command string before anything is
+  removed — `.loop/active` still exists at that moment, and the string also
+  mentions `.loop/criteria.sha256`, so the call is denied (exit 2). The deny
+  message says the same thing.
 
 If your Claude Code version does not auto-load plugin hooks, register manually
 in your project's `.claude/settings.json`:
@@ -440,7 +453,11 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   `--time` sets the daily `OnCalendar` (default `03:00`). A polish scope must
   exist in the repo (a path or a glob that matches) — otherwise the unit would
   enable cleanly and review nothing every night, so it is refused at install
-  time, like the whitespace and `%` cases above.
+  time, like the whitespace case above and the `%` one: systemd reads a literal
+  `%` in a unit file as a specifier prefix (`%i`, `%h`, …), so a percent sign in
+  the repo path, the plugin path, the claude path or a polish scope would
+  misexpand or make the unit fail to load. Same family, same install-time
+  refusal — all of these "enable cleanly, break at first trigger" if deferred.
 - **Both modes default to `03:00`, and both timers on one repo at the same
   minute is refused.** The two drivers cannot share a working tree, so the
   second one to fire would take the lock refusal (exit 69) and do nothing —
@@ -467,7 +484,7 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 
 | Variable | Layer | Default | Effect |
 |---|---|---|---|
-| `LOOP_ENG_ALLOW_AUTOFIX` | `unattended-polish.sh` | unset (`0`) | Required together with the `--auto-fix` flag before `unattended-polish.sh` will write fixes; without it the run stays report-only. |
+| `LOOP_ENG_ALLOW_AUTOFIX` | `unattended-polish.sh` | unset (`0`) | Required together with the `--auto-fix` flag before `unattended-polish.sh` will write fixes. `--auto-fix` *without* it is **refused** (exit 1, nothing runs) — it does not fall back to report-only. Report-only is what you get by omitting the flag, not by omitting the variable. |
 | `LOOP_ENG_ALLOW_AUTOBUILD` | `unattended-autoloop.sh` | unset (`0`) | Required before `unattended-autoloop.sh` will drive a builder; without it the driver refuses to run. |
 | `LOOP_ENG_ARM_REDCHECK` | `arm-contract.sh` | `1` (enabled) | Set to `0` to skip the arm-time advisory red-check entirely — zero criterion commands executed. |
 | `LOOP_ENG_ARM_REDCHECK_TIMEOUT` | `arm-contract.sh` | `10` (seconds) | Per-criterion timeout budget for the arm-time red-check; non-numeric or `0` falls back to `10`. |
@@ -482,6 +499,7 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 | `LOOP_ENG_POST_CHECK` | `unattended-polish.sh` | unset | A shell command run after an `--auto-fix` session (never in report-only). Non-zero makes the driver exit `70` — the driver cannot know a project's test command, so the operator names one. |
 | `LOOP_ENG_MAX_MINUTES` | `unattended-polish.sh`, `unattended-autoloop.sh` | `120` (polish) / `240` (autoloop) | Wall-clock budget for the unattended run, enforced via `timeout` or `gtimeout` (both drivers probe in that order; with neither on `PATH` the run is uncapped and says so). `0` is a config error (would disable the timeout) and falls back to the script's default. |
 | `LOOP_ENG_TIMER_NO_SYSTEMCTL` | `install-timer.sh`, `uninstall-timer.sh` | unset (`0`) | Set to `1` to write the systemd unit files without calling `systemctl` — used by the test suite, also useful on a box with no user D-Bus. |
+| `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` | `unattended-polish.sh`, `unattended-autoloop.sh` | `0` (set by the drivers) | Not a loop-eng knob — a Claude Code one, listed because both drivers override it. The platform default (600000, 10 min) caps how long `claude -p` waits on backgrounded work; the drivers set `0` so a session is bounded by their own `timeout` budget instead of by two ceilings that disagree. Export it yourself to override. |
 | `LOOP_ENG_TIMER_SKIP_PROBE` | `install-timer.sh` | unset (`0`) | Set to `1` to skip the install-time probe that runs `claude --version` under the unit's own minimal `PATH`. The probe catches an npm/nvm `#!/usr/bin/env node` shim that resolves in your shell and exits 127 at first trigger; skip it if your binary needs environment the probe cannot reproduce. |
 
 ## Safety model
@@ -493,7 +511,7 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 | Done = machine signal | contracts allow only binary criteria with verify commands |
 | Done = machine-written fact | results.json/evidence written only by run-contract.sh; PreToolUse gate denies model writes |
 | Never weaken a check to pass it | red line in every agent + orchestrator |
-| Loops can't run away | round caps, block ceiling, same-failure and no-progress brakes |
+| Loops can't run away | round caps, block ceiling, same-root-cause and no-progress brakes |
 | Red actions stay human | money / production / schema / public API are never looped |
 | Output is a proposal | every run ends by showing the diff for human review |
 | Test/build output is untrusted text | checker reports are forwarded verbatim by design (fidelity over filtering); prompt-injection riding in tool output is a residual covered by the red lines and the human review of the diff |
@@ -520,8 +538,11 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   `git rm -r --cached` command that fixes it.
 - **`.loop/` is local state, not auto-removed.** That same directory lives in
   your working tree. Neither the
-  plugin uninstall nor `uninstall-timer.sh` deletes it — by design, since it
-  may hold an in-progress loop's state. If you want it gone, remove it by
+  plugin uninstall deletes it, and `uninstall-timer.sh` removes it only in the
+  one case where it is provably the timer's own litter: `.loop/` holding
+  *nothing but* the `cron.log` that install-timer created. Any other content —
+  an in-progress loop's state included — and it removes nothing at all, not even
+  the log. If you want it gone, remove it by
   hand: `rm -rf .loop/`. While a loop is **armed**, the evidence-gate denies
   that command from a model's Bash call — one `rm` would take the stop-gate's
   marker, the hash-lock and the evidence ledger together, which is a disarm
@@ -537,7 +558,11 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   A successful check silences the network for 24h; a **failed** one — offline,
   a 403, an uncomparable tag — silences it for 1h, so a machine with no
   connectivity pays one 3-second `curl` an hour rather than one per session.
-  Nothing else the plugin writes lives outside your project's `.loop/`.
+  Two other things the plugin writes live outside `.loop/`, both by request and
+  both documented above: the systemd unit pair under
+  `${XDG_CONFIG_HOME:-~/.config}/systemd/user/` when you install a timer
+  (removed by `uninstall-timer.sh`), and the `.loop/` ignore line appended to
+  `.git/info/exclude` when a loop arms. Nothing else.
 
 ## What to loop (and what not to)
 
