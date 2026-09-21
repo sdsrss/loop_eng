@@ -112,7 +112,7 @@ fi
 cd "$REPO"
 
 # The dirty-tree guard below reads `git status --porcelain`, which in a non-repo
-# prints its fatal to STDERR and leaves stdout EMPTY — so `grep -vq` saw no line,
+# prints its fatal to STDERR and leaves stdout EMPTY — so the guard saw no line,
 # concluded "not dirty", and let the run proceed. That failed the guard OPEN in
 # the one case it matters most: an unattended `--permission-mode bypassPermissions`
 # session editing a directory with no version control, so nothing is attributable
@@ -122,6 +122,46 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "not a git repository (or no work tree): $REPO — refusing unattended run. Unattended changes must be attributable and revertable." >&2
   exit 1
 fi
+
+# The one place that answers "is this tree dirty?", for both guards below.
+#
+# They used to ask it with a PIPELINE — `git status --porcelain | grep -vq '^??
+# \.loop/'` — which under this script's `set -euo pipefail` answered CLEAN for
+# the dirtiest trees there are. `grep -vq` selects its first line and exits on
+# the spot; git, still writing, takes a SIGPIPE and dies 141; pipefail makes
+# that 141 the pipeline's status, so the `if` read FALSE and the run PROCEEDED.
+# PIPESTATUS at the moment of failure is `git=141 grep=0` — the producer's death
+# read as an answer. The guard failed OPEN exactly when the tree was dirtiest.
+#
+# It is a race, and which way it goes is a matter of size: on a one-file tree
+# (~40 bytes of porcelain, which is what every test fixture had) git finishes
+# writing before grep leaves and the guard works. Past the 64KB pipe buffer
+# — ~4000 modified files — git is guaranteed to be blocked mid-write when grep
+# goes, so it always dies and the guard always fails open. Verified pre-fix: a
+# `--permission-mode bypassPermissions` session started on a 4000-file dirty
+# tree, driver exit 0, no refusal line anywhere.
+#
+# So: no pipe. Capture the porcelain whole, filter it in-process, where nothing
+# can signal the producer and a partial read cannot pass for a verdict. The
+# `?? .loop/` exemption is the same literal prefix the old `-v` pattern carried,
+# including its boundary: git quotes unusual paths (`?? ".loop/a b"`), which
+# that pattern did not match either, so such a file still reads as dirt.
+tree_is_dirty() { # 0 = dirty (refuse), 1 = clean
+  local porcelain line
+  # A git that cannot answer is not a clean tree. The work-tree check above has
+  # already established that git can speak for this directory, so a failure here
+  # is a broken one — refuse. (That check is also what makes an EMPTY porcelain
+  # trustworthy as "clean" rather than "git printed its fatal to stderr".)
+  porcelain=$(git status --porcelain) || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      '') ;;              # trailing newline / empty capture on a clean tree
+      '?? .loop/'*) ;;    # untracked loop bookkeeping is not the operator's work
+      *) return 0 ;;
+    esac
+  done <<< "$porcelain"
+  return 1
+}
 
 LOG_DIR=".loop"
 mkdir -p "$LOG_DIR"
@@ -196,7 +236,7 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 LOG="$LOG_DIR/unattended-$STAMP.log"
 
 # Dirty tree (ignoring .loop/ bookkeeping) -> refuse.
-if git status --porcelain | grep -vq '^?? \.loop/'; then
+if tree_is_dirty; then
   echo "$STAMP dirty tree, refusing unattended run" | tee -a "$LOG_DIR/unattended.log" >&2
   exit 1
 fi
@@ -326,7 +366,7 @@ fi
 # report-only is exempt: it changes nothing, so there is nothing to vet, and its
 # exit code is the session's by design.
 if [ -z "$MODE" ]; then
-  if git status --porcelain | grep -vq '^?? \.loop/'; then
+  if tree_is_dirty; then
     echo "$STAMP mode=auto-fix scope=$SCOPE exit=$STATUS UNTRUSTWORTHY: the session ended with uncommitted changes in the tree — it did not finish applying its fixes (--max-turns exhausted mid-edit is the usual cause). The tree is left as it was found; review \`git status\` and either commit or revert. log=$LOG" \
       | tee -a "$LOG_DIR/unattended.log" >&2
     tail -40 "$LOG"

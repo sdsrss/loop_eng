@@ -652,4 +652,41 @@ assert_eq "plain item" "$(pick_item '- [ ] plain item')" \
 assert_eq "second item" "$(pick_item '- [x] first item' '+ [ ] second item')" \
   "the picker skips ticked lines and takes the first unfinished one, any bullet"
 
+# --- the dirty-tree guard vs. a WIDE tree: it failed OPEN ---
+# `git status --porcelain | grep -vq '^?? \.loop/'` under `set -euo pipefail`.
+# `grep -vq` selects the FIRST porcelain line and exits on the spot; git, still
+# writing, takes a SIGPIPE and dies 141; pipefail hands the pipeline that 141,
+# so the `if` is FALSE and the guard calls the tree CLEAN. PIPESTATUS at the
+# moment of failure is `git=141 grep=0` — the producer's death read as an
+# answer. This driver WRITES and COMMITS unattended, so the guard failing open
+# means sessions layering commits on top of someone's uncommitted work, which
+# is the one thing "every session starts from a committed state" promised.
+#
+# The dirty fixture at the top of this suite is ONE untracked file (~20 bytes of
+# porcelain): git finishes writing before grep leaves, the guard works, and the
+# bug stays invisible. Measured on the pre-fix driver in a 4000-file tree
+# (~72000 bytes): TWO bypassPermissions sessions started on a tree it was
+# supposed to refuse. That small fixture stays; it pins the other end.
+SBWIDE=$(mk_wide_sandbox_repo)
+trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBW" "$SBW0" "$SBW3" "$SBB" "$SBB2" "$SBWIDE" "$SD" "$TD"' EXIT
+mkdir -p "$SBWIDE/.loop"
+printf -- '- [ ] item A\n' > "$SBWIDE/.loop/backlog.md"
+dirty_wide_tree "$SBWIDE"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SBWIDE" 5 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "a wide dirty tree is refused (the guard must not fail open at scale)"
+assert_file_contains "$SBWIDE/.loop/unattended.log" "dirty tree" "the wide-tree refusal names its reason"
+assert_eq 0 "$(grep -c 'session .* starting' "$SBWIDE/.loop/unattended.log")" \
+  "no session is started against a wide dirty tree"
+# The clean end of the same guard, same scale: a wide tree with nothing
+# modified must still run, or the fix is just a guard that refuses everything.
+(cd "$SBWIDE" && git checkout -- . >/dev/null 2>&1)
+: > "$SBWIDE/.loop/unattended.log"
+printf -- '- [ ] item A\n' > "$SBWIDE/.loop/backlog.md"
+STUB_MODE=progress LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SBWIDE" 5 >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 0 "$rc" "a wide but CLEAN tree still runs its backlog to the end"
+assert_eq 1 "$(grep -c 'session .* starting' "$SBWIDE/.loop/unattended.log")" \
+  "the clean wide tree gets its one session"
+
 report "test-unattended-autoloop"

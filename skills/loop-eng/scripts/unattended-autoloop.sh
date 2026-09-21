@@ -112,6 +112,40 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
+# The in-loop dirty check, in the one place that answers the question — and NOT
+# as a pipeline, which is how it came to answer wrong. `git status --porcelain |
+# grep -vq '^?? \.loop/'` under `set -euo pipefail`: `grep -vq` selects its first
+# line and exits on the spot, git dies of SIGPIPE mid-write (141), pipefail makes
+# that the pipeline's status, and the `if` reads FALSE — CLEAN. PIPESTATUS at the
+# moment of failure is `git=141 grep=0`. This driver COMMITS unattended, so the
+# guard failing open means sessions layering commits on top of work that was
+# never committed, which is exactly what "every session starts from a committed
+# state" was supposed to rule out. Verified pre-fix: two bypassPermissions
+# sessions started on a 4000-file dirty tree.
+#
+# Size decides the race: a one-file tree (~20 bytes of porcelain, what the test
+# fixture had) is won by git, so the guard looks sound; past the 64KB pipe buffer
+# git is blocked mid-write when grep leaves and is always killed. Capturing the
+# porcelain whole removes the race rather than moving it. Twin of the function
+# in unattended-polish.sh — the drivers share no library, so they share the
+# comment; fix one and the other needs the same fix.
+tree_is_dirty() { # 0 = dirty (refuse), 1 = clean
+  local porcelain line
+  # A git that cannot answer is not a clean tree: the work-tree check above has
+  # already established that git can speak here, so a failure now is a broken
+  # one — refuse. It is also what makes an EMPTY porcelain mean "clean" rather
+  # than "git printed its fatal to stderr and nothing to stdout".
+  porcelain=$(git status --porcelain) || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      '') ;;              # trailing newline / empty capture on a clean tree
+      '?? .loop/'*) ;;    # untracked loop bookkeeping is not the operator's work
+      *) return 0 ;;
+    esac
+  done <<< "$porcelain"
+  return 1
+}
+
 BACKLOG=".loop/backlog.md"
 # The ONE grammar this driver reads the backlog with — the pending count and the
 # item picker below must not drift apart, and neither may drift from
@@ -314,7 +348,7 @@ while :; do
     break
   fi
 
-  if git status --porcelain | grep -vq '^?? \.loop/'; then
+  if tree_is_dirty; then
     note "dirty tree, refusing to continue"; exit 1; fi
 
   session=$((session + 1))

@@ -68,6 +68,15 @@ case "${STUB_MODE:-ok}" in
   # changes are unattributable and which will make every later run refuse the
   # tree as dirty.
   dirty) echo "applied a fix"; echo "half-applied" > leftover-fix.txt; exit 0 ;;
+  # The same abandonment, at SCALE — see the wide-tree block at the bottom of
+  # this file. The post-run truth check reads `git status --porcelain` through
+  # the same pipeline the pre-run guard does, so it has the same blind spot,
+  # and a session that abandons thousands of files is the one the check most
+  # has to catch. Only meaningful in a mk_wide_sandbox_repo tree.
+  dirty-wide)
+    echo "applied fixes"
+    for f in wide/*; do echo "half-applied" > "$f"; done
+    exit 0 ;;
 esac
 EOF
 chmod +x "$STUB"
@@ -170,7 +179,7 @@ fi
 
 # --- non-git target: the dirty-tree guard must not fail OPEN ---
 # `git status --porcelain` in a non-repo writes its fatal to stderr and leaves
-# stdout EMPTY, so `grep -vq` found no line, reported "not dirty", and the run
+# stdout EMPTY, so the guard found no line, reported "not dirty", and the run
 # proceeded — invoking claude with --permission-mode bypassPermissions against a
 # directory with no version control at all, i.e. unattributable, unrevertable
 # edits. That is exactly what the guard exists to prevent.
@@ -504,5 +513,80 @@ assert_eq 0 $? "a passing LOOP_ENG_POST_CHECK leaves the run green"
 STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" LOOP_ENG_POST_CHECK='exit 4' \
   bash "$SCRIPT" "$SBF" src/ >/dev/null 2>&1
 assert_eq 0 $? "LOOP_ENG_POST_CHECK does not run in report-only mode"
+
+# --- the dirty-tree guards vs. a WIDE tree: both of them failed OPEN ---
+# `git status --porcelain | grep -vq '^?? \.loop/'` under `set -euo pipefail`.
+# `grep -vq` selects the FIRST porcelain line and exits on the spot; git, still
+# writing, takes a SIGPIPE and dies 141; pipefail hands the pipeline that 141,
+# so the `if` is FALSE and the guard reports the tree CLEAN. PIPESTATUS at the
+# moment of failure is `git=141 grep=0` — the producer's death, read as an
+# answer. The guard fails open exactly when the tree is at its dirtiest.
+#
+# Every dirty fixture in this suite is ONE file (~40 bytes of porcelain): git
+# finishes writing before grep leaves, so the guard works and the bug is
+# invisible — three orders of magnitude below the break point. Measured on the
+# pre-fix driver in a 4000-file tree (~72000 bytes): claude invoked with
+# --permission-mode bypassPermissions, exit 0, no refusal line, 3/3 runs.
+# The small fixtures above stay as they are; they pin the other end.
+SBW=$(mk_wide_sandbox_repo)
+SBX=$(mk_sandbox_repo)
+trap 'rm -rf "$SB" "$SBF" "$SD" "$TD" "$SBW" "$SBX"' EXIT
+
+# Site 1: the pre-run guard. Refuse, and refuse BEFORE the session starts —
+# an exit code alone would not distinguish "refused" from "ran, then failed".
+dirty_wide_tree "$SBW"
+rm -f "$SD/argv-wide"
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ARGV_LOG="$SD/argv-wide" \
+  bash "$SCRIPT" "$SBW" src/ >/dev/null 2>"$SD/wide-err" && rc=0 || rc=$?
+assert_eq 1 "$rc" "a wide dirty tree is refused (the pre-run guard must not fail open at scale)"
+assert_file_contains "$SD/wide-err" "dirty tree, refusing" "the wide-tree refusal names its reason"
+if [ -e "$SD/argv-wide" ]; then
+  assert_eq "no session" "session launched" "a refused wide dirty tree never invokes claude"
+else
+  assert_eq 0 0 "a refused wide dirty tree never invokes claude"
+fi
+(cd "$SBW" && git checkout -- . >/dev/null 2>&1)
+
+# Site 2: the post-run truth check, same pipeline, same blind spot. A session
+# that abandons 4000 modified files must come back UNTRUSTWORTHY (70), not 0.
+STUB_MODE=dirty-wide LOOP_ENG_ALLOW_AUTOFIX=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SBW" src/ --auto-fix >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 70 "$rc" "an auto-fix session that abandons a WIDE tree exits 70, not 0"
+assert_file_contains "$SBW/.loop/unattended.log" "uncommitted changes" "the wide-tree post-run refusal says what the exit code means"
+(cd "$SBW" && git checkout -- . >/dev/null 2>&1; git clean -qfd >/dev/null 2>&1)
+
+# ...and the clean end of the same guard, at the same scale: a wide tree with
+# nothing modified still runs. A guard fixed by refusing everything would pass
+# the two assertions above and fail here.
+rm -f "$SD/argv-wide-clean"
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ARGV_LOG="$SD/argv-wide-clean" \
+  bash "$SCRIPT" "$SBW" src/ >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 0 "$rc" "a wide but CLEAN tree still runs"
+assert_file_contains "$SD/argv-wide-clean" "/polish src/" "the clean wide-tree run still starts a session"
+
+# The `-v` in the pattern is the whole point of it: untracked .loop/
+# bookkeeping is NOT dirt, and that exemption has to survive the fix — at
+# scale too, where it is 4000 porcelain lines the guard must read past rather
+# than one it may stop at. This fixture makes .loop/ VISIBLE to git (the
+# standard sandbox gitignores it, so its exemption lines never appear at all):
+# .gitignore drops the .loop/ rule and a tracked .loop/keep.md forces git to
+# list the untracked siblings individually instead of collapsing the directory.
+printf '*.log\n' > "$SBX/.gitignore"
+mkdir -p "$SBX/.loop"
+printf 'tracked so the untracked siblings are listed one per line\n' > "$SBX/.loop/keep.md"
+(cd "$SBX" && git add -A >/dev/null && git commit -qm "visible .loop" >/dev/null)
+i=0; while [ "$i" -lt 4000 ]; do printf 'bookkeeping\n' > "$SBX/.loop/note-$i.txt"; i=$((i+1)); done
+rm -f "$SD/argv-loop-only"
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" STUB_ARGV_LOG="$SD/argv-loop-only" \
+  bash "$SCRIPT" "$SBX" src/ >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 0 "$rc" "a tree dirty only with untracked .loop/ bookkeeping still runs (4000 exempt lines)"
+assert_file_contains "$SD/argv-loop-only" "/polish src/" "the .loop/-only run still starts a session"
+# ...and one genuinely dirty file among those 4000 exempt lines still refuses,
+# so the exemption is a filter and not a blanket.
+printf 'real work\n' > "$SBX/README.md"
+STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$SCRIPT" "$SBX" src/ >/dev/null 2>"$SD/loop-plus-err" && rc=0 || rc=$?
+assert_eq 1 "$rc" "one real modification hiding among 4000 exempt .loop/ lines is still dirt"
+assert_file_contains "$SD/loop-plus-err" "dirty tree, refusing" "the mixed-tree refusal names its reason"
 
 report "test-unattended-polish"

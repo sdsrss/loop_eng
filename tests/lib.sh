@@ -30,6 +30,43 @@ mk_sandbox_repo() {
   echo "$sb"
 }
 
+# A sandbox repo with MANY tracked files. SCALE is the point, and it is the
+# axis every dirty-tree fixture in this suite was blind to: the drivers' guards
+# read `git status --porcelain` through a consumer that stops at the first line,
+# so whether the guard works at all is a RACE between git writing and the
+# consumer leaving. A one-file fixture (~40 bytes of porcelain) is won by git
+# every time and the guard looks sound. The race turns deterministic the other
+# way once the output passes the 64KB pipe buffer — git blocks mid-write and
+# takes the SIGPIPE — on a tree wide enough that git is still enumerating when
+# the consumer goes. 4000 files = ~72000 bytes once all of them are modified.
+#
+# Deliberately pinned at that far end. Measured on the pre-fix driver, the
+# 15-24KB band flips run to run (a test pinned there would be FLAKY) and ~27KB
+# is already deterministic; 72000 bytes sits clear of both. Build cost is
+# ~0.2s, so the whole shape is cheap enough to keep.
+mk_wide_sandbox_repo() { # [file-count, default 4000] -> repo path on stdout
+  local sb n i f
+  n="${1:-4000}"
+  sb=$(mk_sandbox_repo)
+  (
+    cd "$sb" || exit 1
+    mkdir wide || exit 1
+    # printf -v, not $(printf ...): a subshell per file turns 0.2s into minutes.
+    for ((i = 0; i < n; i++)); do
+      printf -v f 'wide/f%05d.txt' "$i"
+      printf 'x\n' > "$f"
+    done
+    git add wide
+    git commit -qm "wide fixture: $n tracked files"
+  ) >/dev/null || return 1
+  echo "$sb"
+}
+
+dirty_wide_tree() { # repo -> modify every file the wide fixture tracked
+  local f
+  for f in "$1"/wide/*; do printf 'modified\n' > "$f"; done
+}
+
 sha_of() { # portable SHA-256 of a file -> stdout (mirrors the scripts' loop_sha256)
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
   elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
