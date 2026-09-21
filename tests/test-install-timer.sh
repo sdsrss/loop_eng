@@ -59,6 +59,43 @@ run_install polish "$SB" lib/ --allow-write >/dev/null
 assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "unattended-polish.sh $SB lib/ --auto-fix" "allow-write appends --auto-fix + custom scope"
 assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "LOOP_ENG_ALLOW_AUTOFIX=1" "allow-write injects autofix env"
 
+# --- autoloop WITHOUT --allow-write: refused at install time ---
+# unattended-autoloop.sh has no report-only mode: it exits 1 unless
+# LOOP_ENG_ALLOW_AUTOBUILD=1 is in the environment. A unit installed without
+# --allow-write therefore fails on EVERY trigger for the life of the install —
+# the same "enables cleanly, does nothing every night" family as the missing
+# polish scope and the same-minute collision, and refused the same way.
+#
+# --time 04:00 is load-bearing: a polish timer already holds 03:00 on this repo,
+# so at the default time the COLLISION check would answer first and this case
+# would assert nothing about write mode. Run BEFORE the --allow-write case below
+# so no autoloop unit exists yet and "wrote nothing" means what it says.
+nw_err=$(run_install autoloop "$SB" --time 04:00 2>&1 >/dev/null); rc=$?
+assert_eq 1 "$rc" "autoloop without --allow-write is refused"
+assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.service")" "the refused autoloop install writes no .service"
+assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.timer")" "the refused autoloop install writes no .timer"
+case "$nw_err" in
+  *--allow-write*) assert_eq 0 0 "the refusal names --allow-write as the fix" ;;
+  *) assert_eq "a message naming --allow-write" "[$nw_err]" "the refusal names --allow-write as the fix" ;;
+esac
+case "$nw_err" in
+  *report-only*) assert_eq 0 0 "the refusal says autoloop has no report-only mode" ;;
+  *) assert_eq "a message naming report-only" "[$nw_err]" "the refusal says autoloop has no report-only mode" ;;
+esac
+
+# ...and it leaves no DIRECTORY behind either. "$UNIT_DIR" is only named before
+# the refusals; the mkdir waits until past the last one. This needs its own
+# config home because every case above has already created the shared one, so
+# the residue would be invisible there — which is exactly how the first version
+# of this change shipped an empty ~/.config/systemd/user onto a box that had
+# never had one.
+FRESH_XDG=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-xdg-fresh.XXXXXX")
+trap 'rm -rf "$SB" "$XDG" "$FRESH_XDG"' EXIT
+XDG_CONFIG_HOME="$FRESH_XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" \
+  bash "$INSTALL" autoloop "$SB" >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "refused autoloop install exits 1 on a never-used config home too"
+assert_eq no "$(exists "$FRESH_XDG/systemd")" "the refused install creates no systemd config dir"
+
 # --- autoloop --allow-write: max-sessions + autobuild env ---
 # --time 04:00: a polish timer already holds 03:00 on this repo, and two modes
 # on one repo at the same minute are refused (see the collision block at the
@@ -66,9 +103,28 @@ assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "LOOP_ENG_ALLOW_AUTOFIX
 run_install autoloop "$SB" 5 --allow-write --time 04:00 >/dev/null
 assert_file_contains "$UNIT_DIR/loop-eng-autoloop.service" "unattended-autoloop.sh $SB 5" "autoloop ExecStart has max-sessions"
 assert_file_contains "$UNIT_DIR/loop-eng-autoloop.service" "LOOP_ENG_ALLOW_AUTOBUILD=1" "autoloop allow-write injects autobuild env"
+# The ONLY autoloop unit that can now exist is a writing one, so its
+# Description must say so. Nothing asserted on Description= before this, which
+# is how "report-only: refuses to build" survived in the source describing a
+# mode the driver has never had.
+assert_file_contains "$UNIT_DIR/loop-eng-autoloop.service" "Description=loop-eng autoloop driver (dogfood, WRITES code unattended)" "the only installable autoloop unit describes itself as writing"
 
 # --- validation: bad mode / bad time / non-git repo / bad max-sessions all refuse ---
-run_install bogus "$SB" 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "bad mode refused"
+# Captured rather than discarded: this is the only message a user who typos the
+# mode ever sees, and it is now where the "--allow-write is REQUIRED for
+# autoloop" fact lives. Nothing asserted a character of it before — the same
+# "prose drifts away from the mechanism" shape the gate below exists to close,
+# and uninstall-timer.sh's equivalent message has been pinned all along.
+merr=$(run_install bogus "$SB" 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "bad mode refused"
+case "$merr" in
+  *usage*) assert_eq 0 0 "bad-mode refusal shows usage" ;;
+  *) assert_eq "a usage message" "[$merr]" "bad-mode refusal shows usage" ;;
+esac
+case "$merr" in
+  *"REQUIRED for autoloop"*) assert_eq 0 0 "the usage synopsis says --allow-write is REQUIRED for autoloop" ;;
+  *) assert_eq "a synopsis naming --allow-write as REQUIRED for autoloop" "[$merr]" "the usage synopsis says --allow-write is REQUIRED for autoloop" ;;
+esac
 run_install polish "$SB" --time 25:00 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "bad --time refused"
 # --time with its value omitted: `shift 2` on a single remaining arg fails, and
 # under `set -e` that aborted the script BEFORE the HH:MM validation could speak
@@ -80,7 +136,16 @@ case "$terr" in
   *) assert_eq "a message naming --time" "[$terr]" "--time with no value says what is missing" ;;
 esac
 run_install polish "$XDG" 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-git repo refused"
-run_install autoloop "$SB" abc 2>/dev/null && rc=0 || rc=$?; assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-numeric max-sessions refused"
+# Deliberately WITHOUT --allow-write, and asserted by CAUSE: the max-sessions
+# parse must answer before the write-mode gate, or this line silently stops
+# testing max-sessions and starts testing the gate instead. Exit code alone
+# cannot tell the two refusals apart — the message can.
+nerr=$(run_install autoloop "$SB" abc 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-numeric max-sessions refused"
+case "$nerr" in
+  *max-sessions*) assert_eq 0 0 "non-numeric max-sessions is refused for ITS OWN cause, not the write-mode gate" ;;
+  *) assert_eq "a message naming max-sessions" "[$nerr]" "non-numeric max-sessions is refused for ITS OWN cause, not the write-mode gate" ;;
+esac
 
 # --- repo path containing whitespace: refused (systemd ExecStart is unquoted) ---
 SPACE_REPO="$XDG/has space repo"
@@ -177,7 +242,7 @@ run_install polish "$SB" >/dev/null
 # (the losing driver would exit 69 and do nothing, silently, every night). This
 # test is about uninstall symmetry between two coexisting timers, and staggered
 # times are how a real user makes them coexist.
-run_install autoloop "$SB" --time 04:00 >/dev/null
+run_install autoloop "$SB" --allow-write --time 04:00 >/dev/null
 run_uninstall autoloop >/dev/null; rc=$?
 assert_eq 0 "$rc" "autoloop uninstall exits 0"
 assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.service")" "autoloop uninstall removed .service"
@@ -200,7 +265,7 @@ assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.service")" "bad-mode uninstal
 # way a real trigger would. A repo that only ever had a timer (never ran a loop)
 # has nothing else in .loop — uninstall must reap both the log and the now-empty
 # dir. The cron.log path is parsed out of the .service unit file being removed.
-run_install autoloop "$SB" --time 04:00 >/dev/null   # polish still holds 03:00 on this repo
+run_install autoloop "$SB" --allow-write --time 04:00 >/dev/null   # polish still holds 03:00 on this repo
 assert_eq yes "$(exists "$SB/.loop")" "install pre-created repo .loop"
 : > "$SB/.loop/cron.log"
 run_uninstall autoloop >/dev/null; rc=$?
@@ -212,7 +277,7 @@ assert_eq no "$(exists "$SB/.loop")" "uninstall removed the now-empty .loop dir"
 # Plant real loop state (results.json) alongside cron.log. A live loop's state
 # must survive a timer uninstall, so cleanup removes NOTHING here — not the dir,
 # not the extra file, and (err on preservation) not even cron.log.
-run_install autoloop "$SB" --time 04:00 >/dev/null   # polish still holds 03:00 on this repo
+run_install autoloop "$SB" --allow-write --time 04:00 >/dev/null   # polish still holds 03:00 on this repo
 : > "$SB/.loop/cron.log"
 echo '{"passes":true}' > "$SB/.loop/results.json"
 run_uninstall autoloop >/dev/null; rc=$?
@@ -238,15 +303,15 @@ assert_file_contains "$XDG/collide.err" "uninstall-timer.sh polish" "the refusal
 assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.service")" "the refused install writes no unit file"
 
 # ...and the two legitimate shapes are NOT refused.
-run_install autoloop "$SB" --time 04:00 >/dev/null && rc=0 || rc=$?
+run_install autoloop "$SB" --allow-write --time 04:00 >/dev/null && rc=0 || rc=$?
 assert_eq 0 "$rc" "same repo at a DIFFERENT time is allowed (this is how you run both)"
 assert_file_contains "$UNIT_DIR/loop-eng-autoloop.timer" "OnCalendar=*-*-* 04:00:00" "the allowed install wrote its own time"
 run_uninstall autoloop >/dev/null
-SB2=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$XDG"' EXIT
-run_install autoloop "$SB2" >/dev/null && rc=0 || rc=$?
+SB2=$(mk_sandbox_repo); trap 'rm -rf "$SB" "$SB2" "$XDG" "$FRESH_XDG"' EXIT
+run_install autoloop "$SB2" --allow-write >/dev/null && rc=0 || rc=$?
 assert_eq 0 "$rc" "a DIFFERENT repo at the same time is allowed (different tree, different lock)"
 # re-installing the SAME mode is an overwrite, not a collision
-run_install autoloop "$SB2" >/dev/null && rc=0 || rc=$?
+run_install autoloop "$SB2" --allow-write >/dev/null && rc=0 || rc=$?
 assert_eq 0 "$rc" "re-installing the same mode on the same repo is an overwrite, not a collision"
 run_uninstall autoloop >/dev/null; run_uninstall polish >/dev/null
 

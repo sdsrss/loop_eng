@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Upgrade
+
+- **An `autoloop` timer installed without `--allow-write` is now refused.**
+  `unattended-autoloop.sh` has never had a report-only mode: without
+  `LOOP_ENG_ALLOW_AUTOBUILD=1` it refuses at its own entry and exits 1. So
+  `install-timer.sh autoloop <repo>` was enabling a unit that failed on every
+  trigger for the life of the install: no work, a `status=1/FAILURE` record in
+  the journal, and the one sentence explaining why appended to
+  `<repo>/.loop/cron.log`, since the unit routes both of the driver's streams
+  there — while its own `Description=` called the mode "report-only". The
+  installer now refuses that combination at install time, names the cause and
+  the fix, and writes no unit file. This is the rule the installer already
+  applied to a polish scope that does not exist in the repo ("the unit would
+  enable cleanly and review nothing every night"); only its coverage was short.
+
+  **What to do:** pass `--allow-write` to schedule real unattended builds — they
+  modify and commit to your repo with no human in the loop — or install a polish
+  timer instead, whose no-flag mode is report-only and does useful work. If you
+  have such a timer installed today it keeps running and keeps failing nightly;
+  nothing removes it for you, and `uninstall-timer.sh autoloop` is the way out.
+  **To keep the old behaviour, pin `0.18.1`.** `polish` is unchanged in every
+  mode.
+
 ## 0.18.1 — 2026-09-21
 
 0.18.0 widened the backlog grammar in code and left the instructions the model

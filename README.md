@@ -426,7 +426,8 @@ pair — it writes the `.service` + `.timer`, enables the timer, and reverses
 exactly:
 
 ```
-skills/loop-eng/scripts/install-timer.sh   <polish|autoloop> <repo> [arg] [--time HH:MM] [--allow-write]
+skills/loop-eng/scripts/install-timer.sh   polish   <repo> [scope]        [--time HH:MM] [--allow-write]
+skills/loop-eng/scripts/install-timer.sh   autoloop <repo> [max-sessions] [--time HH:MM]  --allow-write
 skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
 ```
 
@@ -446,10 +447,13 @@ skills/loop-eng/scripts/uninstall-timer.sh <polish|autoloop>
   silently, every night, with `systemctl status` still green. Stagger them
   (`--time 04:00` for the second) or remove the other timer first. Two
   *different* repos at `03:00` are fine.
-- **Safe by default**: without `--allow-write` the timer runs polish report-only
-  and autoloop refuses to build — a scheduled run cannot modify the repo.
-  `--allow-write` injects the mode's write-enable env (`LOOP_ENG_ALLOW_AUTOFIX`
-  / `LOOP_ENG_ALLOW_AUTOBUILD`).
+- **Safe by default**: without `--allow-write` a polish timer runs report-only,
+  so a scheduled run cannot modify the repo. An **autoloop** timer without it is
+  **refused at install time** — `unattended-autoloop.sh` has no report-only mode,
+  so that unit would exit 1 at every trigger rather than do harmless work, which
+  is the same "enables cleanly, does nothing every night" shape as the
+  missing-scope refusal above. `--allow-write` injects the mode's write-enable
+  env (`LOOP_ENG_ALLOW_AUTOFIX` / `LOOP_ENG_ALLOW_AUTOBUILD`).
 - A failed `systemctl enable` exits non-zero (no silent "installed but not
   scheduled"); `uninstall-timer.sh` is a benign no-op when nothing is installed.
 - Units log to `<repo>/.loop/cron.log`. `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` writes

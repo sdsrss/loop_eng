@@ -9,15 +9,22 @@
 # it exactly.
 #
 # Usage:
-#   install-timer.sh <polish|autoloop> <repo-dir> [arg] [--time HH:MM] [--allow-write]
+#   install-timer.sh polish   <repo-dir> [scope]        [--time HH:MM] [--allow-write]
+#   install-timer.sh autoloop <repo-dir> [max-sessions] [--time HH:MM]  --allow-write
+#
+#   --allow-write is OPTIONAL for polish and REQUIRED for autoloop — that
+#   driver has no report-only mode, so an autoloop install without it is
+#   refused (see the gate further down).
 #     polish    arg = scope passed to unattended-polish.sh   (default src/)
 #     autoloop  arg = max-sessions for unattended-autoloop.sh (default 8)
 #     --time HH:MM   OnCalendar daily trigger time            (default 03:00)
 #     --allow-write  opt into the mode's write path (OFF by default):
 #                      polish   -> ExecStart gets --auto-fix + LOOP_ENG_ALLOW_AUTOFIX=1
 #                      autoloop -> Environment gets LOOP_ENG_ALLOW_AUTOBUILD=1
-#                    Without it, polish is report-only and autoloop refuses to
-#                    build (its own env guard), so a scheduled run cannot write.
+#                    Without it, polish is report-only, so a scheduled run
+#                    cannot write. An autoloop install without it is REFUSED:
+#                    that driver has no report-only mode, so the unit could
+#                    never do anything but exit 1 every night.
 #
 # Safety / testability:
 #   - unit dir honors $XDG_CONFIG_HOME (falls back to $HOME/.config)
@@ -33,7 +40,10 @@ die() { echo "install-timer: $*" >&2; exit 1; }
 MODE="${1:-}"; REPO="${2:-}"
 case "$MODE" in
   polish|autoloop) ;;
-  *) die "usage: install-timer.sh <polish|autoloop> <repo-dir> [arg] [--time HH:MM] [--allow-write]" ;;
+  *) die "usage:
+  install-timer.sh polish   <repo-dir> [scope]        [--time HH:MM] [--allow-write]
+  install-timer.sh autoloop <repo-dir> [max-sessions] [--time HH:MM]  --allow-write
+--allow-write is optional for polish and REQUIRED for autoloop, which has no report-only mode." ;;
 esac
 [ -n "$REPO" ] || die "missing <repo-dir>"
 shift 2
@@ -171,16 +181,24 @@ else
   MAX_SESSIONS="${ARG:-8}"
   case "$MAX_SESSIONS" in ''|*[!0-9]*) die "autoloop max-sessions must be an integer: $MAX_SESSIONS" ;; esac
   EXEC_ARGS="$REPO $MAX_SESSIONS"
-  DESC="loop-eng autoloop driver (dogfood, report-only: refuses to build)"
+  # One description, unconditionally: the gate below refuses an autoloop install
+  # without --allow-write, so a no-write shape never reaches a unit file. A
+  # second arm here used to read "report-only: refuses to build" — a mode this
+  # driver has never had, and the exact symptom the gate removes. Deleted rather
+  # than left unreachable, so no future reader trusts a string nothing can
+  # produce. Pinned by an assertion on Description= in test-install-timer.sh.
+  DESC="loop-eng autoloop driver (dogfood, WRITES code unattended)"
   if [ "$ALLOW_WRITE" = 1 ]; then
     ENV_LINES="Environment=LOOP_ENG_ALLOW_AUTOBUILD=1"
-    DESC="loop-eng autoloop driver (dogfood, WRITES code unattended)"
   fi
 fi
 
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT="loop-eng-$MODE"
-mkdir -p "$UNIT_DIR"
+# NOTE: $UNIT_DIR is only NAMED here. Creating it waits until after the last
+# refusal below — the collision check merely reads from it, and a refused
+# install must leave nothing behind, including an empty config directory on a
+# box that never had one.
 
 # Same-repo, same-minute collision with the OTHER mode's timer.
 #
@@ -209,6 +227,36 @@ if [ -f "$OTHER_SVC" ] && [ -f "$OTHER_TMR" ]; then
     die "loop-eng-$OTHER_MODE.timer already runs $REPO at $TIME, and the two drivers cannot share a working tree — the second one to fire would exit 69 (another driver is running) and do nothing, silently, every night. Re-run with a different --time (e.g. --time 04:00), or remove the other timer first: $(dirname "$0")/uninstall-timer.sh $OTHER_MODE"
   fi
 fi
+
+# An autoloop timer with no write permission can never do anything.
+#
+# unattended-autoloop.sh has NO report-only mode — without
+# LOOP_ENG_ALLOW_AUTOBUILD=1 it refuses at its own entry and exits 1. So this
+# combination schedules a unit that fails on EVERY trigger for the life of the
+# install: no work, a `status=1/FAILURE` record in the journal, and the sentence
+# explaining why buried in $REPO/.loop/cron.log — the unit sends both its
+# stdout and stderr there, so the driver's own "refusing:" line never reaches
+# the journal at all. Nothing at install time says any of it. That is the same
+# family as the missing-scope and collision refusals above
+# — "enables cleanly, does nothing every night" — so it is refused in the same
+# place and for the same reason.
+#
+# Ordering is load-bearing, both ways. LAST among the validations: max-sessions
+# and the collision check each have their own cause and their own message, and
+# a user who typed two mistakes should hear about the one they can see (the
+# suite pins this by asserting those two refusals name THEIR cause, which exit
+# code alone cannot distinguish). And BEFORE the first write below, so a refused
+# install leaves nothing behind.
+#
+# polish is deliberately untouched: its no-flag mode runs report-only and does
+# real work, which is why it is the documented safe default.
+if [ "$MODE" = autoloop ] && [ "$ALLOW_WRITE" != 1 ]; then
+  die "autoloop has no report-only mode, so this timer could never do anything: unattended-autoloop.sh refuses to build unless LOOP_ENG_ALLOW_AUTOBUILD=1 is set, and the unit would exit 1 on every trigger, every night. Re-run with --allow-write to schedule real unattended builds — they modify and commit to $REPO with no human in the loop — or install a polish timer instead, whose no-flag mode is report-only and does useful work."
+fi
+
+# Past the last refusal — now the directory may be created. (Named at $UNIT_DIR
+# above; see the note there for why the mkdir waits until here.)
+mkdir -p "$UNIT_DIR"
 
 # The unit's StandardOutput/Error append to $REPO/.loop/cron.log; systemd opens
 # that file BEFORE ExecStart runs, so the directory must already exist at first
