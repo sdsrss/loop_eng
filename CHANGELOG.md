@@ -28,6 +28,28 @@ disagrees with the machine's.
   such a backlog. No script, test or behavior changed; the suite is unmoved at
   942 assertions.
 
+### Live-install smoke
+
+Passed on Claude Code 2.1.278 against a real marketplace install of 0.18.1 from
+the GitHub source into a throwaway `CLAUDE_CONFIG_DIR`, hooks instrumented in
+the cache copy so each verdict is a machine fact. Required this release because
+it touches `commands/` — and directly relevant, since step 6 is what proves
+`${CLAUDE_PLUGIN_ROOT}` still expands inside the command markdown this release
+edits.
+
+- `armed from …/plugins/cache/loop-eng/loop-eng/0.18.1/…` — the cache copy under
+  test, not the marketplace clone.
+- evidence-gate denied `echo hello > .loop/evidence/smoke.log`; file absent,
+  marker `EGDENY root=…/0.18.1`.
+- stop-gate on a RED contract: `SGBLOCK-contract` ×3 then `CEILING-RELEASE`,
+  every block on the contract-unsatisfied path — none on missing-runner,
+  dedup-replay or timeout. On disk `generated_by: run-contract.sh`,
+  `all_green: false`.
+- the edited `/loop-eng:autoloop` command expanded and ran: `all_green: true`
+  on two criteria, acceptance artifact written, `.loop/active` lifted by the
+  gate itself, and the marker log **empty** — the same instrumentation that
+  recorded four markers under the RED contract recorded none here.
+
 ## 0.18.0 — 2026-09-21
 
 The backlog half of a loop accepted less than it locked. The evidence-gate has
