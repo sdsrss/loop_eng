@@ -645,6 +645,45 @@ assert_file_contains .loop/results.json '"item": "star", "verify": "true", "exit
 assert_file_contains .loop/backlog.md '1. [ ] ordered | verify: true' "an ordered-list item is left exactly as written"
 assert_eq 0 "$(grep -c '"item": "ordered"' .loop/results.json)" "an ordered-list item is not in the backlog ledger either"
 
+# --- a pipe inside the item text is not the separator ------------------------
+# The separator scan walks pipe by pipe and takes the FIRST whose tail is
+# whitespace + `verify:`. Item text is free-form (commands/autoloop.md, README's
+# backlog section) and nothing forbids a pipe in it — a shell pipeline, an
+# alternation, a table cell — while the gate's probe reads the whole FILE for
+# `|[[:space:]]*verify:` and so locks such a line exactly as it locks any other.
+# Locked-must-imply-tickable therefore binds here too: a first-pipe-only split
+# reads `fix the a` as the item and finds no command at all, leaving the line
+# locked AND unrun — untickable by anyone, while count_pending keeps counting it
+# and the driver re-picks it every round. Until this block every `verify:` line
+# in every suite carried exactly ONE pipe, so a mutant replacing the scan's
+# `bitem="$bitem|"` continuation with `break` left the suite byte-identically
+# green.
+rm -f .loop/backlog.md .loop/results.json
+{
+  printf -- '- [ ] fix the a|b splitter | verify: echo a-ok | grep -q a-ok\n'
+  printf -- '- [ ] one|two|three | verify: true\n'
+  printf -- '- [ ] hugs the separator| | verify: true\n'
+  printf -- '- [ ] red a|b splitter | verify: false\n'
+} > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "a backlog with pipes in its item text does not change the contract's own verdict"
+assert_file_contains .loop/backlog.md '- [x] fix the a|b splitter | verify: echo a-ok | grep -q a-ok' "an item whose text holds a pipe ticks, with a pipe on BOTH sides of the separator"
+assert_file_contains .loop/results.json '"item": "fix the a|b splitter", "verify": "echo a-ok | grep -q a-ok", "exit": 0, "done": true' "the ledger carries the whole item text and the whole command — the line split at the separator and nowhere else"
+assert_file_contains .loop/backlog.md '- [x] one|two|three | verify: true' "three pipes in the item text still tick"
+assert_file_contains .loop/backlog.md '- [x] hugs the separator| | verify: true' "a pipe immediately against the separator ticks"
+assert_file_contains .loop/results.json '"item": "hugs the separator|"' "the item's trailing pipe reaches the ledger; only whitespace is trimmed"
+assert_file_contains .loop/backlog.md '- [ ] red a|b splitter | verify: false' "a failing piped item stays unticked, byte for byte as written"
+# FIRST wins, and that is the boundary: an item whose text embeds a literal
+# `| verify:` is indistinguishable from the real separator, so the runner splits
+# at the earlier one and the tail becomes the command. Pinned rather than left
+# silent — same treatment as the ordered-list marker above. The residual is
+# benign: the line IS parsed, the derived command fails, and the box stays
+# unticked and re-checkable rather than locked-and-unrun.
+rm -f .loop/backlog.md .loop/results.json
+printf -- '- [ ] first-wins | verify: not-a-real-command | verify: true\n' > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "an item text embedding a literal separator does not change the contract's own verdict"
+assert_file_contains .loop/results.json '"item": "first-wins", "verify": "not-a-real-command | verify: true"' "the split lands on the FIRST | verify:, so the rest of the line is the command"
+assert_file_contains .loop/backlog.md '- [ ] first-wins | verify: not-a-real-command | verify: true' "a line whose derived command fails stays unticked, byte for byte as written"
+
 # --- both redirects on the backlog verify command ---------------------------
 # `bash -c "$bcmd" >/dev/null 2>&1 </dev/null`. The criteria loop carries the
 # identical pair and both halves are pinned there (the stdin-reader above, and
