@@ -316,8 +316,27 @@ echo "ancient run" > "$OLD_LOG"
 touch -t 202001010000 "$OLD_LOG"
 FRESH_LOG="$SB/.loop/unattended-fresh-run.log"
 echo "recent run" > "$FRESH_LOG"
-# oversized rolling log: >1MB of filler, marker line at the very end
-{ head -c 1200000 /dev/zero | tr '\0' 'x'; echo; echo "TAIL-MARKER-SURVIVES"; } > "$SB/.loop/unattended.log"
+# Oversized rolling log: >1MB of filler, marker lines at the very end — and
+# ALSO aged past 30 days, which is what makes the prune arm and the 1MB-cap arm
+# see each other. Both act on this one file (prune first, cap second), so while
+# this fixture was written fresh it could never be a prune candidate and nothing
+# here noticed WHICH glob the prune used. Reachable for real: the rolling log's
+# mtime reaches 30 days exactly when the timer has not fired for a month (host
+# off, unit disabled, repo revisited next quarter) — precisely the run that
+# would delete the record of every run before it. The only thing excluding it is
+# the dash in the driver's `unattended-*.log`; widen that to `unattended*.log`
+# and PRE-RUN-HISTORY-KEPT below goes red.
+{ head -c 1200000 /dev/zero | tr '\0' 'x'; echo
+  echo "TAIL-MARKER-SURVIVES"; echo "PRE-RUN-HISTORY-KEPT"; } > "$SB/.loop/unattended.log"
+touch -t 202001010000 "$SB/.loop/unattended.log"
+# Guard: drop that aging and the prune assertion below silently stops pinning
+# anything (a fresh file matches `-mtime +30` under neither glob), so pin the
+# fixture itself rather than trusting it to stay aged.
+if [ -n "$(find "$SB/.loop" -maxdepth 1 -name 'unattended.log' -mtime +30)" ]; then
+  assert_eq 0 0 "rolling-log fixture really is >30 days old (guards the prune assertion)"
+else
+  assert_eq "aged" "fresh" "rolling-log fixture really is >30 days old (guards the prune assertion)"
+fi
 STUB_MODE=ok LOOP_ENG_CLAUDE_BIN="$STUB" bash "$SCRIPT" "$SB" src/ >/dev/null
 assert_eq 0 $? "rotation run exits 0"
 if [ -e "$OLD_LOG" ]; then
@@ -337,6 +356,11 @@ else
   assert_eq "<=1048576" "$ROLL_SIZE" "oversized unattended.log truncated to <=1MB"
 fi
 assert_file_contains "$SB/.loop/unattended.log" "TAIL-MARKER-SURVIVES" "truncation keeps the tail (marker survives)"
+# The rolling log IS the unattended-run history. Under the widened glob the
+# prune deletes it and the driver's own exit line recreates an empty one, so
+# this must assert CONTENT — mere existence passes either way.
+assert_file_contains "$SB/.loop/unattended.log" "PRE-RUN-HISTORY-KEPT" \
+  "aged (>30-day) rolling unattended.log survives the per-run-log prune"
 
 # --- one driver per repo: the second concurrent run is refused, not run ---
 # Nothing enforced this. Two drivers launched against one tree both passed the
