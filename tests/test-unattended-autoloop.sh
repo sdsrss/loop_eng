@@ -732,4 +732,68 @@ assert_eq 0 "$rc" "a wide but CLEAN tree still runs its backlog to the end"
 assert_eq 1 "$(grep -c 'session .* starting' "$SBWIDE/.loop/unattended.log")" \
   "the clean wide tree gets its one session"
 
+# --- a TERM during the provider-limit wait must be acted on at once ---
+#
+# The limit wait is the one place this driver idles for a long, configurable
+# period (LOOP_ENG_LIMIT_WAIT_MIN, default 60 minutes). Pre-fix it was a
+# FOREGROUND `sleep`, and a foreground child blocks trap dispatch until it
+# returns — so the _terminate trap installed above it was deferred for the
+# whole remaining wait. Measured at the 1-minute setting: a driver TERMed at
+# +15s logged "interrupted by signal" and exited 143 at +60s, one full wait
+# period late. At the default that is an hour of a driver that was told to stop
+# and kept sleeping. Same shape, and the same reason, as the backgrounded
+# session above it; unattended-polish.sh has no such wait (it exits 75 on the
+# first provider limit), so this case has no twin there.
+#
+# The driver PID ALONE is signalled, and that is the whole case: a process
+# GROUP kill reaches the `sleep` directly and PASSES against the unfixed
+# driver. That is why the installed systemd timer (default KillMode, so the
+# cgroup gets the signal) and Ctrl-C (terminal signals go to the foreground
+# process group) never showed it — a hand-rolled `kill <driver-pid>` does.
+# Rewriting this to signal a group would make it vacuous.
+SBLW=$(mk_sandbox_repo)
+trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBQT" "$SBW" "$SBW0" "$SBW3" "$SBB" "$SBB2" "$SBWIDE" "$SBLW" "$SD" "$TD"' EXIT
+mkdir -p "$SBLW/.loop"
+printf -- '- [ ] one\n' > "$SBLW/.loop/backlog.md"
+STUB_MODE=limit LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_LIMIT_WAIT_MIN=1 LOOP_ENG_CLAUDE_BIN="$STUB" \
+  bash "$DRIVER" "$SBLW" 5 >/dev/null 2>&1 &
+LW_DRV=$!
+for _ in $(seq 1 150); do
+  grep -q 'provider limit detected' "$SBLW/.loop/unattended.log" 2>/dev/null && break
+  sleep 0.1
+done
+if grep -q 'provider limit detected' "$SBLW/.loop/unattended.log" 2>/dev/null; then
+  assert_eq 0 0 "the driver parks in the provider-limit wait (the branch under test was reached)"
+  # A watchdog bounds a RED run: with the trap deferred, nothing else would end
+  # this driver for a full LOOP_ENG_LIMIT_WAIT_MIN and the suite would sit
+  # through it. It fires at +10s, after the assertion window, and signals the
+  # driver pid rather than the group — so it can never stand in for the trap
+  # and report a pass the driver did not earn.
+  # Both fds go to /dev/null and the countdown is half-second granular for one
+  # reason: killing the watchdog below orphans whatever `sleep` it is in, and an
+  # orphan that inherited the suite's stdout holds the pipe open after the suite
+  # exits — a piped caller (`| tail`, a CI log capture) then blocks on EOF for
+  # the rest of that sleep. Measured: 16s suite, 26s as seen through a pipe.
+  ( for _ in $(seq 1 20); do sleep 0.5; done; kill -KILL "$LW_DRV" 2>/dev/null ) >/dev/null 2>&1 &
+  LW_WD=$!
+  lw_t0=$(date +%s)
+  kill -TERM "$LW_DRV" 2>/dev/null || true
+  wait "$LW_DRV" 2>/dev/null && lw_rc=0 || lw_rc=$?
+  lw_elapsed=$(( $(date +%s) - lw_t0 ))
+  kill -KILL "$LW_WD" 2>/dev/null || true   # KILL: a TERM to a shell parked in
+  wait "$LW_WD" 2>/dev/null || true         # `sleep` is deferred the same way
+  assert_eq 143 "$lw_rc" "a driver TERMed inside the provider-limit wait exits 143 by its own trap, not by the watchdog"
+  if [ "$lw_elapsed" -le 3 ]; then
+    PASS=$((PASS+1))
+  else
+    FAIL=$((FAIL+1))
+    echo "  FAIL: the TERM was acted on ${lw_elapsed}s after it was sent — the limit wait is deferring trap dispatch (LOOP_ENG_LIMIT_WAIT_MIN=1 here; 60 by default)" >&2
+  fi
+  assert_file_contains "$SBLW/.loop/unattended.log" "interrupted by signal" "the interruption is recorded even when it arrives during the wait"
+else
+  kill -KILL "$LW_DRV" 2>/dev/null || true
+  wait "$LW_DRV" 2>/dev/null || true
+  FAIL=$((FAIL+1)); echo "  FAIL: the driver never reached the provider-limit wait — the case did not run" >&2
+fi
+
 report "test-unattended-autoloop"

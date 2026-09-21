@@ -242,7 +242,12 @@ note() { echo "$(date +%Y%m%d-%H%M%S) autoloop-driver $*" | tee -a "$LOG_MAIN" >
 # child, so one TERM reaches claude whether or not a wrapper is in play.
 #
 # 143 = 128 + SIGTERM, so a scheduler can tell an interrupted run from a failure.
+#
+# The provider-limit wait further down is backgrounded for the same reason and
+# tracked here: it is the one place this driver idles for a long, operator-set
+# period, so it is where a deferred trap costs the most.
 SESSION_PID=""
+LIMIT_WAIT_PID=""
 _terminate() {
   trap '' TERM INT HUP   # a second signal must not re-enter this handler
   if [ -n "$SESSION_PID" ] && kill -0 "$SESSION_PID" 2>/dev/null; then
@@ -253,6 +258,12 @@ _terminate() {
     done
     kill -KILL "$SESSION_PID" 2>/dev/null || true
   fi
+  # The limit wait, when we are parked in one. A bare `sleep` has nothing to
+  # flush, so it gets no grace period. Killing it explicitly is not tidiness:
+  # bash gives an async child of a non-interactive shell an IGNORED SIGINT, so
+  # a Ctrl-C that this handler answers would otherwise leave the sleep running
+  # out the rest of the wait with no parent.
+  if [ -n "$LIMIT_WAIT_PID" ]; then kill -TERM "$LIMIT_WAIT_PID" 2>/dev/null || true; fi
   note "interrupted by signal — session terminated, $(count_pending) item(s) still pending"
   exit 143
 }
@@ -419,7 +430,22 @@ while :; do
     if [ "$limit_hits" -ge 2 ]; then
       note "provider limit hit twice — stopping"; exit 75; fi
     note "provider limit detected — waiting ${LIMIT_WAIT_MIN}m before retrying"
-    sleep $((LIMIT_WAIT_MIN * 60))
+    # BACKGROUNDED + `wait`, exactly like the session above and for the same
+    # reason: a foreground child blocks trap dispatch until it returns, so as a
+    # plain foreground `sleep` this parked the TERM/INT/HUP trap for the rest
+    # of the wait — an hour at the default. Measured at LOOP_ENG_LIMIT_WAIT_MIN=1:
+    # TERM at +15s, "interrupted by signal" and exit 143 at +60s.
+    #
+    # Less severe than the session case it mirrors, and worth saying so: by here
+    # SESSION_PID is cleared and no claude is running, so nothing is orphaned —
+    # the driver just went on sleeping after being told to stop, and the 143
+    # arrived late rather than never. What it bites is a hand-rolled
+    # `kill <driver-pid>`; systemd's default control-group stop and Ctrl-C both
+    # signal the whole group, which reaches the sleep directly.
+    sleep $((LIMIT_WAIT_MIN * 60)) &
+    LIMIT_WAIT_PID=$!
+    wait "$LIMIT_WAIT_PID" || true   # a killed sleep must not end the run via set -e
+    LIMIT_WAIT_PID=""
   fi
 done
 
