@@ -234,6 +234,59 @@ else
   assert_eq 0 0 "no rate-limited marker for a failure that is not one"
 fi
 
+# --- ...and the OTHER narrowing: the TAIL of the log, not the whole log ---
+# The fixture above is identical under both readings of the detector — its
+# quota-shaped lines are a three-line log, inside `tail -n 40` either way — so
+# it pins "phrases, not words" and says nothing about WHERE the match was
+# looked for. Replacing `tail -n 40 "$LOG" | grep -qiE ...` with a whole-log
+# `grep -qiE ... "$LOG"` left every suite in this repo green.
+#
+# The narrowing is load-bearing: a provider limit ENDS the run, so it is the
+# last thing written, while a review that quotes the same phrase puts it in the
+# BODY. This repo is its own proof — the driver's own detector line carries all
+# six phrases, so the armed nightly polish over skills/ has a reviewer reading
+# them hundreds of lines above the end of the log.
+#
+# The fixture is that shape: one literal phrase on line 1 as REVIEWED CODE, 50
+# ordinary lines, then a real crash — 52 lines, so the match sits 51 lines from
+# the end, well outside the 40-line window. Under the whole-log reading this
+# exit 2 comes back as EX_TEMPFAIL 75 ("try again later") and the real failure
+# never surfaces to whatever watches exit codes.
+TAIL_STUB="$SD/stub-tail-body"
+cat > "$TAIL_STUB" <<'EOF'
+#!/usr/bin/env bash
+echo 'reviewing src/limiter.js:88  throw new Error("rate limit exceeded")'
+i=1
+while [ "$i" -le 50 ]; do echo "  finding $i: ordinary review output"; i=$((i + 1)); done
+echo "fatal: the session died writing its report"
+exit 2
+EOF
+chmod +x "$TAIL_STUB"
+# The fixture's own premise, asserted rather than assumed: should this log ever
+# shrink to <=40 lines, the phrase moves INTO the tail and the two assertions
+# below stop telling the two readings apart while still passing.
+fixture_lines=$("$TAIL_STUB" | wc -l | tr -d ' ')
+if [ "$fixture_lines" -gt 40 ]; then PASS=$((PASS+1)); else
+  FAIL=$((FAIL+1))
+  echo "  FAIL: the limit phrase must sit outside tail -n 40, but the fixture log is only $fixture_lines lines" >&2
+fi
+LOOP_ENG_CLAUDE_BIN="$TAIL_STUB" bash "$SCRIPT" "$SB" src/ >/dev/null 2>&1 && rc=0 || rc=$?
+assert_eq 2 "$rc" "a limit phrase in the BODY of the log is review text: the real exit 2 is passed through, not relabelled EX_TEMPFAIL 75"
+# Both halves of the entry, because the mutant changes both: `exit=2 log=...`
+# is the plain-failure entry, `exit=2 rate-limited log=...` is the relabel.
+last_entry=$(tail -1 "$SB/.loop/unattended.log")
+case "$last_entry" in
+  *"exit=2 log="*) PASS=$((PASS+1)) ;;
+  *) FAIL=$((FAIL+1))
+     echo "  FAIL: a body-of-the-log match is not logged as a plain failure — got [$last_entry]" >&2 ;;
+esac
+case "$last_entry" in
+  *rate-limited*)
+     FAIL=$((FAIL+1))
+     echo "  FAIL: a body-of-the-log match was marked rate-limited — got [$last_entry]" >&2 ;;
+  *) PASS=$((PASS+1)) ;;
+esac
+
 # --- and a run killed by OUR OWN wall-clock cap is a timeout, not a limit ---
 # 0.14.0's release notes recorded this as a known consequence of enforcing the
 # cap on macOS: a killed run exits 124 and its partial log may carry anything.

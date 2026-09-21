@@ -516,6 +516,49 @@ assert_eq 1 "$rc" "sessions failing over quota-shaped CODE stop at the breaker (
 assert_eq "" "$(grep -c 'provider limit' "$SBQ/.loop/unattended.log" | grep -v '^0$')" "no provider-limit entry for failures that are not one"
 assert_file_contains "$SBQ/.loop/unattended.log" "circuit breaker OPEN" "they are counted as no-progress, which is what they are"
 
+# --- ...and the OTHER narrowing: the TAIL of the session log, not all of it ---
+# The fixture above is identical under both readings of the detector — a
+# one-line session log is inside `tail -n 40` whichever way it is matched — so
+# it pins "phrases, not words" and nothing about WHERE the match is looked for.
+# Replacing `tail -n 40 "$SLOG" | grep -qiE ...` with a whole-log grep in BOTH
+# drivers left all of this repo's suites at identical counts.
+#
+# Here the cost of the false positive is worse than the mislabelled exit code
+# the polish driver pays: the first hit parks this driver in
+# `sleep $((LIMIT_WAIT_MIN * 60))` and the second ends the run at 75, so a
+# session that merely EDITED a rate limiter and then crashed stops the whole
+# backlog with "try again later". LIMIT_WAIT_MIN=0 for the same reason as the
+# block above: a regression here must be a red assertion, not an hour-long hang.
+#
+# 52 lines, the phrase on line 1 as the code under edit, then 50 ordinary lines
+# and a real crash — the match sits 51 lines from the end, outside the window.
+SBQT=$(mk_sandbox_repo)
+mkdir -p "$SBQT/.loop"; printf -- '- [ ] one\n' > "$SBQT/.loop/backlog.md"
+TAIL_STUB="$SD/stub-tail-body"
+cat > "$TAIL_STUB" <<'EOF'
+#!/usr/bin/env bash
+echo 'src/limiter.js:88  throw new Error("rate limit exceeded")'
+i=1
+while [ "$i" -le 50 ]; do echo "  turn $i: ordinary session output"; i=$((i + 1)); done
+echo "fatal: the session died mid-edit"
+exit 2
+EOF
+chmod +x "$TAIL_STUB"
+# The fixture's own premise, asserted rather than assumed: should this log ever
+# shrink to <=40 lines, the phrase moves INTO the tail and the assertions below
+# stop telling the two readings apart while still passing.
+fixture_lines=$("$TAIL_STUB" | wc -l | tr -d ' ')
+if [ "$fixture_lines" -gt 40 ]; then PASS=$((PASS+1)); else
+  FAIL=$((FAIL+1))
+  echo "  FAIL: the limit phrase must sit outside tail -n 40, but the fixture log is only $fixture_lines lines" >&2
+fi
+LOOP_ENG_ALLOW_AUTOBUILD=1 LOOP_ENG_LIMIT_WAIT_MIN=0 LOOP_ENG_CLAUDE_BIN="$TAIL_STUB" \
+  bash "$DRIVER" "$SBQT" 5 >/dev/null 2>&1 && rc=0 || rc=$?   # 5, not 2: same reason
+  # as the block above — a cap of 2 would stop the run before the breaker decides
+assert_eq 1 "$rc" "a limit phrase in the BODY of a session log is the code under edit: the run stops at the breaker (exit 1), not as a provider limit (75)"
+assert_eq 0 "$(grep -c 'provider limit' "$SBQT/.loop/unattended.log")" "no provider-limit entry — and so no LIMIT_WAIT_MIN park — for a body-of-the-log match"
+assert_file_contains "$SBQT/.loop/unattended.log" "circuit breaker OPEN" "the failed sessions are counted as no-progress, which is what they are"
+
 # --- non-git target: refuse with a named reason, not a raw git fatal ---
 # The driver reached `git rev-parse HEAD` and died under `set -e` with git's own
 # "fatal: not a git repository" (exit 128) — it stopped, but the operator got a
@@ -536,7 +579,7 @@ SBW3=$(mk_sandbox_repo)
 # sandbox — a hand-maintained list that had already dropped $SBG/$SBG2 once
 # and $SB9 again, so a killed suite leaked exactly the dirs the growing
 # trap was supposed to be collecting.
-trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBW" "$SBW0" "$SBW3" "$SD" "$TD"' EXIT
+trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBQT" "$SBW" "$SBW0" "$SBW3" "$SD" "$TD"' EXIT
 
 # --- P2-5: a session that COMMITS but never ticks its box must still stop the
 #     driver. ---
@@ -587,7 +630,7 @@ assert_eq 0 "$(grep -c '^- \[ \]' "$SBW3/.loop/backlog.md")" "all three items co
 # all three call sites must move together or the widening is worse than none.
 SBB=$(mk_sandbox_repo)
 SBB2=$(mk_sandbox_repo)
-trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBW" "$SBW0" "$SBW3" "$SBB" "$SBB2" "$SD" "$TD"' EXIT
+trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBQT" "$SBW" "$SBW0" "$SBW3" "$SBB" "$SBB2" "$SD" "$TD"' EXIT
 mkdir -p "$SBB/.loop" "$SBB2/.loop"
 
 # max-sessions 0 probes the COUNT alone: the loop head reads it before any
@@ -668,7 +711,7 @@ assert_eq "second item" "$(pick_item '- [x] first item' '+ [ ] second item')" \
 # (~72000 bytes): TWO bypassPermissions sessions started on a tree it was
 # supposed to refuse. That small fixture stays; it pins the other end.
 SBWIDE=$(mk_wide_sandbox_repo)
-trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBW" "$SBW0" "$SBW3" "$SBB" "$SBB2" "$SBWIDE" "$SD" "$TD"' EXIT
+trap 'rm -rf "$SB" "$SB2" "$SB3" "$SB4" "$SB5" "$SB6" "$SB7" "$SB8" "$SB9" "$SBG" "$SBG2" "$SBL" "$SBQ" "$SBQT" "$SBW" "$SBW0" "$SBW3" "$SBB" "$SBB2" "$SBWIDE" "$SD" "$TD"' EXIT
 mkdir -p "$SBWIDE/.loop"
 printf -- '- [ ] item A\n' > "$SBWIDE/.loop/backlog.md"
 dirty_wide_tree "$SBWIDE"
