@@ -17,9 +17,13 @@ bash tests/run-all.sh          # bash -n syntax + shellcheck -S warning + every 
 bash tests/test-run-contract.sh   # run ONE suite directly
 ```
 
-`run-all.sh` collects scripts via `git ls-files '*.sh'`, so a **new script must
-be `git add`ed before shellcheck will cover it**. shellcheck is optional (skipped
-with a note if absent). Each `tests/test-*.sh` sources `tests/lib.sh`, builds a
+`run-all.sh` collects **tracked and untracked-but-not-ignored** `*.sh` (`git
+ls-files` plus `git ls-files --others --exclude-standard`), so a new script is
+syntax-checked and shellchecked before it is `git add`ed; `.gitignore` is still
+honoured, so `.loop/` and friends stay out. It fails closed when that list is
+empty, when no suite matches `tests/test-*.sh`, and when a suite exits 0 without
+printing its `N passed, M failed` line. shellcheck is optional (skipped with a
+note if absent). Each `tests/test-*.sh` sources `tests/lib.sh`, builds a
 throwaway git repo with `mk_sandbox_repo`, and cleans it on a `trap ... EXIT` —
 tests must never touch the real tree, `~/.claude/`, or real systemd (the timer
 tests set `LOOP_ENG_TIMER_NO_SYSTEMCTL=1` + a fake `XDG_CONFIG_HOME`).
