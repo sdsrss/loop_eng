@@ -17,6 +17,10 @@
   applied to a polish scope that does not exist in the repo ("the unit would
   enable cleanly and review nothing every night"); only its coverage was short.
 
+  The refusal is argv-only and fires **before any environment check**, so a box
+  with no `claude` CLI installed is told what is actually wrong instead of being
+  sent to install a CLI this request never needed.
+
   **What to do:** pass `--allow-write` to schedule real unattended builds — they
   modify and commit to your repo with no human in the loop — or install a polish
   timer instead, whose no-flag mode is report-only and does useful work. If you

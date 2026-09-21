@@ -71,6 +71,37 @@ case "$TIME" in
   *) die "--time must be HH:MM (24h), got: $TIME" ;;
 esac
 
+# ---------------------------------------------------------------------------
+# Last of the argv-only checks. Everything BELOW this block touches the machine
+# (resolving the repo, finding the runner, resolving and then EXECUTING the
+# claude binary); everything above it is answerable from the command line alone.
+#
+# The --allow-write gate lives here for that reason. It depends on nothing but
+# MODE and ALLOW_WRITE, both fixed by the parse loop above — yet it used to sit
+# after all seven environment checks, so on a box without the claude CLI
+# `install-timer.sh autoloop <repo>` answered "claude CLI not found". The user
+# then installed a CLI this request never needed, re-ran, and only at that point
+# learned the request had never been installable. A question the arguments
+# already answer must not be deferred behind the machine's state.
+#
+# max-sessions moves up with it and stays FIRST of the two: same class of check,
+# and a user who typed both mistakes should hear about the number they can see.
+# Pinned by an assertion on the message — exit code alone cannot tell two
+# refusals apart.
+#
+# The collision check is NOT argv-only (it reads $UNIT_DIR), so it stays below.
+# Consequence, deliberate: a colliding autoloop install must be otherwise valid
+# before it is told about the collision.
+#
+# polish is untouched: its no-flag mode runs report-only and does real work,
+# which is why it is the documented safe default.
+if [ "$MODE" = autoloop ]; then
+  MAX_SESSIONS="${ARG:-8}"
+  case "$MAX_SESSIONS" in ''|*[!0-9]*) die "autoloop max-sessions must be an integer: $MAX_SESSIONS" ;; esac
+  [ "$ALLOW_WRITE" = 1 ] || die "autoloop has no report-only mode, so this timer could never do anything: unattended-autoloop.sh refuses to build unless LOOP_ENG_ALLOW_AUTOBUILD=1 is set, and the unit would exit 1 on every trigger, every night — no work, a status=1/FAILURE record in the journal, and the sentence explaining why buried in the repo's .loop/cron.log. Re-run with --allow-write to schedule real unattended builds — they modify and commit to the target repo with no human in the loop — or install a polish timer instead, whose no-flag mode is report-only and does useful work."
+fi
+# ---------------------------------------------------------------------------
+
 # Resolve repo to an absolute path — systemd ExecStart/WorkingDirectory reject
 # relative paths, and a scheduled run has no inherited cwd.
 # Keep the user's original argument: the command substitution below overwrites
@@ -178,19 +209,18 @@ if [ "$MODE" = polish ]; then
   DESC="loop-eng nightly report-only polish (dogfood)"
   [ "$ALLOW_WRITE" = 1 ] && DESC="loop-eng nightly auto-fix polish (dogfood)"
 else
-  MAX_SESSIONS="${ARG:-8}"
-  case "$MAX_SESSIONS" in ''|*[!0-9]*) die "autoloop max-sessions must be an integer: $MAX_SESSIONS" ;; esac
+  # MAX_SESSIONS was parsed and range-checked in the argv-only block above, next
+  # to the gate that makes this branch reachable ONLY in write mode.
   EXEC_ARGS="$REPO $MAX_SESSIONS"
-  # One description, unconditionally: the gate below refuses an autoloop install
-  # without --allow-write, so a no-write shape never reaches a unit file. A
-  # second arm here used to read "report-only: refuses to build" — a mode this
-  # driver has never had, and the exact symptom the gate removes. Deleted rather
-  # than left unreachable, so no future reader trusts a string nothing can
-  # produce. Pinned by an assertion on Description= in test-install-timer.sh.
+  # Description and env are unconditional, because that gate already refused
+  # every no-write shape. A second arm here used to read "report-only: refuses
+  # to build" — a mode this driver has never had, and the exact symptom the gate
+  # removes. Deleted rather than left unreachable, so no future reader trusts a
+  # string nothing can produce. Both are pinned by assertions in
+  # test-install-timer.sh; if a future change gives the gate an escape hatch,
+  # these two lines are what starts lying.
   DESC="loop-eng autoloop driver (dogfood, WRITES code unattended)"
-  if [ "$ALLOW_WRITE" = 1 ]; then
-    ENV_LINES="Environment=LOOP_ENG_ALLOW_AUTOBUILD=1"
-  fi
+  ENV_LINES="Environment=LOOP_ENG_ALLOW_AUTOBUILD=1"
 fi
 
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -226,32 +256,6 @@ if [ -f "$OTHER_SVC" ] && [ -f "$OTHER_TMR" ]; then
   if [ -n "$other_repo" ] && [ "$other_repo" = "$REPO" ] && [ "$other_time" = "$TIME" ]; then
     die "loop-eng-$OTHER_MODE.timer already runs $REPO at $TIME, and the two drivers cannot share a working tree — the second one to fire would exit 69 (another driver is running) and do nothing, silently, every night. Re-run with a different --time (e.g. --time 04:00), or remove the other timer first: $(dirname "$0")/uninstall-timer.sh $OTHER_MODE"
   fi
-fi
-
-# An autoloop timer with no write permission can never do anything.
-#
-# unattended-autoloop.sh has NO report-only mode — without
-# LOOP_ENG_ALLOW_AUTOBUILD=1 it refuses at its own entry and exits 1. So this
-# combination schedules a unit that fails on EVERY trigger for the life of the
-# install: no work, a `status=1/FAILURE` record in the journal, and the sentence
-# explaining why buried in $REPO/.loop/cron.log — the unit sends both its
-# stdout and stderr there, so the driver's own "refusing:" line never reaches
-# the journal at all. Nothing at install time says any of it. That is the same
-# family as the missing-scope and collision refusals above
-# — "enables cleanly, does nothing every night" — so it is refused in the same
-# place and for the same reason.
-#
-# Ordering is load-bearing, both ways. LAST among the validations: max-sessions
-# and the collision check each have their own cause and their own message, and
-# a user who typed two mistakes should hear about the one they can see (the
-# suite pins this by asserting those two refusals name THEIR cause, which exit
-# code alone cannot distinguish). And BEFORE the first write below, so a refused
-# install leaves nothing behind.
-#
-# polish is deliberately untouched: its no-flag mode runs report-only and does
-# real work, which is why it is the documented safe default.
-if [ "$MODE" = autoloop ] && [ "$ALLOW_WRITE" != 1 ]; then
-  die "autoloop has no report-only mode, so this timer could never do anything: unattended-autoloop.sh refuses to build unless LOOP_ENG_ALLOW_AUTOBUILD=1 is set, and the unit would exit 1 on every trigger, every night. Re-run with --allow-write to schedule real unattended builds — they modify and commit to $REPO with no human in the loop — or install a polish timer instead, whose no-flag mode is report-only and does useful work."
 fi
 
 # Past the last refusal — now the directory may be created. (Named at $UNIT_DIR

@@ -66,11 +66,11 @@ assert_file_contains "$UNIT_DIR/loop-eng-polish.service" "LOOP_ENG_ALLOW_AUTOFIX
 # the same "enables cleanly, does nothing every night" family as the missing
 # polish scope and the same-minute collision, and refused the same way.
 #
-# --time 04:00 is load-bearing: a polish timer already holds 03:00 on this repo,
-# so at the default time the COLLISION check would answer first and this case
-# would assert nothing about write mode. Run BEFORE the --allow-write case below
-# so no autoloop unit exists yet and "wrote nothing" means what it says.
-nw_err=$(run_install autoloop "$SB" --time 04:00 2>&1 >/dev/null); rc=$?
+# No --time on purpose. A polish timer already holds 03:00 on this repo, so this
+# is also the collision shape — and the gate must still answer, because it is
+# argv-only and the collision check is not. Run BEFORE the --allow-write case
+# below so no autoloop unit exists yet and "wrote nothing" means what it says.
+nw_err=$(run_install autoloop "$SB" 2>&1 >/dev/null); rc=$?
 assert_eq 1 "$rc" "autoloop without --allow-write is refused"
 assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.service")" "the refused autoloop install writes no .service"
 assert_eq no "$(exists "$UNIT_DIR/loop-eng-autoloop.timer")" "the refused autoloop install writes no .timer"
@@ -81,6 +81,27 @@ esac
 case "$nw_err" in
   *report-only*) assert_eq 0 0 "the refusal says autoloop has no report-only mode" ;;
   *) assert_eq "a message naming report-only" "[$nw_err]" "the refusal says autoloop has no report-only mode" ;;
+esac
+# ...and it beat the collision check, which would otherwise have claimed this
+# exact shape (polish holds 03:00 on $SB and no --time was passed). Asserted by
+# the strings only the collision refusal carries.
+case "$nw_err" in
+  *uninstall-timer*) assert_eq "the write-mode refusal" "the collision refusal" "the argv-only gate answers before the collision check" ;;
+  *) assert_eq 0 0 "the argv-only gate answers before the collision check" ;;
+esac
+
+# --- and before the environment probes: a box with no claude hears the gate ---
+# The gate needs nothing but argv, so it must not sit behind the claude probe —
+# which resolves AND executes the binary. When it did, this shape answered
+# "claude CLI not found", sending the user to install a CLI the request never
+# needed, only to learn on the retry that it was never installable.
+np_err=$(XDG_CONFIG_HOME="$XDG" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 \
+  LOOP_ENG_CLAUDE_BIN="$XDG/no-such-claude" bash "$INSTALL" autoloop "$SB" 2>&1 >/dev/null); rc=$?
+assert_eq 1 "$rc" "autoloop without --allow-write is refused even with no claude installed"
+case "$np_err" in
+  *"claude CLI not found"*) assert_eq "the write-mode refusal" "claude CLI not found" "the gate answers before the claude probe, so no CLI is demanded for an uninstallable request" ;;
+  *--allow-write*) assert_eq 0 0 "the gate answers before the claude probe, so no CLI is demanded for an uninstallable request" ;;
+  *) assert_eq "a message naming --allow-write" "[$np_err]" "the gate answers before the claude probe, so no CLI is demanded for an uninstallable request" ;;
 esac
 
 # ...and it leaves no DIRECTORY behind either. "$UNIT_DIR" is only named before
@@ -145,6 +166,26 @@ assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "non-numeric max-sessions refused"
 case "$nerr" in
   *max-sessions*) assert_eq 0 0 "non-numeric max-sessions is refused for ITS OWN cause, not the write-mode gate" ;;
   *) assert_eq "a message naming max-sessions" "[$nerr]" "non-numeric max-sessions is refused for ITS OWN cause, not the write-mode gate" ;;
+esac
+
+# --- argv beats the machine, in both directions, pinned by cause ---
+# The rule the argv-only block encodes: a fault the command line already shows
+# is reported before anything that inspects the machine. Nothing pinned the
+# precedence, so a future reshuffle could flip it back silently — which is how
+# the claude probe came to answer for a request argv had already invalidated.
+# Both shapes below are refused either way; only the MESSAGE distinguishes which
+# rule won.
+aerr=$(run_install autoloop "$XDG/no-such-dir" abc 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "bad max-sessions on a nonexistent repo is refused"
+case "$aerr" in
+  *max-sessions*) assert_eq 0 0 "argv wins: bad max-sessions answers before the repo is looked for" ;;
+  *) assert_eq "a message naming max-sessions" "[$aerr]" "argv wins: bad max-sessions answers before the repo is looked for" ;;
+esac
+gerr=$(run_install autoloop "$XDG/no-such-dir" 2>&1 >/dev/null); rc=$?
+assert_eq 0 "$(( rc != 0 ? 0 : 1 ))" "no-write autoloop on a nonexistent repo is refused"
+case "$gerr" in
+  *--allow-write*) assert_eq 0 0 "argv wins: the write-mode gate answers before the repo is looked for" ;;
+  *) assert_eq "a message naming --allow-write" "[$gerr]" "argv wins: the write-mode gate answers before the repo is looked for" ;;
 esac
 
 # --- repo path containing whitespace: refused (systemd ExecStart is unquoted) ---
@@ -296,7 +337,11 @@ assert_eq yes "$(exists "$SB/.loop/cron.log")" "cron.log-only cleanup does not f
 run_uninstall polish >/dev/null 2>&1 || true
 run_uninstall autoloop >/dev/null 2>&1 || true
 run_install polish "$SB" src/ >/dev/null
-run_install autoloop "$SB" >/dev/null 2>"$XDG/collide.err" && rc=0 || rc=$?
+# --allow-write is required to REACH this check: the argv-only gate now answers
+# first, so a colliding autoloop install must be otherwise valid before it is
+# told about the collision. Without the flag this case would assert the gate's
+# message instead of the collision's.
+run_install autoloop "$SB" --allow-write >/dev/null 2>"$XDG/collide.err" && rc=0 || rc=$?
 assert_eq 1 "$rc" "second mode on the same repo at the same time is refused"
 assert_file_contains "$XDG/collide.err" "--time" "the refusal names --time as the fix"
 assert_file_contains "$XDG/collide.err" "uninstall-timer.sh polish" "the refusal names the other timer and how to remove it"
