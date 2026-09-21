@@ -78,7 +78,12 @@ No adjectives.
      the outcome is fixed in advance. Record each deferral here the moment it
      is made, and skip anything matching on the next round.
 3. For each fresh finding, dispatch loop-verifier (one finding per dispatch,
-   parallel). Only `VERDICT: CONFIRMED` findings with impact `correctness` or
+   parallel) **with the finding verbatim AND its lens, named as such** — you
+   hold the lens because you just recorded it in `polish-seen.md`, and the
+   verifier's verdict format has a `LENS:` line it is told to echo. Without it
+   the verifier is asked to echo something it was never given, and `correctness`
+   is a token in BOTH vocabularies (see step 2 of Phase 3), so the likeliest
+   repair is the wrong one. Only `VERDICT: CONFIRMED` findings with impact `correctness` or
    `requirement` enter the fix queue. Confirmed `optional` findings go to the
    report's "Optional (not queued)" list — they are the human's call, not the
    loop's. A confirmed finding that the public-contract stop rule below forbids
@@ -161,6 +166,11 @@ Report:
 1. Baseline vs final numbers table (tests, lint, types, coverage if measured).
 2. Findings ledger: reported / refuted-by-verifier / confirmed / fixed /
    deferred / optional-not-queued, each with file:line and impact class.
+   Plus **not-listed (beyond cap)**: a reviewer that hit its ~10-finding cap
+   ends its report with `MORE BEYOND CAP: <n>`. Carry that number here, per
+   lens. It is the one part of a round the loop never revisits on its own — a
+   dry round, the 3-round cap and report-only mode all end the loop with that
+   remainder unreviewed — so the human is the only reader it has.
 3. The full diff (`git diff <baseline-ref>..HEAD`) — polish output is a
    proposal for human review, not an accomplished fact.
 4. Append one entry to `.loop/lessons.md`.

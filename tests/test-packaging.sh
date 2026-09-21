@@ -141,6 +141,15 @@ for a in agents/loop-checker.md agents/loop-reviewer.md agents/loop-verifier.md;
   hasnt "$a" "no write access by design" "$a no longer claims a guarantee its Bash tool breaks"
   has   "$a" "no Write or Edit tool" "$a states the part the tool whitelist actually enforces"
   has   "$a" "not for writing"       "$a states the Bash red line instead of implying it is impossible"
+  # The ban was a FIXED STRING, so the same overclaim walked straight back in
+  # under a different spelling: `description: … Read-only by design.` sat in the
+  # frontmatter of loop-reviewer.md and loop-verifier.md — the line an
+  # orchestrator reads when deciding what an agent can do — while each body
+  # said "You do have Bash, and Bash writes" five lines later. Phrasings, not
+  # one phrasing.
+  for banned in "Read-only by design" "read-only by design" "cannot write"; do
+    hasnt "$a" "$banned" "$a does not restate the overclaim as [$banned]"
+  done
 done
 
 # ...and the same overclaim, in the file the sweep above did not cover. SKILL.md
@@ -152,6 +161,26 @@ hasnt skills/loop-eng/SKILL.md "loop-checker cannot" \
   "SKILL.md does not claim the checker cannot write — it has Bash"
 has   skills/loop-eng/SKILL.md "no Write or Edit tool" \
   "SKILL.md states the whitelist claim in the same terms the agent files do"
+
+# Two hand-off contracts between commands/polish.md and the agents it dispatches.
+# Both were broken by prose that could not be followed: an instruction whose
+# input nobody sends, and an output nobody reads. Neither shows up in any other
+# check — the files are prose, and prose is in no assertion by default.
+#
+# 1. loop-verifier.md's verdict format requires a LENS line "echoed verbatim
+#    from your dispatch", but Phase 2 step 3 did not tell the orchestrator to
+#    send one. `correctness` is a token in BOTH the lens and impact
+#    vocabularies, so the verifier's likeliest guess is also the wrong one.
+has commands/polish.md "with the finding verbatim AND its lens" \
+  "polish.md's verifier dispatch sends the lens the verifier is told to echo"
+# 2. loop-reviewer.md emits `MORE BEYOND CAP: <n>` when a round is capped. That
+#    line had no consumer anywhere in the repo, and the loop never revisits the
+#    remainder by itself (dry round / 3-round cap / report-only single round),
+#    so the wrap-up ledger is its only reader.
+has agents/loop-reviewer.md "MORE BEYOND CAP" \
+  "the reviewer still emits the cap marker this ledger field exists for"
+has commands/polish.md "MORE BEYOND CAP" \
+  "polish.md's wrap-up reads the cap marker instead of leaving it unconsumed"
 
 # P2-12. The template's FAST subset is what the stop-gate runs on every stop
 # attempt under a 100s budget, and it shipped with `npm test` in it — a typical

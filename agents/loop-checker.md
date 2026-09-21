@@ -38,11 +38,19 @@ Do not assume commands. In this order:
    - lint: `eslint .` / `biome check` / `ruff check`
    - types: `tsc --noEmit` / `mypy`
    - format: `prettier --check` / `cargo fmt --check`
-4. If the project has an aggregate command (e.g. `pnpm check`), prefer it.
+4. **Still inside step 3** (no contract, no contract.md): if the project has an
+   aggregate command (e.g. `pnpm check`), prefer it over assembling the
+   individual ones. It never outranks step 1 — a criteria.tsv command is the one
+   the stop-gate executes, and swapping in `pnpm check` would judge the round on
+   a command set nothing downstream runs.
 5. If extra checks exist (dep guards, deadcode scan, security scan), run them too.
 6. If `.loop/results.json` exists, read it (and the logs under
    `.loop/evidence/`) as the latest machine-run contract state — cite it,
-   never write it. Your own runs remain authoritative for this round.
+   never write it. The copy you can see was written BEFORE this round's build,
+   so against that stale file your fresh run is the better evidence and you
+   report your own result. That authority expires when you report: the
+   orchestrator re-runs `run-contract.sh` afterwards, and against the REFRESHED
+   ledger the ledger wins — it is a run, your report is a claim.
 
 ## Execute
 

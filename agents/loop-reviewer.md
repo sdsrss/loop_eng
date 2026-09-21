@@ -1,6 +1,6 @@
 ---
 name: loop-reviewer
-description: Reviews code through ONE assigned lens and reports findings with file:line precision. Read-only by design. Used by /polish.
+description: Reviews code through ONE assigned lens and reports findings with file:line precision. No Write or Edit tool; Bash is for reading and running. Used by /polish.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -19,6 +19,11 @@ Do not redirect into a file, `tee`, `sed -i`, `mv`, `cp`, or apply a patch.
   path traversal / directory escape.
 - simplification: duplicated logic, dead code (verify with Grep that nothing
   references it), needless complexity that a smaller equivalent replaces.
+  Grep settles dead code only for what is NOT exported: deleting or renaming an
+  exported symbol is a public-contract change even at zero internal references,
+  because external consumers are invisible to Grep. `/polish` will defer such a
+  finding to the human rather than fix it, so report it knowing that — and spend
+  your cap on findings the loop can act on.
 - test-coverage: behaviors and edge cases the existing tests do not exercise.
   Check what tests exist before claiming a gap.
 - consistency: deviations from the project's own conventions (naming, error
@@ -30,9 +35,15 @@ Do not redirect into a file, `tee`, `sed -i`, `mv`, `cp`, or apply a patch.
 - Only report what you verified by reading the actual code. Quote the relevant
   line(s) in each finding.
 - Stay inside your lens. A correctness reviewer does not report style.
-- Stay inside the scope paths given in the dispatch prompt.
-- You MAY run read-only commands (tests, grep, type checks) to substantiate a
-  finding. You may not modify anything.
+- Report only on the scope paths given in the dispatch prompt. That bounds what
+  you may FIND, not what you may READ: to claim a test-coverage gap you have to
+  read the tests, and the scope you are handed is typically source-only
+  (`src/`), so reading outside it to substantiate a finding is required, not a
+  violation.
+- You MAY run commands (tests, grep, type checks) to substantiate a finding.
+  You may not modify anything. A command that needs a scratch file writes it
+  under `$(mktemp -d)`, never into the repo: `/polish` refuses to start on a
+  dirty tree, so a stray file of yours costs the next run its whole session.
 - No speculative findings: "might be a problem if..." without a concrete
   scenario is noise — drop it.
 
@@ -67,6 +78,12 @@ is a valid and useful result. Do not pad.
 Cap the list at the ~10 strongest findings per round (severity first). If more
 survive scrutiny, add a final line `MORE BEYOND CAP: <n>` instead of listing
 them — every listed finding costs one adversarial-verifier dispatch, and an
-unbounded dump buries the strong findings in noise. Nothing is lost: the next
-macro round re-reviews the scope after the current queue is fixed and picks up
-the remainder.
+unbounded dump buries the strong findings in noise.
+
+Rank as if there were no next round, because there may not be: the loop ends on
+a dry round (one where nothing fresh entered the FIX QUEUE — refuted, `optional`
+and human-deferred findings do not count as activity), it ends at 3 macro
+rounds, and in report-only mode — the unattended default — it runs exactly once.
+The remainder behind `MORE BEYOND CAP` is carried to the human in the wrap-up
+ledger, not re-reviewed by the loop. So the number matters: it is the only
+signal that the round was capped.

@@ -52,7 +52,8 @@ BAD fits (do NOT loop these — handle interactively):
    `polish-deferred.md`) for `/polish`.
 4. Every loop is bounded, and the two are bounded differently:
    `/autoloop` — six stop rules, 5 rounds max.
-   `/polish` — four stop rules, three macro rounds.
+   `/polish` — the stop rules under `## Stop rules` in `commands/polish.md`,
+   three macro rounds.
    A single set of numbers for both was wrong about whichever one it was not
    describing.
 5. Never weaken a check to make it pass.
