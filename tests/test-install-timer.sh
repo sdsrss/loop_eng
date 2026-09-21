@@ -429,4 +429,72 @@ else
   echo "  FAIL: the timer must be disabled (line ${dis_ln:-none}) before the service is stopped (line ${stop_ln:-none})" >&2
 fi
 
+
+# --- the enable that FAILS: "unit files written" is not "scheduled" ---
+# The block above pins that `enable --now` is CALLED. This one pins what the
+# installer does when it comes back NON-ZERO, which the suite had never seen.
+# Not hypothetical: on a box with no user bus (no session, no lingering)
+# `systemctl --user` exits 1 with "Failed to connect to bus", and this repo's
+# own nightly-timer setup hit exactly that. The install-time answer has to be a
+# refusal — otherwise the installer prints "enabled ... (next run 03:00 daily)"
+# over a timer that does not exist: the header's "installed but never `enable`d,
+# so they silently never run" trap, wearing a success message.
+# LOOP_ENG_TIMER_NO_SYSTEMCTL=1 is useless here — it returns before this branch
+# — so a stubbed systemctl on PATH is the only way in.
+FAILBIN="$XDG/failbin"; mkdir -p "$FAILBIN"
+FAIL_LOG="$XDG/systemctl-fail.log"
+cat > "$FAILBIN/systemctl" <<'EOS'
+#!/bin/sh
+printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
+case "$*" in
+  *"enable --now"*) exit 1 ;;
+esac
+exit 0
+EOS
+chmod +x "$FAILBIN/systemctl"
+run_uninstall polish >/dev/null 2>&1 || true
+: > "$FAIL_LOG"
+XDG_CONFIG_HOME="$XDG" PATH="$FAILBIN:$PATH" SYSTEMCTL_LOG="$FAIL_LOG" \
+  LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" bash "$INSTALL" polish "$SB" \
+  > "$XDG/enable-fail.out" 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "an enable that FAILS fails the install"
+# Anchors the case to the branch it claims to cover: had the install died
+# earlier (scope, claude probe, collision) the assertions around this one would
+# be measuring some other refusal entirely.
+assert_file_contains "$FAIL_LOG" "--user enable --now loop-eng-polish.timer" "the failing case really got as far as the enable"
+assert_file_contains "$XDG/enable-fail.out" "NOT scheduled" "the failed enable tells the operator the timer is NOT scheduled"
+if grep -qF -- "install-timer: enabled loop-eng-polish.timer" "$XDG/enable-fail.out"; then
+  FAIL=$((FAIL+1)); echo "  FAIL: the install announced it enabled a timer systemctl had just refused to enable" >&2
+else
+  PASS=$((PASS+1))
+fi
+# The refusal says the files WERE written and offers a manual enable as the fix
+# — true only if it leaves them on disk. (Contrast the probe refusal above,
+# which writes none: that one answers before the files exist.)
+assert_eq yes "$(exists "$UNIT_DIR/loop-eng-polish.timer")" "the refusal leaves the unit files it says it wrote, so its manual-enable advice can work"
+
+# ...and the same for daemon-reload, the OTHER half of that condition — a
+# separate arm, because `! daemon-reload || ! enable` short-circuits and decides
+# on the reload before enable is ever consulted. This stub lets enable SUCCEED,
+# which is what makes the case distinguishing: stop checking the reload and the
+# install reports success.
+RELOADBIN="$XDG/reloadfailbin"; mkdir -p "$RELOADBIN"
+cat > "$RELOADBIN/systemctl" <<'EOS'
+#!/bin/sh
+printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
+case "$*" in
+  *daemon-reload*) exit 1 ;;
+esac
+exit 0
+EOS
+chmod +x "$RELOADBIN/systemctl"
+run_uninstall polish >/dev/null 2>&1 || true
+: > "$FAIL_LOG"
+XDG_CONFIG_HOME="$XDG" PATH="$RELOADBIN:$PATH" SYSTEMCTL_LOG="$FAIL_LOG" \
+  LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" bash "$INSTALL" polish "$SB" \
+  > "$XDG/reload-fail.out" 2>&1 && rc=0 || rc=$?
+assert_eq 1 "$rc" "a daemon-reload that FAILS fails the install too, even though the enable after it would have succeeded"
+assert_file_contains "$XDG/reload-fail.out" "NOT scheduled" "the failed daemon-reload also says the timer is NOT scheduled"
+run_uninstall polish >/dev/null 2>&1 || true
+
 report "test-install-timer"
