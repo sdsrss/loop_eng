@@ -1,5 +1,5 @@
 ---
-description: Iteratively raise code quality until a review round comes back clean. Use when the user asks to polish/clean up a module or codebase — 打磨/清理/提升代码质量 — or wants review findings actually fixed, not just listed. Unlike a one-shot code review, every finding is adversarially verified, then fixed and regression-tested, looping until a dry round (no fresh confirmed findings). Behavior-preserving — public-contract changes are reported, never applied.
+description: Iteratively raise code quality until a review round comes back clean. Use when the user asks to polish/clean up a module or codebase — 打磨/清理/提升代码质量 — or wants review findings actually fixed, not just listed. Unlike a one-shot code review, every finding is adversarially verified, then fixed and regression-tested, looping until a dry round (no fresh finding entered the fix queue). Behavior-preserving — public-contract changes are reported, never applied.
 argument-hint: [scope, e.g. src/ — defaults to the whole project source]
 allowed-tools: Read, Write, Grep, Glob, Bash, Task, Agent
 ---
@@ -22,6 +22,14 @@ through loop-checker.
 
 - `git status` must be clean (untracked `.loop/` is fine). If dirty, STOP and
   tell the user — polish must be attributable and revertible as one diff.
+- Check for a leftover `.loop/active`. `/polish` arms no contract of its own, so
+  it never creates one — but the Stop hook is command-agnostic
+  (`hooks/stop-gate.sh` allows the stop only when `.loop/active` is absent), so
+  one left behind by a killed or ceilinged `/autoloop` will block YOUR stops
+  too, for a contract that has nothing to do with this run. If it is there,
+  record it and disarm the same way `/autoloop` Step 0 does: `rm -f .loop/active`
+  first, then `rm -f .loop/gate-count .loop/criteria.sha256` as a SECOND Bash
+  call (one command naming both `active` and `criteria.sha256` is itself denied).
 - Record the baseline ref: `git rev-parse HEAD`.
 
 ## Phase 1 — Baseline (numbers, not vibes)
@@ -79,9 +87,15 @@ No adjectives.
 
 1. Order the fix queue: high severity first; within a severity, correctness >
    test-coverage > simplification > consistency.
-2. For each finding in the fix queue, dispatch loop-builder with the finding verbatim
-   (file:line, defect, failure scenario, category — the builder's polish-finding
-   discipline keys off the category). Batch only trivially independent
+2. For each finding in the fix queue, dispatch loop-builder with the finding
+   verbatim (file:line, defect, failure scenario) plus BOTH labels, named as
+   such: its **lens** (`correctness` / `test-coverage` / `simplification` /
+   `consistency`) and its **impact class** (`correctness` / `requirement` /
+   `optional`). They are different vocabularies that share the word
+   `correctness`, the reviewer's report line carries only the impact class, and
+   the builder's discipline keys off the LENS — so passing one token labelled
+   "category" is how a test-coverage fix arrives under a rule that forbids
+   touching tests. Batch only trivially independent
    low-severity items. Builder rules apply (root cause, no drive-by changes,
    commit per fix).
    Cost: a low-severity single-file fix MAY dispatch the builder at a cheaper
@@ -91,8 +105,13 @@ No adjectives.
    - correctness fixes: if the bug is not covered by an existing test, the
      builder MUST first add a failing test reproducing it, then fix
      (red → green — proof the bug was real and is gone).
-   - simplification fixes: behavior-preserving only; existing tests must stay
-     green with zero test modifications.
+   - test-coverage fixes: the fix IS a test change, so the zero-modification
+     rule below does not apply to it. Add the missing assertion, then prove it
+     is load-bearing — break the code it claims to cover, see the new assertion
+     go red, restore, see it green. An assertion that passes both ways pins
+     nothing.
+   - simplification / consistency fixes: behavior-preserving only; existing
+     tests must stay green with zero test modifications.
 3. Dispatch loop-checker for a full regression after the queue is done.
    - ALL GREEN → update `.loop/polish-state.md` (round summary: found /
      confirmed / refuted / fixed) and return to Phase 2 for the next round.
@@ -122,7 +141,14 @@ yourself sequentially and label the final report `degraded mode:
 single-context review` — never silently pretend independent review happened.
 Verification by execution (running tests/repros) remains mandatory, and so does
 the commit-per-fix discipline — degraded mode degrades independence, not
-traceability.
+traceability. But note what it cannot degrade: the rule above — you NEVER edit
+source files yourself, the only files you may write are under `.loop/` — is not
+suspended by the dispatch failure that put you here. With no loop-builder to
+dispatch there is nobody left who may apply a fix, so **degraded mode is
+report-only**: run the lenses, verify by execution, write the ledger, hand the
+fix queue to the user, and say plainly that nothing was applied. The
+commit-per-fix discipline binds whoever picks the queue up, which in this mode
+is not you.
 
 ## Wrap-up
 
