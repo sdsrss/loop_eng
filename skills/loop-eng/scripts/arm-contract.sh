@@ -51,6 +51,37 @@ cannot_arm() { # $1 = path, $2 = why
 
 mkdir -p "$LOOP_DIR" || cannot_arm "$LOOP_DIR" "mkdir failed"
 
+# Absolute path of the git dir whose info/exclude git actually READS -> stdout;
+# non-zero and no output when it cannot be resolved (the caller must then warn
+# rather than claim success — a resolution failure and a successful write must
+# never share one branch's verdict).
+#
+# --git-common-dir is the right question (see the worktree note below), but its
+# ANSWER may be relative: this git (2.53.0) says plain `.git` at the top of a
+# main worktree and `../.git` from a subdirectory of one — cwd-relative — while
+# older gits resolved it against the TOPLEVEL instead. `--git-dir` had the same
+# exposure and the same `.git` answer at a top level; it was invisible because
+# the value was only ever concatenated and used from the cwd it was asked in.
+# Resolved to absolute here so the path in the message is one the user can
+# paste, and so it survives being reported from anywhere. Both relative bases
+# are tried, cwd first, because a wrong guess would silently create a stray
+# `.git/info/` directory in a subdirectory instead of writing the real one.
+git_exclude_dir() {
+  local gcd top
+  gcd=$(git rev-parse --git-common-dir 2>/dev/null) || gcd=""
+  # A git too old to know the flag echoes it back verbatim (rev-parse passes
+  # unrecognized arguments through) instead of failing: treat that as "no
+  # answer" and fall back to the per-worktree dir, which such a git — having no
+  # worktree support to speak of — is not wrong about.
+  case "$gcd" in ''|-*) gcd=$(git rev-parse --git-dir 2>/dev/null) || gcd="" ;; esac
+  [ -n "$gcd" ] || return 1
+  case "$gcd" in /*) printf '%s\n' "$gcd"; return 0 ;; esac
+  [ -d "$gcd" ] && { (cd "$gcd" && pwd); return 0; }
+  top=$(git rev-parse --show-toplevel 2>/dev/null) || top=""
+  [ -n "$top" ] && [ -d "$top/$gcd" ] && { (cd "$top/$gcd" && pwd); return 0; }
+  return 1
+}
+
 # The whole chain assumes git ignores $LOOP_DIR/, and nothing made it so.
 #
 # The builder commits with `git add -A`. In a repo whose .gitignore does not
@@ -66,6 +97,19 @@ mkdir -p "$LOOP_DIR" || cannot_arm "$LOOP_DIR" "mkdir failed"
 # Written into .git/info/exclude, not the user's .gitignore: it is local and
 # untracked, so arming a loop never turns into a diff in someone's PR.
 #
+# COMMON dir, not `--git-dir`. In a LINKED worktree (`git worktree add`, which
+# superpowers:using-git-worktrees runs literally, so agents arm loops inside
+# one) `--git-dir` is the per-worktree <main>/.git/worktrees/<name>, and git
+# does NOT read info/exclude from there — only from --git-common-dir. Writing
+# the line to the per-worktree placement left $LOOP_DIR/ un-ignored while the
+# success message below named a real file that really did contain the line, so
+# the false reassurance survived a `cat`. Worse than silent: re-arming appended
+# a duplicate every round, because the idempotence guard IS the check-ignore
+# above and it could never become true; and the wrong branch only stopped being
+# taken once `git add -A` had committed the bookkeeping (git ls-files then
+# matches, so arming switches to the TRACKED warning) — i.e. after exactly the
+# wedge this block exists to prevent.
+#
 # Already-tracked is the case the exclude file cannot fix — git ignores nothing
 # it already tracks — so it warns instead, and names the one command that undoes
 # it. Advisory, not fail-closed: the loop still runs, it just cannot promise the
@@ -75,8 +119,10 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [ -n "$(git ls-files -- "$LOOP_DIR" 2>/dev/null)" ]; then
     echo "loop-eng arm-contract: WARNING — $LOOP_DIR/ is TRACKED by git. Loop bookkeeping (results.json, evidence/) is rewritten on every stop, so the tree will never be clean again and the unattended drivers will refuse to run. Untrack it with: git rm -r --cached $LOOP_DIR && echo '$LOOP_DIR/' >> .gitignore && git commit -m 'untrack loop bookkeeping'" >&2
   elif ! git check-ignore -q "$LOOP_DIR/results.json" 2>/dev/null; then
-    GIT_EXCLUDE="$(git rev-parse --git-dir 2>/dev/null)/info/exclude"
-    if mkdir -p "$(dirname "$GIT_EXCLUDE")" 2>/dev/null \
+    GIT_EXCLUDE=""
+    GIT_EXCLUDE_DIR="$(git_exclude_dir)" && GIT_EXCLUDE="$GIT_EXCLUDE_DIR/info/exclude"
+    if [ -n "$GIT_EXCLUDE" ] \
+       && mkdir -p "$(dirname "$GIT_EXCLUDE")" 2>/dev/null \
        && printf '%s\n' "$LOOP_DIR/" >> "$GIT_EXCLUDE" 2>/dev/null; then
       echo "loop-eng arm-contract: $LOOP_DIR/ was not ignored by git; added it to $GIT_EXCLUDE (local only — your .gitignore is untouched). Loop bookkeeping must not be committed: the builder's \`git add -A\` would otherwise commit it and leave the tree permanently dirty." >&2
     else

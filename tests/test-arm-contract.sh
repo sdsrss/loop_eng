@@ -104,6 +104,75 @@ assert_file_contains "$IGNOUT/trackwarn" "TRACKED by git" "arming a repo with co
 assert_file_contains "$IGNOUT/trackwarn" "git rm -r --cached" "the tracked warning names the command that undoes it"
 assert_eq "1" "$([ -f "$TRACKED/.loop/active" ] && echo 1)" "the tracked warning is advisory — the loop still arms"
 
+# --- a LINKED worktree: the exclude file git reads is the COMMON one ---------
+# `git rev-parse --git-dir` inside a linked worktree is the PER-WORKTREE dir
+# (<main>/.git/worktrees/<name>), and git does not read info/exclude from there
+# — it reads <main>/.git/info/exclude, i.e. --git-common-dir. Arming wrote the
+# line into the per-worktree placement, so .loop/ stayed un-ignored while the
+# message at the end of the block asserted it had been handled and named a real
+# file that really did contain the line: the reassurance survived a `cat`. Each
+# re-arm appended another duplicate, because the idempotence guard IS the
+# check-ignore that never became true. The wrong branch then repaired itself
+# only AFTER `git add -A` had committed the bookkeeping (git ls-files matches,
+# so the next arm takes the TRACKED warning instead) — i.e. after exactly the
+# wedge the block exists to prevent. Live path: superpowers:using-git-worktrees
+# runs literal `git worktree add`, so an agent can arm a loop in one.
+WT=$(mktemp -d "${TMPDIR:-/tmp}/loop-eng-worktree.XXXXXX")
+WT=$(cd "$WT" && pwd)
+trap 'rm -rf "$SB" "$NOIGN" "$IGNOUT" "$TRACKED" "$WT"' EXIT
+(
+  mkdir -p "$WT/main" || exit 1
+  cd "$WT/main" || exit 1
+  git init -q; git config user.email test@loop-eng.local; git config user.name loop-eng-test
+  echo sandbox > README.md; git add README.md; git commit -qm initial
+  git worktree add -q -b loop-wt "$WT/linked"
+) >/dev/null 2>&1
+mkdir -p "$WT/linked/.loop"
+printf 'ok\tstill fine\ttrue\n' > "$WT/linked/.loop/criteria.tsv"
+( cd "$WT/linked" && bash "$ARM" 2>"$IGNOUT/wtwarn" ) >/dev/null
+# the point of the whole block: git must actually ignore it now
+assert_eq "ignored" "$(cd "$WT/linked" && git check-ignore -q .loop/results.json && echo ignored)" \
+  "arming inside a linked worktree actually makes git ignore .loop/"
+# the consequence, not just the file: `git add -A` stages no bookkeeping
+( cd "$WT/linked" && git add -A && git status --porcelain ) > "$IGNOUT/wtafter" 2>/dev/null
+assert_eq 0 "$(wc -c < "$IGNOUT/wtafter" | tr -d ' ')" "after arming a linked worktree, git add -A stages no loop bookkeeping"
+# ...and the success message must name the file git really reads, not a real
+# file it ignores — a false message is the half that survives casual checking
+assert_file_contains "$IGNOUT/wtwarn" "$WT/main/.git/info/exclude" "the linked-worktree arm names the common exclude it wrote"
+# asked of git rather than spelled out: the per-worktree dir is named after the
+# worktree PATH, not the branch, and a hand-written `worktrees/<branch>` path
+# made both of these assertions pass against a directory that never existed.
+PERWT=$(cd "$WT/linked" && git rev-parse --git-dir)
+assert_eq "" "$(grep -cF "$PERWT/info/exclude" "$IGNOUT/wtwarn" 2>/dev/null | grep -v '^0$')" \
+  "arming never claims the per-worktree exclude, which git does not read"
+# idempotence follows from the root fix — check-ignore is the guard, and it can
+# only become true once the line lands where git reads it. No second mechanism.
+( cd "$WT/linked" && bash "$ARM" ) >/dev/null 2>&1
+assert_eq 1 "$(grep -c '^\.loop/$' "$WT/main/.git/info/exclude")" "re-arming a linked worktree does not append a duplicate exclude line"
+assert_eq 0 "$(grep -c '^\.loop/$' "$PERWT/info/exclude" 2>/dev/null || echo 0)" \
+  "arming writes nothing into the per-worktree exclude git never reads"
+
+# --- and from a SUBDIRECTORY: --git-common-dir can answer RELATIVE -----------
+# From a subdir of a main worktree this git answers `../.git` (cwd-relative),
+# and at the top of one it answers plain `.git`; older gits resolved it against
+# the TOPLEVEL instead. A naive "$(git rev-parse --git-common-dir)/info/exclude"
+# therefore writes correctly here but reports a path the user cannot paste, and
+# reports the wrong one outright on a git that means it toplevel-relative. Arm
+# must name an absolute file, wherever it was invoked from.
+SUBR="$WT/subrepo"
+(
+  mkdir -p "$SUBR/nested" || exit 1
+  cd "$SUBR" || exit 1
+  git init -q; git config user.email test@loop-eng.local; git config user.name loop-eng-test
+  echo sandbox > README.md; git add README.md; git commit -qm initial
+) >/dev/null 2>&1
+mkdir -p "$SUBR/nested/.loop"
+printf 'ok\tstill fine\ttrue\n' > "$SUBR/nested/.loop/criteria.tsv"
+( cd "$SUBR/nested" && bash "$ARM" 2>"$IGNOUT/subwarn" ) >/dev/null
+assert_file_contains "$IGNOUT/subwarn" "$SUBR/.git/info/exclude" "arming from a subdirectory names the exclude file by absolute path"
+assert_eq "ignored" "$(cd "$SUBR/nested" && git check-ignore -q .loop/results.json && echo ignored)" \
+  "arming from a subdirectory still makes git ignore the loop dir"
+
 # --- empty DESCRIPTION column: legal, and arm and run must agree that it is ---
 # `id<TAB><TAB>cmd` is three real TAB-separated columns with a blank middle one.
 # This file used to carry FOUR different splits of the same line: two `awk -F'\t'`
