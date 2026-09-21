@@ -113,11 +113,20 @@ p = pathlib.Path(sys.argv[1], ".claude-plugin", "marketplace.json")
 m = json.loads(p.read_text()); m["metadata"]["version"] = "0.0.1"
 p.write_text(json.dumps(m))
 PY
+d_fields=$(manifest_fields "$SB")
 read -r _ d_pver d_mver _ _ <<EOF
-$(manifest_fields "$SB")
+$d_fields
 EOF
-if [ "$d_pver" != "$d_mver" ]; then PASS=$((PASS+1)); else
-  FAIL=$((FAIL+1)); echo "  FAIL: a drifted metadata.version was not detected" >&2; fi
+# `!=` alone also scores a PASS when manifest_fields FAILED: on its error paths
+# it prints `ERROR <ExceptionName>`, so d_pver is the exception name, d_mver is
+# empty, and "different" is trivially true for a call that produced no fields at
+# all. Rule the error shape out first, the way case (b) below already matches
+# its `ERROR no-unique-marketplace-entry*` prefix explicitly.
+case "$d_fields" in
+  ERROR*) FAIL=$((FAIL+1)); echo "  FAIL: manifest_fields errored on the drift fixture: $d_fields" >&2 ;;
+  *) if [ "$d_pver" != "$d_mver" ]; then PASS=$((PASS+1)); else
+       FAIL=$((FAIL+1)); echo "  FAIL: a drifted metadata.version was not detected" >&2; fi ;;
+esac
 
 # (b) the marketplace entry for this plugin disappears
 python3 - "$SB" <<'PY'

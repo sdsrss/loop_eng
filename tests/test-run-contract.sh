@@ -136,6 +136,13 @@ bash "$RUNNER" >/dev/null 2>&1
 if command -v python3 >/dev/null 2>&1; then
   python3 -c "import json;json.load(open('.loop/results.json'))" 2>/dev/null
   assert_eq 0 $? "results.json stays valid JSON when a field contains a TAB"
+else
+  # Say it, like every other conditional skip in this file (:507, :588, :697).
+  # A python3-less host is a shape the project contemplates — CLAUDE.md's
+  # bash-3.2 docker recipe installs python3 precisely because its absence
+  # changes behavior — and a JSON-validity assertion that quietly is not run is
+  # indistinguishable from one that passed.
+  echo "  SKIP: no python3 — JSON validity under a TAB field not checked (1 assertion)" >&2
 fi
 assert_file_contains .loop/results.json '\\t' "TAB in field escaped as \\t"
 # a raw C0 control byte (ESC) in a field must also keep results.json valid JSON
@@ -144,6 +151,8 @@ bash "$RUNNER" >/dev/null 2>&1
 if command -v python3 >/dev/null 2>&1; then
   python3 -c "import json;json.load(open('.loop/results.json'))" 2>/dev/null
   assert_eq 0 $? "results.json stays valid JSON when a field contains a raw C0 control byte"
+else
+  echo "  SKIP: no python3 — JSON validity under a C0 control byte not checked (1 assertion)" >&2
 fi
 
 # --- stdin-reading criterion must not swallow later criteria lines ---
