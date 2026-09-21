@@ -1,5 +1,84 @@
 # Changelog
 
+## Unreleased
+
+The first unattended write-mode run this project has ever done, and what came
+out of it. The run was the point — the audit's one open verdict was that the
+`--allow-write` path had never actually run unattended, which is missing
+evidence, not missing code — but it also found a guard that fails open, and the
+nightly it was rehearsing would have inherited that.
+
+### Fixed
+
+- **The dirty-tree guard answered CLEAN for a tree full of uncommitted work.**
+  `git status --porcelain | grep -vq '^?? \.loop/'` under `set -euo pipefail`:
+  `grep -vq` leaves at the first line, git takes a SIGPIPE and dies 141, and
+  pipefail makes 141 the pipeline's status, which the `if` reads as FALSE. Every
+  dirty fixture in the suite was one file (~40 bytes of porcelain), so git
+  always won the race and the guard looked sound; past the 64KB pipe buffer it
+  is git that always loses. Measured on a 4000-file tree, pre-fix: the polish
+  driver started a `bypassPermissions` session on a dirty tree 5/5 runs, its
+  post-run check passed a session that abandoned 4000 modified files, and the
+  autoloop driver let sessions commit on top of someone's uncommitted work. All
+  three sites now share one `tree_is_dirty` that captures the porcelain whole
+  and filters it in-process; a git that fails to answer counts as dirty.
+
+- Nine more defects from the same run, each with its own commit: an arm that
+  could not write still said it had armed; a backlog rewrite published a partial
+  read over the user's file; the ignore line written where git never reads it;
+  `max-sessions 0` installed a unit that could never run; the provider-limit
+  wait deferred the signal trap for the whole wait.
+
+- **`install-timer.sh` created `~/.config/systemd/user` before it could fail.**
+  A `set -e` abort between the two mkdirs left that directory on a box that
+  never had one. Repo-local `.loop/` now goes first, so residue lands in the
+  repo's own gitignored bookkeeping dir.
+
+- **A failed ledger publish left the previous round's `results.json` looking
+  current.** Exit 73 already protects every machine consumer; the refusal now
+  also tells a human reader the file on disk is from an earlier round. The stale
+  ledger is still not deleted — erasing a completion record on an error path is
+  worse than a stale one.
+
+### Changed
+
+- **`agents/loop-reviewer.md` and `agents/loop-verifier.md` had never been
+  through a review lens**, and two of the nine defects found there were broken
+  contracts rather than wrong sentences: the verifier was told to echo a `LENS:`
+  its caller was never told to send, and `MORE BEYOND CAP: <n>` had no consumer
+  anywhere — while "nothing is lost, the next round picks it up" is false on a
+  dry round, at the 3-round cap, and in report-only mode, which is the
+  unattended default. Both hand-offs are now wired and pinned by assertions.
+  Also: `Read-only by design.` in both frontmatter descriptions was the same
+  overclaim this repo already banned from those files' bodies, back under a
+  spelling the fixed-string ban did not cover.
+
+- **Six documentation claims the recovered SUSPECTED list was right about**,
+  including the README install command (the release smoke runs
+  `loop-eng@loop-eng`, the README said `loop-eng`) and the README's account of
+  two loops in one repo, which described a hash-lock collision that cannot
+  happen — the second session's contract write is denied outright.
+
+### Test harness
+
+- **The entry point could print ALL GREEN in three shapes where nothing ran:**
+  an untracked script escaped both `bash -n` and shellcheck, zero suites counted
+  as a pass, and a suite that exited 0 without reaching `report` was "ok".
+- **Six more scans that had stopped checking**: the sandbox-leak scan matched
+  four spellings and missed four ordinary ones; the hooks.json command scan
+  broke on a JSON reformat (61 → 58 passed, still ALL GREEN); two hash-lock
+  assertions compared empty to empty on a host with no SHA-256 tool; two JSON
+  validity checks vanished unannounced without python3; a manifest negative
+  control passed when its helper errored; a fake PATH named a tool the gate
+  never uses.
+- **The timer scripts are now in CI's bash-3.2 leg** (they were hand-verified
+  under a real 3.2.57 for several releases, which is not a gate), and the two
+  unattended suites no longer assert against the ambient environment — this
+  project's own systemd unit exports `LOOP_ENG_ALLOW_AUTOFIX=1`, so a suite run
+  from inside an unattended session went red for reasons unrelated to the code.
+
+Suite 967 → 1104 assertions, 13 suites, 0 failed; bash 3.2.57 leg green.
+
 ## 0.19.0 — 2026-09-21
 
 One refusal, and the documentation catching up with the machine. The refusal is
