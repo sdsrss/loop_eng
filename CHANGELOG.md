@@ -1,12 +1,28 @@
 # Changelog
 
-## Unreleased
+## 0.20.0 — 2026-09-21
 
 The first unattended write-mode run this project has ever done, and what came
 out of it. The run was the point — the audit's one open verdict was that the
 `--allow-write` path had never actually run unattended, which is missing
 evidence, not missing code — but it also found a guard that fails open, and the
 nightly it was rehearsing would have inherited that.
+
+### Upgrade
+
+- **The unattended drivers now refuse dirty trees they previously ran on.** The
+  refusal was always the documented contract ("refuses to run on a dirty tree —
+  unattended changes must be attributable"); on a wide tree it silently did not
+  happen (see the first entry under Fixed). If a scheduled run of yours has been
+  starting on a repo with uncommitted work, it will now stop with
+  `dirty tree, refusing unattended run` in `.loop/unattended.log` and exit 1
+  instead. **What to do:** commit or stash before the timer fires — that is what
+  the guard has always asked for. The same tightening makes
+  `unattended-polish.sh`'s post-run check refuse to vouch for a session that
+  ended mid-edit (exit 70, `UNTRUSTWORTHY`), which previously passed silently on
+  a wide tree. **To keep the old behaviour, pin `0.19.0`** — but note that the
+  old behaviour is a `bypassPermissions` session starting on work it cannot
+  attribute.
 
 ### Fixed
 
