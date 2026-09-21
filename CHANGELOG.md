@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.0 — 2026-09-21
 
 The backlog half of a loop accepted less than it locked. The evidence-gate has
 always frozen a backlog line on a tolerant pattern, while the runner ticked one
