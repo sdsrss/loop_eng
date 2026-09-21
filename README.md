@@ -14,8 +14,13 @@ mechanically refuses to let a session quit while its contract is unsatisfied.
 
 ```
 /plugin marketplace add sdsrss/loop_eng
-/plugin install loop-eng
+/plugin install loop-eng@loop-eng
 ```
+
+`loop-eng@loop-eng` is plugin@marketplace. The qualified form is the one this
+project's own release smoke runs against a real install (`RELEASING.md` §1), so
+it is the one documented here; the bare `loop-eng` may resolve too, but nothing
+here has verified that.
 
 After a marketplace install the commands may resolve namespace-prefixed —
 `/loop-eng:autoloop` and `/loop-eng:polish` — if the bare `/autoloop` /
@@ -205,10 +210,14 @@ rather than dying partway through.
 
 Scope notes:
 
-- **One loop per repo at a time.** `.loop/` is shared, unversioned state: a
-  second session arming the same repo overwrites the hash-lock, so the first
-  session's contract then fails closed as tampered (safe, but confusing) and
-  the two loops fight over `results.json`.
+- **One loop per repo at a time.** `.loop/` is shared, unversioned state: one
+  `criteria.tsv`, one `criteria.sha256`, one `results.json`, no per-session
+  namespace. What a second session actually hits first is the evidence-gate:
+  while the first loop is armed, its attempt to write a contract of its own is
+  denied on both the Write/Edit and the Bash path, so it arms nothing. What it
+  does collide with is the bookkeeping the gate does not protect — arming clears
+  the other session's `gate-count` and `gate-last`, and both loops write
+  `results.json`.
 - **The stop-gate guards `/autoloop` only.** `/polish` has no mechanism-layer
   completion gate — its dry-round convergence rests on the orchestration
   prompt and the behavior-preserving red lines, not on a hook.

@@ -192,8 +192,10 @@ falls back to it when criteria.tsv is absent.)
    subset); the full sweep (the run-everything command, e.g. the whole test
    runner) runs ONCE, in the final round. Full-sweeping every intermediate
    round re-buys assurance the fast subset already gives and multiplies
-   checker wall-clock by the round count (2026-07-14 dogfood: 5 rounds of
-   full sweeps caught nothing the fast subset would have missed).
+   checker wall-clock by the round count. (A 2026-07-14 dogfood run is where
+   this rule came from; its numbers were never written down anywhere in this
+   repo, so the argument above is the rationale — not a measurement you can
+   re-check.)
 3. If the checker's report starts with `ALL GREEN`, that verdict is about THIS
    round's item, not about the loop. On a multi-item backlog the checker judges
    only the current item (its criteria plus the project suite) and lists the rest as
@@ -275,7 +277,9 @@ loop has closed, and the block text will prompt you to "keep fixing" while a
 builder is still mid-edit, inviting a second builder into the same files.
 
 Observed rather than assumed: on Claude Code CLI 2.1.278 the dispatch is
-synchronous and a full round completed to `all_green: true` (0.14.0 smoke). If
+synchronous, and a full round has completed to `all_green: true` on it. (That
+was seen during 0.14.0's smoke work; the run itself left no tracked artifact, so
+the version is the checkable part and the round is a report.) If
 your harness dispatches subagents in the background, expect the spurious blocks
 above; that is a harness property this prompt cannot override.
 

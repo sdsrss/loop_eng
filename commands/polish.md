@@ -1,11 +1,13 @@
 ---
 description: Iteratively raise code quality until a review round comes back clean. Use when the user asks to polish/clean up a module or codebase — 打磨/清理/提升代码质量 — or wants review findings actually fixed, not just listed. Unlike a one-shot code review, every finding is adversarially verified, then fixed and regression-tested, looping until a dry round (no fresh finding entered the fix queue). Behavior-preserving — public-contract changes are reported, never applied.
-argument-hint: [scope, e.g. src/ — defaults to the whole project source]
+argument-hint: [scope, e.g. src/ — defaults to the project's main source directory]
 allowed-tools: Read, Write, Grep, Glob, Bash, Task, Agent
 ---
 
 Polish the code quality of: $ARGUMENTS (if empty: the project's main source
-directory — state which one you chose).
+directory — state which one you chose). The unattended driver does not share
+this default: `unattended-polish.sh` hard-codes `src/` when its scope argument
+is omitted, because a scheduled run has nobody to state a choice to.
 
 Report-only mode: if $ARGUMENTS contains `report-only`, run Phases 0–2 (baseline,
 review, adversarial verification) but SKIP Phase 3 entirely — no fixes, no file

@@ -171,8 +171,12 @@ tracked path lands in the user's plugin cache, `tests/` (the ~272KB of
 plugin manifest format (`.claude-plugin/plugin.json` / `marketplace.json`) has
 no `files`/`include`/`exclude` field and Claude Code honours no `.claudeignore`
 — the `claude-code-plugin-dev` skill documents no such mechanism and states the
-install "copies the full tree", confirmed empirically (installed cache under
-`~/.claude/plugins/cache/loop-eng/` contains all `tests/`). This is acceptable
+install "copies the full tree". That was also seen directly once, in a cache
+under `~/.claude/plugins/cache/loop-eng/` that held all of `tests/` — but that
+install is gone (this machine has had none since 2026-09-19, as the dual-source
+section above says), so treat it as a past observation, not a check you can
+re-run. Re-verify it during a release's live-install smoke, which installs the
+plugin for real. This is acceptable
 and left as-is: the suites are tiny text files, carry no runtime cost (never
 sourced by any command/hook), and hold no secrets. Untracking `tests/` is NOT
 an option — CI runs them. Do not add a build/packaging step for ~272KB of text
