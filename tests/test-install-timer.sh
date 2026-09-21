@@ -133,9 +133,24 @@ trap 'rm -rf "$SB" "$XDG" "$FRESH_XDG" "$FRESH_XDG2" "$SB_BLOCKED"' EXIT
 # test left the suite at 107 passed, 0 failed. The mutant has to die.
 mkdir -p "$SB_BLOCKED/src"
 printf 'not a directory\n' > "$SB_BLOCKED/.loop"
-XDG_CONFIG_HOME="$FRESH_XDG2" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" \
-  bash "$INSTALL" polish "$SB_BLOCKED" >/dev/null 2>&1 && rc=0 || rc=$?
+blk_err=$(XDG_CONFIG_HOME="$FRESH_XDG2" LOOP_ENG_TIMER_NO_SYSTEMCTL=1 LOOP_ENG_CLAUDE_BIN="$FAKE_CLAUDE" \
+  bash "$INSTALL" polish "$SB_BLOCKED" 2>&1 >/dev/null) && rc=0 || rc=$?
 assert_eq "1" "$([ "$rc" -ne 0 ] && echo 1)" "an install that cannot create the repo's .loop/ fails"
+# ...and it must fail for the RIGHT reason. `rc != 0` alone accepts every refusal
+# in the 110 lines above the mkdirs, and this band is exactly where this project
+# keeps adding them — whitespace, percent, scope, same-minute collision, claude
+# probe. The `src/` fixture above fixes today's instance of that trap; this
+# assertion fixes the class, so the next refusal inserted there cannot silently
+# turn both assertions back into passes-for-the-wrong-reason.
+# Asserting the ABSENCE of the wrong refusals, not the presence of the right
+# diagnostic: the mkdir message is not portable (GNU "cannot create directory …:
+# File exists", BSD "…: File exists", musl "Already exists").
+case "$blk_err" in
+  *"scope not found"*|*"already runs"*|*"claude CLI not found"*|*"usage:"*)
+    FAIL=$((FAIL+1))
+    echo "  FAIL: the blocked-.loop case died BEFORE the mkdirs, so the residue assertion below proves nothing: $blk_err" >&2 ;;
+  *) PASS=$((PASS+1)) ;;
+esac
 assert_eq no "$(exists "$FRESH_XDG2/systemd")" "that failure leaves no user-global systemd dir behind"
 rm -f "$SB_BLOCKED/.loop"
 
