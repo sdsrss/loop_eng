@@ -50,7 +50,7 @@ producing behavior *neither* real 3.2.57 *nor* 5.x exhibits: `${s//\\/\\\\}` in
 `run-contract.sh`'s `json_str` stops doubling backslashes, and the TAB-escaping
 assertion fails against working code. Acting on that false positive would break
 `json_str` on every real bash — which is exactly what the "do not
-portability-rewrite it speculatively" note at `run-contract.sh:51` warns about.
+portability-rewrite it speculatively" note at `run-contract.sh:61` warns about.
 
 ## Dual-source layout — the one gotcha that bites
 
@@ -113,10 +113,12 @@ machine-written fact, never a model claim. Three layers, all in `hooks/` +
    commands) and records `.loop/criteria.sha256` (a hash-lock), then drops
    `.loop/active`.
 2. `hooks/evidence-gate.sh` (PreToolUse on Write/Edit/MultiEdit/NotebookEdit/Bash) **denies model writes**
-   to `.loop/results.json`, `.loop/evidence/`, the armed `criteria.tsv` and the
-   legacy `.loop/verify.sh` (the contract of a loop armed without a
-   `criteria.tsv`, and the one gate input with no hash-lock behind it) while
-   `.loop/active` exists. Escape hatch: `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
+   to `.loop/results.json`, `.loop/evidence/`, the armed `criteria.tsv`, its
+   `criteria.sha256` hash-lock, a `.loop/backlog.md` carrying any
+   `| verify:` line (the lock is FILE-wide, not per-line — one such line freezes
+   every line in the file) and the legacy `.loop/verify.sh` (the contract of a
+   loop armed without a `criteria.tsv`, and the one gate input with no hash-lock
+   behind it) while `.loop/active` exists. Escape hatch: `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
 3. `hooks/stop-gate.sh` (Stop) re-runs `run-contract.sh` on every stop attempt
    and blocks exit (exit 2, failure fed back) until the contract passes. It fails
    **closed** on a vacuous/empty contract, on a *partly parsed* one (any criteria
@@ -135,10 +137,17 @@ So `passes: true` can only come from actually running the verify command — it
 cannot be typed. When changing any of these three scripts, keep the fail-closed
 behavior and re-run the full test suite; the invariant is the product.
 
-Unattended entry points (`scripts/unattended-{polish,autoloop}.sh`) are
-report-only / no-build unless explicitly opted in (`LOOP_ENG_ALLOW_AUTOFIX=1` /
-`LOOP_ENG_ALLOW_AUTOBUILD=1`) and refuse dirty trees. `install-timer.sh` /
-`uninstall-timer.sh` register them as a `systemd --user` timer.
+Unattended entry points live in `skills/loop-eng/scripts/`, not in the repo-root
+`scripts/` (which holds only `sync-local.sh`): `unattended-polish.sh`,
+`unattended-autoloop.sh`, `install-timer.sh`, `uninstall-timer.sh`. Both drivers
+refuse dirty trees, and the two write paths are opt-in — but **not
+symmetrically**. `unattended-polish.sh` without `LOOP_ENG_ALLOW_AUTOFIX=1` runs
+**report-only**, which is real work. `unattended-autoloop.sh` has **never had a
+report-only mode**: without `LOOP_ENG_ALLOW_AUTOBUILD=1` it refuses at its own
+entry and exits 1. So `install-timer.sh autoloop` without `--allow-write` is
+**refused at install time** — it would otherwise enable a unit that fails at
+every trigger forever. `install-timer.sh` / `uninstall-timer.sh` register the
+drivers as a `systemd --user` timer.
 
 ## Release
 
@@ -153,7 +162,7 @@ two files**: `.claude-plugin/plugin.json` (`version`) and
 
 A git-based marketplace install ships the **full git tree** — the `/plugin
 install` clone is a wholesale `git clone`/`git pull` of the repo, so every
-tracked path lands in the user's plugin cache, `tests/` (the ~40KB of
+tracked path lands in the user's plugin cache, `tests/` (the ~272KB of
 `test-*.sh` suites) included. There is **no way to exclude tracked paths**: the
 plugin manifest format (`.claude-plugin/plugin.json` / `marketplace.json`) has
 no `files`/`include`/`exclude` field and Claude Code honours no `.claudeignore`
@@ -162,7 +171,10 @@ install "copies the full tree", confirmed empirically (installed cache under
 `~/.claude/plugins/cache/loop-eng/` contains all `tests/`). This is acceptable
 and left as-is: the suites are tiny text files, carry no runtime cost (never
 sourced by any command/hook), and hold no secrets. Untracking `tests/` is NOT
-an option — CI runs them. Do not add a build/packaging step for ~40KB.
+an option — CI runs them. Do not add a build/packaging step for ~272KB of text
+(`git ls-files 'tests/*' | xargs wc -c` → 278563 bytes, 2026-09-21; the figure
+read ~40KB for several releases while the suites grew past six times that, so
+re-measure rather than quoting this line).
 
 ---
 

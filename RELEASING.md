@@ -6,8 +6,19 @@ memory of having run it.
 ## 0. Pre-flight
 
 - [ ] `bash tests/run-all.sh` → `ALL GREEN` locally.
-- [ ] CI green on main for the release commit:
-      `gh run list --branch main --limit 1` → `completed success`.
+- [ ] CI green on main **for the release commit** — select the run by its sha.
+      **Never `--limit 1`**: for ~15s after a push GitHub has not registered the
+      new run, so `--limit 1` returns the PREVIOUS commit's already-finished run
+      and reports green for a tree other than the one being released. That is
+      the difference between "CI passed on the release commit" and "CI passed on
+      something else"; it cost one wasted verification on 0.16.0.
+      ```
+      gh run list --branch main --limit 10 \
+        --json headSha,status,conclusion \
+        --jq ".[] | select(.headSha==\"$(git rev-parse HEAD)\")"
+      ```
+      Empty output means "not registered yet" — re-run it. Treat empty as
+      not-yet, never as failure.
 - [ ] Version bump touches THREE fields across TWO files:
       `.claude-plugin/plugin.json` (`version`) and
       `.claude-plugin/marketplace.json` (`metadata.version` +
@@ -54,8 +65,15 @@ to do" is always the first section, and it is always called the same thing.
 - Bugs. What was wrong, what it cost, what it does now.
 ```
 
-The 19 sections before 0.16.0 are left as written. They are diary-style and
-long — about 129 lines each over the last five releases — but that prose is the
+One heading beyond the skeleton is established practice: `### Live-install
+smoke`, carrying that release's machine-verified smoke verdicts (0.18.0, 0.18.1).
+Add it after the three above when §1 ran. And 0.16.1 shipped its three in the
+order Upgrade → Fixed → Changed; the skeleton's order is what new sections
+follow, not a claim about what every existing one did.
+
+The 20 sections before 0.16.0 are left as written. They are diary-style and
+long — the five releases before the skeleton average about 175 lines each, and
+all 20 average about 83 — but that prose is the
 project's decision record, and rewriting it would destroy the thing that makes
 it worth keeping while changing nothing for any reader. The skeleton binds
 forward only. When an entry wants a full incident narrative, put the narrative
@@ -69,8 +87,14 @@ keeps that true now. 0.1.0 is deliberately not back-filled: a tag invented years
 later points at a commit nobody released, which is a worse record than an
 honest gap.
 
-## 1. Live-install smoke (REQUIRED before any release that touches
-##    hooks/, commands/, skills/, or .claude-plugin/ — audit H2)
+## 1. Live-install smoke — REQUIRED for any release touching `hooks/`, `commands/`, `skills/` or `.claude-plugin/`
+
+That is **four** paths (audit H2). Re-read this line at ship time instead of
+recalling it: 0.18.1's smoke was nearly skipped by remembering the trigger as
+"hooks/ and skills/", and a four-item list recalled as two looks exactly like a
+four-item list satisfied. It was also the release where the smoke was most
+on-point — step 6 exists to prove `${CLAUDE_PLUGIN_ROOT}` expands inside command
+markdown, which was the very file that release changed.
 
 The plugin's entire enforcement value depends on two platform behaviors that
 unit tests cannot see: (a) `hooks/hooks.json` auto-loads on a marketplace
@@ -228,8 +252,19 @@ smoked commit and the tag is then the commit recording the smoke itself, which
 - [ ] Wait for the **release gate** (`.github/workflows/release.yml`, fires on
       the `v*` tag): it re-runs the full suite against the TAGGED tree and
       asserts that the three manifest fields, the CHANGELOG's dated section and
-      the tag all say the same version.
-      `gh run list --workflow=release.yml --limit 1` → `completed success`.
+      the tag all say the same version — and that no `## Unreleased` section is
+      left behind.
+      Select the gate run by the TAG, for the same reason as step 0's sha
+      filter and with a second recorded incident behind it: right after a tag
+      push, `--limit 1` returns the PREVIOUS tag's gate run, already
+      `completed success`, so the wait-loop reports the new tag verified before
+      its gate has started (0.16.1).
+      ```
+      gh run list --workflow=release.yml --limit 10 \
+        --json headBranch,status,conclusion \
+        --jq '.[] | select(.headBranch=="vX.Y.Z")'
+      ```
+      Empty output means "not registered yet" — re-run it.
       A red gate means **do not publish**: delete the tag, fix, re-tag. A tag
       whose manifests disagree with it installs cleanly and then serves the
       wrong version forever, which is why this is the one step that is now a
@@ -246,11 +281,12 @@ smoked commit and the tag is then the commit recording the smoke itself, which
 - [ ] Prove the artifact users get IS the tag, in one command — install into a
       second, fresh `CLAUDE_CONFIG_DIR`, then:
       ```
-      git archive v0.14.0 --prefix=tagtree/ | tar -x -C /tmp
+      CFG2=~/tmp/loop-ship-verify        # the SECOND, uninstrumented config dir
+      git archive vX.Y.Z --prefix=tagtree/ | tar -x -C /tmp
       diff -r --exclude=.git /tmp/tagtree \
-        "$CFG/plugins/cache/loop-eng/loop-eng/0.14.0"
+        "$CFG2/plugins/cache/loop-eng/loop-eng/X.Y.Z"
       ```
-      Expect exactly one difference: `Only in …/0.14.0: .in_use`, a marker the
+      Expect exactly one difference: `Only in …/X.Y.Z: .in_use`, a marker the
       platform writes. Anything else means the install is not the tag. This is
       cheaper than re-running all six steps and answers a different question
       than they do — they test behavior, this tests identity, which is what
