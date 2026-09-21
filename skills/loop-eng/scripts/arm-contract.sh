@@ -25,7 +25,31 @@ SHA_LOCK="$LOOP_DIR/criteria.sha256"
 ACTIVE="$LOOP_DIR/active"
 COUNT_FILE="$LOOP_DIR/gate-count"
 
-mkdir -p "$LOOP_DIR"
+# Every write to $LOOP_DIR below is CHECKED, and a failed one is fatal.
+# arm-contract exits 0 on every other path and reports on stderr what it did, so
+# an unchecked failed write printed the success lines over a $LOOP_DIR that got
+# neither: "pinned criteria.tsv @ <hash>" with no hash-lock on disk, and
+# "stop-gate armed" with no $ACTIVE. Without $ACTIVE the stop-gate returns at its
+# first line (hooks/stop-gate.sh: `[ -f "$ACTIVE" ] || exit 0`), so the stop it
+# exists to block is allowed, and the evidence-gate's lock on criteria.tsv — also
+# keyed on $ACTIVE — never engages, leaving the armed contract FILE model-writable
+# (results.json and evidence/ stay protected either way). An arm that reports
+# success over that state is the one failure this plugin cannot afford: silently
+# unenforced, in the script whose whole job is to enforce.
+#
+# Refusing is fail-closed here even though it leaves the loop unarmed: the
+# alternative is arming a loop whose contract is not pinned, and a loop that
+# never armed is loud (exit 73 + this message), where a mis-armed one is silent.
+# 73 = EX_CANTCREAT, exactly what run-contract.sh's cannot_write() exits for the
+# same class of failure, so both halves of the machinery tell one story. The raw
+# bash/mkdir diagnostic is deliberately NOT swallowed — it carries the errno
+# ("Permission denied" vs "No space left on device") this message cannot know.
+cannot_arm() { # $1 = path, $2 = why
+  echo "loop-eng arm-contract: FATAL — cannot write $1 ($2); refusing to arm (fail closed). An arm that cannot record the contract has armed nothing: the stop-gate only runs while $ACTIVE exists, so reporting success here would leave the loop silently unenforced. Check permissions and free space under $LOOP_DIR/." >&2
+  exit 73
+}
+
+mkdir -p "$LOOP_DIR" || cannot_arm "$LOOP_DIR" "mkdir failed"
 
 # The whole chain assumes git ignores $LOOP_DIR/, and nothing made it so.
 #
@@ -168,14 +192,17 @@ if [ -f "$CRIT" ]; then
   fi
   hash=$(loop_sha256 "$CRIT")
   if [ -n "$hash" ]; then
-    printf '%s\n' "$hash" > "$SHA_LOCK"
+    printf '%s\n' "$hash" > "$SHA_LOCK" || cannot_arm "$SHA_LOCK" "hash-lock not writable"
     echo "loop-eng arm-contract: pinned criteria.tsv @ $hash" >&2
   else
-    rm -f "$SHA_LOCK"
+    rm -f "$SHA_LOCK" || cannot_arm "$SHA_LOCK" "stale hash-lock not removable"
     echo "loop-eng arm-contract: no SHA-256 tool available; contract armed WITHOUT a hash-lock (drift will not fail closed)." >&2
   fi
 else
-  rm -f "$SHA_LOCK"
+  # Fatal for the same reason the write above is: a stale lock left beside a
+  # contract this arm did not pin makes run-contract fail closed on a tamper that
+  # never happened, and the loop can then only end by hitting a stop rule.
+  rm -f "$SHA_LOCK" || cannot_arm "$SHA_LOCK" "stale hash-lock not removable"
   echo "loop-eng arm-contract: no $CRIT (legacy verify.sh loop?); armed without a hash-lock." >&2
 fi
 
@@ -262,12 +289,15 @@ if [ -f "$CRIT" ] && [ "${LOOP_ENG_ARM_REDCHECK:-1}" != "0" ]; then
   done < "$CRIT"
 fi
 
-: > "$ACTIVE"
+: > "$ACTIVE" || cannot_arm "$ACTIVE" "arm marker not creatable"
 # gate-last is the stop-gate's same-stop-attempt marker. It is time-bounded, so a
 # stale one is already harmless — but a loop arms with a clean slate, and leaving
 # a previous loop's verdict lying next to a fresh contract is the same class of
 # leftover as the stale gate-count beside it.
-rm -f "$COUNT_FILE" "$LOOP_DIR/gate-last"
+# Checked like every other write here: a surviving gate-count spends the
+# stop-gate's 3-block ceiling before this loop's first stop, which weakens the
+# gate exactly the way a missing $ACTIVE removes it.
+rm -f "$COUNT_FILE" "$LOOP_DIR/gate-last" || cannot_arm "$COUNT_FILE" "stale gate-count not removable"
 echo "loop-eng arm-contract: stop-gate armed ($ACTIVE)." >&2
 # Provenance line (cache-vs-repo divergence guard, pilot retro finding): print
 # the path THIS script was invoked as. In a dogfood run the loop arms from the

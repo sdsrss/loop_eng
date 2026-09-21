@@ -323,4 +323,70 @@ assert_eq "" "$([ -f .loop/active ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loo
 assert_eq "" "$([ -f .loop/criteria.sha256 ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loop/criteria.sha256 NOT created"
 rm -rf customdir
 
+# --- a write that FAILED must never be reported as a successful arm ---
+# arm-contract runs under `set -u` only and exits 0 on every path, reporting on
+# stderr what it did. With the writes to $LOOP_DIR unchecked, a failed write
+# printed both success lines over a .loop/ that got neither: `pinned
+# criteria.tsv @ <hash>` with no hash-lock on disk, and `stop-gate armed
+# (.loop/active)` with no .loop/active. Without .loop/active the stop-gate
+# returns at its first line (hooks/stop-gate.sh: `[ -f "$ACTIVE" ] || exit 0`),
+# so the stop it exists to block is allowed, and the evidence-gate's lock on
+# criteria.tsv — also keyed on .loop/active — never engages, leaving the armed
+# contract file model-writable. (results.json and evidence/ stay protected
+# either way; only the contract file and the stop-gate are lost.)
+#
+# Case (c) needs no filesystem fault at all: an unwritable criteria.sha256 left
+# by an earlier run under sudo or `docker run -v` in an otherwise writable
+# .loop/ is enough, and it wedges the NEXT loop instead of disarming this one.
+# chmod cannot take write access away from root, so this is skipped there.
+if [ "$(id -u)" -ne 0 ]; then
+  rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count .loop/gate-last
+  ARMERR="$SB/arm-failed.err"   # outside .loop/ — the dir under test is unwritable
+
+  # (a) the loop dir itself cannot be created
+  rm -rf roparent; mkdir -p roparent; chmod a-w roparent
+  LOOP_ENG_LOOP_DIR=roparent/loop bash "$ARM" 2>"$ARMERR"; rc=$?
+  chmod u+w roparent
+  assert_eq 73 "$rc" "uncreatable loop dir: arm refuses, exit 73 (EX_CANTCREAT, as run-contract's cannot_write)"
+  assert_file_contains "$ARMERR" 'cannot write' "uncreatable loop dir: the refusal names the write it could not do"
+  assert_eq "" "$(grep -c 'stop-gate armed' "$ARMERR" 2>/dev/null | grep -v '^0$')" "uncreatable loop dir: arm never claims the stop-gate is armed"
+  rm -rf roparent
+
+  # (b) .loop/ exists but is read-only: the hash-lock write is the first casualty
+  rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+  printf 'c1\tsuite passes\tfalse\n' > .loop/criteria.tsv
+  chmod a-w .loop
+  bash "$ARM" 2>"$ARMERR"; rc=$?
+  chmod u+w .loop
+  assert_eq 73 "$rc" "read-only .loop: arm refuses, exit 73"
+  assert_file_contains "$ARMERR" 'cannot write .loop/criteria.sha256' "read-only .loop: the refusal names the hash-lock it could not write (bash's own redirect error names that path too — the needle is the refusal's own wording)"
+  assert_eq "" "$(grep -c 'pinned criteria.tsv @' "$ARMERR" 2>/dev/null | grep -v '^0$')" "read-only .loop: arm never reports pinning a hash it could not write"
+  assert_eq "" "$(grep -c 'stop-gate armed' "$ARMERR" 2>/dev/null | grep -v '^0$')" "read-only .loop: arm never claims the stop-gate is armed"
+  assert_eq "" "$([ -f .loop/active ] && echo 1)" "read-only .loop: no .loop/active — the refusal leaves the loop honestly unarmed"
+  assert_eq "" "$([ -f .loop/criteria.sha256 ] && echo 1)" "read-only .loop: no hash-lock on disk either"
+
+  # (c) writable .loop/, unwritable pre-existing criteria.sha256 (no FS fault)
+  rm -f .loop/criteria.tsv .loop/criteria.sha256 .loop/active .loop/gate-count
+  printf 'c1\tok\ttrue\n' > .loop/criteria.tsv
+  bash "$ARM" 2>/dev/null                      # healthy arm pins contract A
+  stale_lock=$(cut -d' ' -f1 < .loop/criteria.sha256)
+  rm -f .loop/active .loop/gate-count
+  chmod a-w .loop/criteria.sha256
+  printf 'c1\tok\ttrue\nc2\talso ok\ttrue\n' > .loop/criteria.tsv   # contract B
+  bash "$ARM" 2>"$ARMERR"; rc=$?
+  chmod u+w .loop/criteria.sha256
+  assert_eq 73 "$rc" "unwritable pre-existing hash-lock: arm refuses, exit 73"
+  assert_eq "$stale_lock" "$(cut -d' ' -f1 < .loop/criteria.sha256)" "unwritable hash-lock: disk still holds the OLD contract's hash"
+  assert_eq "" "$(grep -c 'pinned criteria.tsv @' "$ARMERR" 2>/dev/null | grep -v '^0$')" "unwritable hash-lock: arm does not report the new hash as pinned while disk holds the old one"
+  assert_eq "" "$([ -f .loop/active ] && echo 1)" "unwritable hash-lock: a contract that could not be re-pinned is not armed"
+  # The wedge this prevents: armed + lock/contract mismatch is exit 77 on EVERY
+  # stop, with criteria.tsv gate-locked, for a contract that is fully GREEN.
+  bash "$RUNNER" >/dev/null 2>&1
+  assert_eq 0 "$?" "unwritable hash-lock: no wedge — the refused arm left no armed-but-mismatched pair to fail closed on"
+
+  rm -f "$ARMERR" .loop/active .loop/gate-count .loop/criteria.sha256
+else
+  echo "  SKIP: running as root — chmod cannot take write access away, so the failed-write refusals are not exercised (14 assertions)" >&2
+fi
+
 report "test-arm-contract"
