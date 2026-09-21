@@ -67,8 +67,11 @@ ordered. Each loop round takes exactly ONE backlog item.
 Backlog lines use checkbox syntax: `- [ ] <item> | verify: <command>`
 pending, `- [x] <item> | verify: <command>` done — each line carries its
 verify command so per-item machine-verifiable criteria survive into the
-backlog, same format as roadmap triage below. The unattended cross-session
-driver consumes this file and stops when no `- [ ]` lines remain.
+backlog, same format as roadmap triage below. Write that shape; recognize a
+wider one — an unfinished item is a `[ ]` checkbox on a `-`, `*` or `+` bullet,
+optionally indented — and judge completion below by whether an unfinished item
+remains, never by the exact spelling above. The unattended cross-session
+driver consumes this file and stops when none remains.
 
 **You do not tick these boxes.** `run-contract.sh` runs each pending line's
 verify command on every stop attempt and ticks the line when it exits 0 — the
@@ -203,14 +206,14 @@ falls back to it when criteria.tsv is absent.)
    - the current item's backlog line is ticked by the run-contract call you just
      made, from its `| verify:` command's exit status — do not tick it yourself
      (the evidence-gate denies it). Read the refreshed `.loop/backlog.md`: if
-     the line is still `- [ ]`, its verify command did not pass, so the item is
+     the line is still unchecked, its verify command did not pass, so the item is
      NOT done whatever the checker said — treat the round as FAILED and go to 1
      with that command's failure. A backlog line carrying no `| verify:`
      command is the older model-ticked shape; tick that one yourself, and say in
      the wrap-up that it was ticked on a report rather than a run;
-   - if any `- [ ]` line remains and the round budget is not exhausted, go to 1
-     with the next item;
-   - only when no `- [ ]` line remains (or there was no backlog at all) is the
+   - if any unfinished item remains and the round budget is not exhausted, go to
+     1 with the next item;
+   - only when no unfinished item remains (or there was no backlog at all) is the
      loop finished — then do the wrap-up below.
 
    Wrap-up, once the loop is finished: the reconcile step above has just
@@ -304,7 +307,7 @@ safety:
 
 ## Stop rules (any one of these stops the loop immediately)
 
-1. ALL GREEN — every `- [ ]` backlog item is ticked (or there was no backlog and
+1. ALL GREEN — no unfinished backlog item remains (or there was no backlog and
    the single task's criteria all pass). Stop with proof of every check.
 2. Rounds exhausted (5) — stop and report per the escalation protocol.
 3. Same root cause two rounds in a row — the builder is guessing, not fixing.
