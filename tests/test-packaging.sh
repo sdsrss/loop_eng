@@ -245,7 +245,7 @@ esac
 FLOOR=$(sed -n '/Syntax-check the hooks-only scripts/,$p' .github/workflows/test.yml \
           | grep -oE '(hooks|skills/loop-eng/scripts)/[a-z-]+\.sh' | sort -u)
 floor_n=$(printf '%s\n' "$FLOOR" | grep -c '[^[:space:]]')
-assert_eq 5 "$floor_n" "the bash-3.2 CI leg covers five scripts"
+assert_eq 7 "$floor_n" "the bash-3.2 CI leg covers seven scripts"
 for f in $FLOOR; do
   b=$(basename "$f")
   if grep -q "$b" <(sed -n '/^Bash compatibility:/,/^$/p' README.md); then PASS=$((PASS+1)); else

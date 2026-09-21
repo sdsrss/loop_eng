@@ -6,6 +6,15 @@ set -u
 
 DRIVER="$PLUGIN_ROOT/skills/loop-eng/scripts/unattended-autoloop.sh"
 
+# Same reason as test-unattended-polish.sh: the refusal arms below assert that
+# the driver refuses WITHOUT the opt-in switch, which is only a real assertion
+# if the switch is absent. This project's own systemd units export them, so a
+# suite run from inside an unattended session went red for 3 assertions that
+# have nothing to do with the code. Reproduced with
+# `LOOP_ENG_ALLOW_AUTOBUILD=1 bash tests/test-unattended-autoloop.sh` →
+# 99 passed, 3 failed before this line existed.
+unset LOOP_ENG_ALLOW_AUTOBUILD LOOP_ENG_ALLOW_AUTOFIX
+
 # --- bash floor: the header's "requires bash >= 4.4" is now enforced ---
 # Pre-fix it was a comment, so on stock macOS bash 3.2 this driver STARTED and
 # could let a session COMMIT before dying on the first empty-array expansion

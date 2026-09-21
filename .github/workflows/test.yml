@@ -124,7 +124,8 @@ jobs:
                    tests/test-run-contract.sh \
                    tests/test-stop-gate.sh \
                    tests/test-hooks-json.sh \
-                   tests/test-update-notify.sh; do
+                   tests/test-update-notify.sh \
+                   tests/test-install-timer.sh; do
             echo "=== /bin/bash $t ==="
             /bin/bash "$t"
           done
@@ -137,6 +138,8 @@ jobs:
                    hooks/evidence-gate.sh \
                    hooks/update-notify.sh \
                    skills/loop-eng/scripts/run-contract.sh \
-                   skills/loop-eng/scripts/arm-contract.sh; do
+                   skills/loop-eng/scripts/arm-contract.sh \
+                   skills/loop-eng/scripts/install-timer.sh \
+                   skills/loop-eng/scripts/uninstall-timer.sh; do
             /bin/bash -n "$f"
           done

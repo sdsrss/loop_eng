@@ -187,12 +187,16 @@ green contract lets the stop-gate exit 0, which discards hook output — so
 Platform note: Claude Code force-allows a stop after 8 consecutive
 Stop-hook blocks; loop-eng's ceiling (3) stays safely under it.
 
-Bash compatibility: five scripts run on stock macOS bash 3.2 — the three hooks
-(`stop-gate.sh`, `evidence-gate.sh`, `update-notify.sh`) and the two contract
-scripts (`arm-contract.sh`, `run-contract.sh`). This is tested in CI, not
+Bash compatibility: seven scripts run on stock macOS bash 3.2 — the three hooks
+(`stop-gate.sh`, `evidence-gate.sh`, `update-notify.sh`), the two contract
+scripts (`arm-contract.sh`, `run-contract.sh`) and the two timer scripts
+(`install-timer.sh`, `uninstall-timer.sh`). This is tested in CI, not
 asserted: a dedicated `test-bash32` job runs their suites through macOS's
 `/bin/bash` (3.2) on every push to `main` and every pull request, and
-syntax-checks those same five files.
+syntax-checks those same seven files.
+The timer scripts are on that list because a macOS user runs them by hand, from
+their own shell, to schedule anything at all — and they were verified under a
+real 3.2.57 by hand for several releases without CI ever pinning it.
 `update-notify.sh` belongs on that list for the plainest reason — it is a
 SessionStart hook, so on a stock macOS box bash 3.2 is what runs it in every
 real session. The unattended runners are the exception: they need bash ≥ 4.4

@@ -5,6 +5,18 @@ set -u
 
 SCRIPT="$PLUGIN_ROOT/skills/loop-eng/scripts/unattended-polish.sh"
 
+# The opt-in write switches are INPUTS to the cases below, so they must come
+# only from the cases. Every refusal arm here runs the driver without them and
+# asserts it refuses — which silently became "assert the ambient environment is
+# clean" — and the one environment where it is NOT clean is this project's own
+# systemd unit, which exports LOOP_ENG_ALLOW_AUTOFIX=1 to the session it starts.
+# A suite run from inside an unattended run therefore reported 2 red for a
+# reason unrelated to the code; observed as exactly that on the 2026-09-21
+# nightly run's first baseline. Reproduced here with
+# `LOOP_ENG_ALLOW_AUTOFIX=1 bash tests/test-unattended-polish.sh` → 86 passed,
+# 2 failed before this line existed.
+unset LOOP_ENG_ALLOW_AUTOFIX LOOP_ENG_ALLOW_AUTOBUILD
+
 # --- bash floor: the header's "requires bash >= 4.4" is now enforced ---
 # Pre-fix it was a comment, so on stock macOS bash 3.2 this driver STARTED, did
 # real work, and only then died on the first empty-array expansion under set -u
