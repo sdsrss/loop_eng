@@ -758,6 +758,89 @@ assert_eq 0 "$(grep -c 'run-contract.sh: line' .loop/rc-err-bappend)" "a failed 
 rm -rf .loop/.backlog.rewrite.*
 rm -f .loop/rc-err-bappend .loop/backlog.md
 
+# --- a verify command that rewrites the backlog cannot delete its siblings ---
+# The same hazard the criteria snapshot above was written for, one level down
+# and worse: this loop streamed the LIVE backlog (`done < "$BACKLOG"`), so a
+# verify command that truncated or regenerated the file made every item after
+# it vanish at EOF — and the cat-back then PUBLISHED that partial read over the
+# user's file. Verified pre-fix: a 4-item backlog whose first item truncates it
+# came back as exactly ONE line, exit 0, the other three items in no ledger, no
+# log and no file. `.loop/` is gitignored, so there was nothing to recover.
+#
+# What this is NOT: a false completion verdict. `overall` is deliberately
+# untouched by backlog outcomes (a red item must not make a green contract
+# red), so the vanished items could never have turned the ledger red even if
+# read. The defect is silent data loss over the user's file plus a "backlog"
+# array that under-reports without saying so — and both halves are asserted.
+rm -f .loop/results.json .loop/backlog.md
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+{
+  printf -- '- [ ] sweep bookkeeping | verify: : > .loop/backlog.md\n'
+  printf -- '- [ ] second | verify: true\n'
+  printf -- '- [ ] third | verify: false\n'
+  printf -- '- [ ] fourth | verify: true\n'
+} > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "a backlog-truncating verify command does not change the contract's own verdict"
+assert_eq 4 "$(grep -c '"verify":' .loop/results.json)" "every backlog item is still verified and ledgered when an earlier one truncates the file (was: 1 of 4)"
+assert_file_contains .loop/results.json '"item": "fourth", "verify": "true", "exit": 0, "done": true' "the LAST item still reaches the ledger after a truncating item"
+assert_file_contains .loop/results.json '"item": "third", "verify": "false", "exit": 1, "done": false' "a red item after the truncating one is reported red, not dropped"
+# The file now holds exactly what the verify command itself left behind (empty).
+# What must not happen is the runner publishing its partial read back over it.
+assert_eq 0 "$(wc -c < .loop/backlog.md | tr -d ' ')" "the runner publishes nothing over a backlog that changed under the run"
+assert_file_contains .loop/results.json '"backlog_rewrite":' "a skipped rewrite is recorded in the ledger rather than left silent"
+# the note sits between the array and all_green, where a stray comma is invisible
+if command -v jq >/dev/null 2>&1; then
+  jq . .loop/results.json >/dev/null 2>&1; assert_eq 0 $? "results.json stays valid JSON when the rewrite was skipped"
+elif command -v python3 >/dev/null 2>&1; then
+  python3 -c 'import json,sys; json.load(open(".loop/results.json"))' 2>/dev/null; assert_eq 0 $? "results.json stays valid JSON when the rewrite was skipped"
+else
+  echo "  SKIP: no jq/python3 — skipped-rewrite JSON validity not checked (1 assertion)" >&2
+fi
+# the snapshot is private bookkeeping and must not outlive the run
+assert_eq 0 "$(find .loop -maxdepth 1 -name '.backlog.snapshot.*' | wc -l | tr -d ' ')" "the backlog snapshot is cleaned up on exit"
+
+# ...and the variant that settles who the destroyer is. This verify command
+# REGENERATES the backlog in place with five fresh items and destroys nothing
+# of its own — yet pre-fix all five were gone after the run, along with the two
+# original unticked items, because the runner published its partial read over
+# them. It came back holding a TORN line ("EN epsilon | verify: true"): the
+# live inode was rewritten under the reader mid-stream.
+rm -f .loop/results.json .loop/backlog.md
+{
+  printf -- '- [ ] regen | verify: { for n in alpha beta gamma delta epsilon; do printf -- "- [ ] REGEN $n | verify: true\\n"; done; } > .loop/backlog.md\n'
+  printf -- '- [ ] orig-two | verify: false\n'
+  printf -- '- [ ] orig-three | verify: false\n'
+} > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 0 $? "a backlog-regenerating verify command does not change the contract's own verdict"
+assert_eq 5 "$(grep -c '^- \[ \] REGEN ' .loop/backlog.md)" "all five items the verify command wrote survive the run (was: 0 — replaced by the runner's partial read)"
+assert_eq '- [ ] REGEN alpha | verify: true' "$(sed -n '1p' .loop/backlog.md)" "the regenerated file's first line is the command's own, not a ticked line the runner published"
+# Nothing but the command's own five lines: pre-fix this counted 2 (the ticked
+# "regen" line the runner published, plus the torn "EN epsilon | verify: true"
+# left where the live inode was rewritten under the reader mid-stream).
+assert_eq 0 "$(grep -c -v '^- \[ \] REGEN ' .loop/backlog.md)" "no line the runner wrote, torn or whole, survives in the regenerated file"
+assert_eq 3 "$(grep -c '"verify":' .loop/results.json)" "all three original items are verified and ledgered (was: 1 of 3)"
+
+# The gate is on DRIFT IN THE BACKLOG, not on verify commands that write at
+# all: a command with side effects elsewhere still gets its box ticked, and an
+# ordinary backlog is rewritten exactly as before.
+rm -f .loop/results.json .loop/backlog.md
+printf -- '- [ ] writes elsewhere | verify: : > .loop/side-effect\n- [ ] plain green | verify: true\n' > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1
+assert_file_contains .loop/backlog.md '- [x] writes elsewhere | verify: : > .loop/side-effect' "a verify command with side effects outside the backlog still ticks"
+assert_file_contains .loop/backlog.md '- [x] plain green | verify: true' "the ordinary tick path is untouched by the drift gate"
+assert_eq 0 "$(grep -c '"backlog_rewrite":' .loop/results.json)" "a published rewrite says nothing extra in the ledger (ordinary case unchanged)"
+rm -f .loop/side-effect
+
+# The mundane neighbour keeps failing CLOSED. A verify command that sweeps the
+# whole of .loop/ takes the ledger's publish path with it, and the runner exits
+# 73 (cannot write results.json) rather than reporting a verdict it could not
+# record. The drift gate must not quietly turn that into a fail-open.
+rm -f .loop/results.json .loop/backlog.md
+printf -- '- [ ] sweeps everything | verify: git clean -xfdq\n- [ ] after the sweep | verify: true\n' > .loop/backlog.md
+bash "$RUNNER" >/dev/null 2>&1; assert_eq 73 $? "a verify command that deletes .loop/ still fails CLOSED on the ledger publish"
+mkdir -p .loop
+printf '1\tok\ttrue\n' > .loop/criteria.tsv
+
 # No backlog, or a backlog nobody opted in: no backlog block at all, and the
 # old model-ticked contract is untouched.
 rm -f .loop/backlog.md

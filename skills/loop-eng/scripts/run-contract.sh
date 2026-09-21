@@ -79,7 +79,11 @@ TMP="$RESULTS.tmp.$$"
 # start; under `set -u` a trap naming an unset variable is its own failure.
 SNAP="$LOOP_DIR/.criteria.snapshot.$$"
 BACK_TMP="$LOOP_DIR/.backlog.rewrite.$$"
-trap 'rm -f "$TMP" "$SNAP" "$BACK_TMP"' EXIT
+# The backlog loop reads a private snapshot too, for the same reason and with
+# one consequence more — that loop also writes its result BACK. See the cp and
+# the drift check around it.
+BSNAP="$LOOP_DIR/.backlog.snapshot.$$"
+trap 'rm -f "$TMP" "$SNAP" "$BACK_TMP" "$BSNAP"' EXIT
 
 # Prove BOTH output paths are writable before a single criterion runs. Without
 # this the failures were safe only by accident: an unwritable .loop/ made the
@@ -371,7 +375,37 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
   # NB the redirects on the verify command. This whole block's stdout IS
   # results.json (the enclosing `{ … } > "$TMP"` group), so a verify command
   # that prints would write its output into the middle of the ledger.
+  # Read the backlog from a private SNAPSHOT, exactly as the criteria loop
+  # does. `while … done < "$BACKLOG"` streams an inode the verify commands can
+  # reach, so an item whose command truncates or regenerates backlog.md made
+  # every item after it vanish at EOF — silently, as a short read looks
+  # identical to a short file. Here that is worse than in the criteria loop,
+  # because this loop WRITES BACK: the cat-back then published the partial read
+  # over the user's file, and .loop/ is gitignored, so nothing was recoverable.
+  #   - [ ] sweep | verify: : > .loop/backlog.md    (+ 3 more items)
+  #   -> the file came back as ONE line and the other three items appeared in
+  #      no ledger, no log and no file. A command that REGENERATED the backlog
+  #      in place, destroying nothing of its own, lost the five items it wrote
+  #      the same way — so the destroyer was this rewrite, not the command.
+  # The `bchanged=-1` latch below does not cover it: a partial read is a fully
+  # SUCCESSFUL set of writes, so the latch stays at 1 and authorises the
+  # cat-back. Snapshotting makes the verified set the set that was read.
+  #
+  # Fail-OPEN when the snapshot cannot be taken, where the criteria loop's cp
+  # fails closed: the backlog is progress, not the contract (`overall` is
+  # untouched throughout this block), so a backlog that cannot be read must not
+  # decide the run. Nothing is verified and nothing is written — and it is said
+  # in the ledger, because on a green run the stop-gate exits 0 and discards
+  # this process's stderr entirely.
+  bopt=0
   if [ -f "$BACKLOG" ] && grep -q '|[[:space:]]*verify:' "$BACKLOG" 2>/dev/null; then
+    if cp "$BACKLOG" "$BSNAP" 2>/dev/null; then bopt=1; else bopt=-1; fi
+  fi
+  if [ "$bopt" -eq -1 ]; then
+    printf '  "backlog_error": "could not snapshot %s for reading — no item was verified and the file was left untouched",\n' "$(json_str "$BACKLOG")"
+    echo "run-contract: could not snapshot $BACKLOG for reading, so no backlog item was verified and the file was left untouched. The ledger and the exit code are unaffected — the backlog is progress, not the contract." >&2
+  fi
+  if [ "$bopt" -eq 1 ]; then
     printf '  "backlog": [\n'
     bfirst=1
     # bchanged is a three-state sentinel, and -1 is a LATCH: 0 = nothing to
@@ -464,17 +498,50 @@ $(printf '%s\n' "$ev_tail" | sed 's/^/    /')"
       bfirst=0
       printf '    {"item": "%s", "verify": "%s", "exit": %d, "done": %s}' \
         "$(json_str "$bitem")" "$(json_str "$bcmd")" "$bstatus" "$bdone"
-    done < "$BACKLOG"
+    done < "$BSNAP"
     printf '\n  ],\n'
-    # cat-back into the same inode rather than mv: the backlog is a file a
-    # human may have open, and only the lines this pass ticked have changed.
-    # Fail-open on its own errors — a backlog that could not be rewritten must
-    # not affect the ledger or the exit code, which are what the harness trusts.
-    # Fail-open means LEAVING THE FILE ALONE, hence `-eq 1` and not `-ne 0`: an
-    # incompletely written $BACK_TMP (the -1 latch above) is not a backlog, and
-    # the ticks it lost are re-verified and re-ticked on the next run anyway.
+    # Publish ONLY over the file that was read. The snapshot above decides what
+    # gets verified; this decides whether the rewrite may be written back at
+    # all — the same division of labour as the criteria loop's snapshot and its
+    # post-run drift check. $BACK_TMP is a rewrite of the backlog as it stood
+    # when the run started, so once a verify command has rewritten the live
+    # file, catting it back would delete whatever that command wrote. Leave the
+    # file alone instead: the ticks are re-verified and re-ticked next run,
+    # which is what every other fail-open path in this block already does.
+    #
+    # Compared with `cat`, which this block already depends on, rather than
+    # with cmp or diff: a comparison tool that is missing would read as "drift"
+    # and silently disable ticking forever. Absent file -> "", present file ->
+    # content + "X", so a backlog a command DELETED can never compare equal to
+    # an empty one and be resurrected by the cat-back. The 2>/dev/null belongs
+    # on the group, not on the assignment: it is there for the shell's own
+    # null-byte warning, which is emitted while the substitution runs — i.e.
+    # before a redirect written on the assignment would be applied — and would
+    # otherwise land in the stop-gate's block reason.
     if [ "$bchanged" -eq 1 ]; then
-      cat "$BACK_TMP" > "$BACKLOG" 2>/dev/null || :
+      bnow=""
+      bwas=""
+      { [ -f "$BACKLOG" ] && bnow=$(cat "$BACKLOG" 2>/dev/null; printf X); } 2>/dev/null
+      { [ -f "$BSNAP" ] && bwas=$(cat "$BSNAP" 2>/dev/null; printf X); } 2>/dev/null
+      if [ "$bnow" = "$bwas" ]; then
+        # cat-back into the same inode rather than mv: the backlog is a file a
+        # human may have open, and only the lines this pass ticked have changed.
+        # Fail-open on its own errors — a backlog that could not be rewritten must
+        # not affect the ledger or the exit code, which are what the harness trusts.
+        # Fail-open means LEAVING THE FILE ALONE, hence `-eq 1` and not `-ne 0`: an
+        # incompletely written $BACK_TMP (the -1 latch above) is not a backlog, and
+        # the ticks it lost are re-verified and re-ticked on the next run anyway.
+        cat "$BACK_TMP" > "$BACKLOG" 2>/dev/null || :
+      else
+        # In the LEDGER as well as on stderr, for the reason the lock warning
+        # gives at the top of this file: a green contract makes the stop-gate
+        # exit 0 and discards our output. And it is the ledger that needs it —
+        # the "backlog" array above lists the items the SNAPSHOT held, which is
+        # no longer what the file holds, and saying so is the difference
+        # between an array that under-reports and one that lies.
+        printf '  "backlog_rewrite": "skipped: %s changed while its own verify commands ran — the ticks recorded above were not written back, and are re-verified next run",\n' "$(json_str "$BACKLOG")"
+        echo "run-contract: $BACKLOG changed while its own verify commands ran, so this run's ticks were NOT written back — the file is left exactly as those commands left it, and the items are re-verified next run." >&2
+      fi
     fi
     rm -f "$BACK_TMP" 2>/dev/null || :
   fi
