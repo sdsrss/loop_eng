@@ -335,7 +335,6 @@ if [ -f "$CRIT" ] && [ "${LOOP_ENG_ARM_REDCHECK:-1}" != "0" ]; then
   done < "$CRIT"
 fi
 
-: > "$ACTIVE" || cannot_arm "$ACTIVE" "arm marker not creatable"
 # gate-last is the stop-gate's same-stop-attempt marker. It is time-bounded, so a
 # stale one is already harmless — but a loop arms with a clean slate, and leaving
 # a previous loop's verdict lying next to a fresh contract is the same class of
@@ -344,6 +343,18 @@ fi
 # stop-gate's 3-block ceiling before this loop's first stop, which weakens the
 # gate exactly the way a missing $ACTIVE removes it.
 rm -f "$COUNT_FILE" "$LOOP_DIR/gate-last" || cannot_arm "$COUNT_FILE" "stale gate-count not removable"
+
+# $ACTIVE goes LAST, and the order is the point: it is the one file that makes
+# the stop-gate run, so its existence has to mean "everything else already
+# succeeded". Created before the clear above, a failing `rm` exited 73 with a
+# message explaining that the gate "only runs while $ACTIVE exists" — while
+# $ACTIVE existed and the gate would in fact have run. The behaviour was safe
+# (loud 73, no "armed" line), but the diagnostic described a state the script had
+# itself just created, and a refusal that misdescribes the machine is the defect
+# this file exists to refuse. Nothing is lost by the swap: without $ACTIVE the
+# stop-gate returns at its first line, so clearing counters ahead of it cannot
+# race anything.
+: > "$ACTIVE" || cannot_arm "$ACTIVE" "arm marker not creatable"
 echo "loop-eng arm-contract: stop-gate armed ($ACTIVE)." >&2
 # Provenance line (cache-vs-repo divergence guard, pilot retro finding): print
 # the path THIS script was invoked as. In a dogfood run the loop arms from the

@@ -476,4 +476,20 @@ else
   echo "  SKIP: running as root — chmod cannot take write access away, so the failed-write refusals are not exercised (14 assertions)" >&2
 fi
 
+# --- a failed gate-count clear must leave NO arm marker (order, not wording) ---
+# $ACTIVE is the file that makes the stop-gate run, so it is written last: its
+# presence has to mean every other write already succeeded. When it was created
+# first, a failing `rm -f gate-count` exited 73 with a message reasoning from
+# "$ACTIVE does not exist" while $ACTIVE did — safe, but a refusal that
+# misdescribes the machine. A DIRECTORY at the gate-count path is what makes the
+# rm fail without chmod, so this case also runs as root (the block above cannot).
+rm -f .loop/active .loop/criteria.sha256 .loop/gate-count
+printf 'c1\tok\ttrue\n' > .loop/criteria.tsv
+mkdir -p .loop/gate-count/wedge
+bash "$ARM" 2>.loop/armerr2 && rc=0 || rc=$?
+assert_eq 73 "$rc" "a gate-count that cannot be cleared refuses with 73"
+assert_eq "" "$([ -f .loop/active ] && echo 1)" "that refusal leaves NO arm marker — the gate is not armed over a half-arm"
+assert_file_contains .loop/armerr2 'stale gate-count not removable' "the refusal names the write it could not do"
+rm -rf .loop/gate-count; rm -f .loop/armerr2 .loop/criteria.sha256 .loop/active
+
 report "test-arm-contract"
