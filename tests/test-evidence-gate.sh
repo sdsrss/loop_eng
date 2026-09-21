@@ -251,10 +251,19 @@ if command -v python3 >/dev/null 2>&1; then
   # Mirror the tools the gate uses (bash for its own subshells, cat for stdin,
   # python3 for the fallback parser, plus the coreutils the path checks call) —
   # everything EXCEPT jq, so `command -v jq` fails and the python3 branch runs.
-  for t in bash cat python3 grep dirname sed sha256sum; do
-    src=$(command -v "$t") && ln -sf "$src" "$FAKE/$t"
+  # `sha256sum` used to be in this list and never belonged: the gate does not
+  # hash anything — it path-matches `.loop/criteria.sha256` as a string
+  # (evidence-gate.sh:122, :192) — and the tool is absent on stock macOS, so the
+  # symlink loop silently produced a different environment there than the one
+  # this block names. A missing prerequisite now says so instead of leaving the
+  # arm to fail as something unrelated.
+  missing=""
+  for t in bash cat python3 grep dirname sed; do
+    src=$(command -v "$t") && ln -sf "$src" "$FAKE/$t" || missing="$missing $t"
   done
-  if ! PATH="$FAKE" bash -c 'command -v jq' >/dev/null 2>&1; then
+  if [ -n "$missing" ]; then
+    echo "  SKIP: fake-PATH prerequisite(s) not on PATH —$missing — the python3-fallback arm did not run" >&2
+  elif ! PATH="$FAKE" bash -c 'command -v jq' >/dev/null 2>&1; then
     printf '%s' "${W/FILE/.loop/results.json}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
     assert_eq 2 $? "python3 fallback (no jq): Write results.json still denied"
     printf '%s' "${W/FILE/src/app.js}" | PATH="$FAKE" bash "$GATE" 2>/dev/null
