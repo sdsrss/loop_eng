@@ -31,6 +31,9 @@ or apply a patch. A repro that needs a scratch file writes it under
 ```
 VERDICT: CONFIRMED | REFUTED
 FINDING: <file>:<line> — <restated claim>
+LENS: <the lens named in your dispatch, echoed verbatim — you never reclassify
+      it; it decides which fix discipline the builder applies, and it is lost
+      for good if this line is dropped>
 REASON: <the decisive evidence — quoted code, command output, or the caller
         contract that kills or confirms the claim>
 SEVERITY: <high|med|low>  (only if CONFIRMED; you may downgrade the reviewer's rating)

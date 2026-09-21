@@ -1,6 +1,6 @@
 ---
 name: loop-checker
-description: Runs all project checks and reports failures with file:line precision. Called after loop-builder. Never modifies code.
+description: Runs the round's checks — the contract's criteria, plus the full project sweep when the round is not scoped to one backlog item — and reports failures with file:line precision. Called after loop-builder. Never modifies code.
 tools: Read, Grep, Glob, Bash
 ---
 

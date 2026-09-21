@@ -23,10 +23,13 @@ through loop-checker.
 - `git status` must be clean (untracked `.loop/` is fine). If dirty, STOP and
   tell the user — polish must be attributable and revertible as one diff.
 - Check for a leftover `.loop/active`. `/polish` arms no contract of its own, so
-  it never creates one — but the Stop hook is command-agnostic
-  (`hooks/stop-gate.sh` allows the stop only when `.loop/active` is absent), so
-  one left behind by a killed or ceilinged `/autoloop` will block YOUR stops
-  too, for a contract that has nothing to do with this run. If it is there,
+  it never creates one — but the Stop hook is command-agnostic: while
+  `.loop/active` exists it re-runs that contract on your stop attempts and
+  blocks while it is unsatisfied (`hooks/stop-gate.sh` has other allow paths —
+  a contract-less arm, a dedup replay, the 3-block ceiling — but none of them
+  spare you the blocks). So an `active` left behind by a killed or ceilinged
+  `/autoloop` costs you rounds over a contract that has nothing to do with this
+  run. If it is there,
   record it and disarm the same way `/autoloop` Step 0 does: `rm -f .loop/active`
   first, then `rm -f .loop/gate-count .loop/criteria.sha256` as a SECOND Bash
   call (one command naming both `active` and `criteria.sha256` is itself denied).
@@ -52,9 +55,12 @@ No adjectives.
    are the point; do not share one reviewer's findings with another.
 2. Collect findings. Deduplicate against TWO ledgers:
    - `.loop/polish-seen.md` — every finding ever reported this run, keyed
-     `file:line|summary`. Append fresh ones. Dedup against SEEN, not against
-     confirmed — otherwise refuted findings resurface every round and the loop
-     never converges.
+     `file:line|summary`. Append fresh ones, each recorded WITH ITS LENS: the
+     reviewer prints the lens once as a report header, not per finding, so it is
+     yours to attach here — the verifier echoes it back but nothing else in the
+     pipeline reconstructs it, and Phase 3 cannot dispatch without it. Dedup
+     against SEEN, not against confirmed — otherwise refuted findings resurface
+     every round and the loop never converges.
      (Known noise, accepted by design: after a fix round shifts line numbers, an
      already-seen finding can re-enter as "fresh" at its new line and cost one
      extra verifier pass — the verifier absorbs it. Keying without the line was
@@ -139,16 +145,15 @@ No adjectives.
 If subagent dispatch is unavailable (some headless contexts), run the lenses
 yourself sequentially and label the final report `degraded mode:
 single-context review` — never silently pretend independent review happened.
-Verification by execution (running tests/repros) remains mandatory, and so does
-the commit-per-fix discipline — degraded mode degrades independence, not
-traceability. But note what it cannot degrade: the rule above — you NEVER edit
-source files yourself, the only files you may write are under `.loop/` — is not
-suspended by the dispatch failure that put you here. With no loop-builder to
-dispatch there is nobody left who may apply a fix, so **degraded mode is
-report-only**: run the lenses, verify by execution, write the ledger, hand the
-fix queue to the user, and say plainly that nothing was applied. The
-commit-per-fix discipline binds whoever picks the queue up, which in this mode
-is not you.
+Verification by execution (running tests/repros) remains mandatory — degraded
+mode degrades independence, not rigour. What it cannot degrade is the rule
+above: you NEVER edit source files yourself, the only files you may write are
+under `.loop/`, and a dispatch failure does not suspend that. With no
+loop-builder to dispatch there is nobody left who may apply a fix, so
+**degraded mode is report-only**: run the lenses, verify by execution, write
+the ledger, hand the fix queue to the user, and say plainly that nothing was
+applied. The commit-per-fix discipline still governs those fixes — it just
+binds whoever picks the queue up, which in this mode is not you.
 
 ## Wrap-up
 

@@ -160,8 +160,9 @@ loaded in this project):
   gate. The hash-lock is a second, independent layer: `run-contract.sh` compares
   `.loop/criteria.sha256` against the live file and, on a mismatch, exits 77
   with `"error": "contract tampered"` on EVERY subsequent stop attempt — so an
-  edited-but-not-re-pinned contract can no longer go green at all, and the loop
-  can only end at a stop rule or a manual disarm. The human must re-run
+  edited-but-not-re-pinned contract can no longer go green at all: every stop is
+  blocked until the 3-block ceiling releases one, and the contract is still
+  UNSATISFIED when it does. The human must re-run
   `arm-contract.sh` afterwards to re-pin the hash. (The variable must also be in
   the SESSION's environment — the hook is spawned by the harness, so a
   `VAR=1 cmd` prefix on a Bash call does not reach it.)
