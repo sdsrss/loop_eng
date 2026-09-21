@@ -25,16 +25,18 @@ Preconditions first:
   then disarm in this order — `rm -f .loop/active`, then
   `rm -f .loop/gate-count .loop/criteria.sha256` as a SECOND Bash call (one
   command naming both `active` and `criteria.sha256` is itself denied).
+  `.loop/gate-last` needs nothing from you — arming clears it, and a stale one
+  is time-bounded and harmless until then.
 - `.loop/` must not be tracked by git. Run `git ls-files .loop` — if it prints
   anything, STOP and tell the user to untrack it
   (`git rm -r --cached .loop && echo '.loop/' >> .gitignore`). `results.json`
   is rewritten on every stop, so a tracked `.loop/` leaves the tree dirty
   forever: the wrap-up diff is polluted and every unattended run afterwards
   refuses with "dirty tree". (An UNtracked `.loop/` needs nothing from you —
-  `arm-contract.sh` adds it to `.git/info/exclude` in Step 2.)
+  `arm-contract.sh` adds it to `.git/info/exclude` when Step 1 arms.)
 - Record the baseline ref: run `git rev-parse HEAD` and write it into
-  `.loop/state.md` as `Baseline: <hash>`. The final report's diff (Step 3 and
-  Wrap-up) is `git diff <baseline>..HEAD` — without a recorded baseline there
+  `.loop/state.md` as `Baseline: <hash>`. The final report's diff (see Wrap-up)
+  is `git diff <baseline>..HEAD` — without a recorded baseline there
   is nothing exact to diff against after multiple builder commits.
 
 Write a one-line task brief: goal, files involved, completion criteria.
@@ -81,8 +83,10 @@ armed the evidence-gate DENIES writes to a backlog carrying `| verify:` lines,
 so an attempt to tick one yourself is refused. If a box will not tick, the
 verify command is failing — fix the code, or the command, before the loop is
 armed. (A backlog with no `| verify:` commands at all is the older
-model-ticked shape: nothing runs and nothing is locked. Prefer verify
-commands — a box you can type is a claim, not a result.)
+model-ticked shape: nothing runs and nothing is locked. The lock is all-or-
+nothing per FILE, not per line — one `| verify:` line freezes every line in the
+file, ordered-list `1. [ ]` items included. Prefer verify commands — a box you
+can type is a claim, not a result.)
 
 ### Roadmap input (a document instead of a task)
 
@@ -119,7 +123,10 @@ schedules unattended-autoloop.sh to consume the remainder across fresh
 sessions.
 
 When looping a multi-item backlog, the checker for each round judges ONLY the
-current round's item — its target criterion plus the suite. The other global
+current round's item — its target criterion plus the project suite
+(`agents/loop-checker.md` defines what that means; it is not the same thing as
+the "full sweep" below, which is the run-everything command this file reserves
+for the final round). The other global
 criteria that belong to not-yet-built items are expected-red and are NOT that
 round's failure; otherwise round 1 would trip a stop rule (regression / no
 progress) on items 2..N that have not been built yet. Each item goes green in
@@ -148,8 +155,16 @@ loaded in this project):
   `.loop/active` exists) — the evidence-gate hook denies rewrites for the
   duration of the loop, because weakening a check to pass it is a red line.
   After the loop ends (`.loop/active` removed) the next contract may rewrite
-  it. A legitimate MID-loop contract change still needs a HUMAN, who clears
-  the lock with `LOOP_ENG_DISABLE_EVIDENCE_GATE=1`.
+  it. A legitimate MID-loop contract change still needs a HUMAN, and it takes
+  TWO steps, not one. `LOOP_ENG_DISABLE_EVIDENCE_GATE=1` clears only the write
+  gate. The hash-lock is a second, independent layer: `run-contract.sh` compares
+  `.loop/criteria.sha256` against the live file and, on a mismatch, exits 77
+  with `"error": "contract tampered"` on EVERY subsequent stop attempt — so an
+  edited-but-not-re-pinned contract can no longer go green at all, and the loop
+  can only end at a stop rule or a manual disarm. The human must re-run
+  `arm-contract.sh` afterwards to re-pin the hash. (The variable must also be in
+  the SESSION's environment — the hook is spawned by the harness, so a
+  `VAR=1 cmd` prefix on a Bash call does not reach it.)
 - Arm via the plugin's arm-contract.sh (NOT a bare `touch .loop/active`):
   `bash "${CLAUDE_PLUGIN_ROOT}/skills/loop-eng/scripts/arm-contract.sh"`.
   It pins the SHA-256 of criteria.tsv into `.loop/criteria.sha256`, creates
@@ -180,7 +195,7 @@ falls back to it when criteria.tsv is absent.)
    full sweeps caught nothing the fast subset would have missed).
 3. If the checker's report starts with `ALL GREEN`, that verdict is about THIS
    round's item, not about the loop. On a multi-item backlog the checker judges
-   only the current item (its criteria plus the suite) and lists the rest as
+   only the current item (its criteria plus the project suite) and lists the rest as
    EXPECTED-RED, so round 1 legitimately reports `ALL GREEN` while items 2..N
    have not been built — taking it as "the loop is done" would stop after one
    item and report a diff for a backlog barely started. So:
@@ -201,16 +216,21 @@ falls back to it when criteria.tsv is absent.)
        this round's failure — the same scoping rule the checker follows.
      - A `"malformed_lines"` field or an `"error"` field means the contract was
        only partly parsed or could not run at all. That is never a green round:
-       fix `.loop/criteria.tsv` — which needs a human, since the evidence-gate
-       locks it while armed (`LOOP_ENG_DISABLE_EVIDENCE_GATE=1`) — and say so.
+       fix `.loop/criteria.tsv` — which needs a human, and needs both halves of
+       the two-step above (`LOOP_ENG_DISABLE_EVIDENCE_GATE=1` to write, then
+       `arm-contract.sh` to re-pin the hash, or the next stop exits 77 as
+       tampered) — and say so.
    - the current item's backlog line is ticked by the run-contract call you just
      made, from its `| verify:` command's exit status — do not tick it yourself
      (the evidence-gate denies it). Read the refreshed `.loop/backlog.md`: if
      the line is still unchecked, its verify command did not pass, so the item is
      NOT done whatever the checker said — treat the round as FAILED and go to 1
-     with that command's failure. A backlog line carrying no `| verify:`
-     command is the older model-ticked shape; tick that one yourself, and say in
-     the wrap-up that it was ticked on a report rather than a run;
+     with that command's failure. A line carrying no `| verify:` command is the
+     older model-ticked shape, but you can only tick it when the WHOLE file is
+     that shape: the evidence-gate's lock is file-wide, so one `| verify:` line
+     anywhere freezes every line in the file and your tick is denied (exit 2).
+     In a mixed backlog, leave the line unticked and say in the wrap-up that it
+     carries no verify command and so was neither run nor ticked;
    - if any unfinished item remains and the round budget is not exhausted, go to
      1 with the next item;
    - only when no unfinished item remains (or there was no backlog at all) is the
@@ -274,8 +294,11 @@ running the contract's commands.
   finish. Announce "Cycle N/5" at the start of every round, counting every round
   of every item in one sequence.
 - Each round takes exactly ONE backlog item (micro-items may share a round, see
-  the triage rule above), and an item is finished when the checker reports
-  `ALL GREEN` for it, not when its first round ends.
+  the triage rule above). An item is finished when **run-contract ticks its
+  backlog line** — a checker reporting `ALL GREEN` for it is necessary but not
+  sufficient, and an unticked line means the item is NOT done whatever the
+  checker said (the ledger is decisive; see The loop). Either way, not when its
+  first round ends.
 - When the budget runs out with items unticked, stop per the escalation
   protocol and say which items are left. The checkboxes persist, so the user
   re-invokes `/autoloop` to continue, or schedules `unattended-autoloop.sh` to
@@ -297,7 +320,7 @@ safety:
   whole builder+checker+suite cycle across several one-liners.
 - For a genuinely trivial round (single file, < ~10 lines, a purely static
   verify — the same class that qualifies for batching), you MAY dispatch
-  loop-builder at a cheaper model tier via the Task tool's model parameter to
+  loop-builder at a cheaper model tier via the Agent tool's `model` parameter to
   cut the fixed overhead. Hard invariant: the checker's tier must be **>= the
   builder's tier** — never let a weaker model certify a stronger model's work,
   that inverts the maker/checker rigor the loop exists to provide. When in doubt
@@ -342,6 +365,12 @@ Whenever you stop on rules 2–6, the report MUST carry:
 - NEVER report success without a checker report saying ALL GREEN.
 - NEVER weaken, delete, or skip checks to reach ALL GREEN.
 - NEVER modify the checker's tool whitelist or bypass it.
+- NEVER write to the gate's inputs. The evidence-gate denies exactly these, and
+  the list is worth knowing because a denial costs you a round: the evidence
+  ledger `.loop/results.json` and `.loop/evidence/` (always), and — while the
+  loop is armed — `.loop/criteria.tsv`, `.loop/criteria.sha256`, the legacy
+  `.loop/verify.sh`, a `.loop/backlog.md` carrying any `| verify:` line, and
+  removing or moving `.loop/` as a whole.
 - The loop's output is a PROPOSAL for human review, not an accomplished fact —
   always end by showing the diff.
 
