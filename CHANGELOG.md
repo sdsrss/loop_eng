@@ -95,6 +95,32 @@ nightly it was rehearsing would have inherited that.
 
 Suite 967 → 1104 assertions, 13 suites, 0 failed; bash 3.2.57 leg green.
 
+### Live-install smoke
+
+Machine-verified against a real marketplace install of 0.20.0 (Claude Code
+2.1.278, headless, throwaway `CLAUDE_CONFIG_DIR`), with the live cache copies
+instrumented before the run — the gate's own markers, not a model's report.
+
+- **The copy under test is the one that ships.** `armed from
+  …/plugins/cache/loop-eng/loop-eng/**0.20.0**/skills/loop-eng/scripts/arm-contract.sh`,
+  and the evidence-gate marker carries
+  `root=…/plugins/cache/loop-eng/loop-eng/0.20.0` — so `CLAUDE_PLUGIN_ROOT`
+  reached the hook process and neither check was answered by the marketplace
+  clone.
+- **Evidence-gate**: `echo hello > .loop/evidence/smoke.log` denied, file absent
+  afterwards, one `EGDENY` marker.
+- **Stop-gate under a RED contract**: three blocks, and all three took the
+  contract exit (`SGBLOCK-contract` ×3 — not missing-runner, not dedup-replay,
+  not timeout), then `CEILING-RELEASE` allowed the fourth stop. Ledger:
+  `"generated_by": "run-contract.sh"`, `"all_green": false`.
+- **The control holds**: the same instrumentation under a full-green
+  `/loop-eng:autoloop` run left the marker file at **0 bytes**, with
+  `"all_green": true` and the gate lifting itself. An instrument that always
+  fires proves nothing; the silence under green is what makes the three blocks
+  mean something.
+- **Identity**: `git archive v0.20.0` vs a second, uninstrumented install
+  differs by exactly one line — `Only in …/0.20.0: .in_use`.
+
 ## 0.19.0 — 2026-09-21
 
 One refusal, and the documentation catching up with the machine. The refusal is
