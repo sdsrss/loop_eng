@@ -49,12 +49,31 @@ done
 # exec bit, and the hooks are always spawned as `bash "${CLAUDE_PLUGIN_ROOT}/..."`
 # by hooks.json — assert that contract so nobody "fixes" the hook modes instead
 # of the hooks.json command, which is what actually decides how they start.
+# Two things this scan needs that it did not have. It matched the literal
+# `"command": "` — one space, exactly — so reformatting hooks.json (what `jq -c`
+# or any JSON formatter produces) yielded ZERO iterations: measured on a copy,
+# test-packaging went 61 passed → 58 passed, 0 failed, suite still ALL GREEN,
+# while hooks.json still declared three command hooks. And nothing compared what
+# the scan found against what the file declares, so the drop was untraceable —
+# the same fail-closed guard this file already applies to the README scan at
+# :26-32, missing here.
+HOOKCMDS=$(grep -oE '"command"[[:space:]]*:[[:space:]]*"[^"]*"' hooks/hooks.json \
+             | sed -E 's/^"command"[[:space:]]*:[[:space:]]*"//; s/"$//')
+declared=$(grep -cE '"type"[[:space:]]*:[[:space:]]*"command"' hooks/hooks.json || true)
+found=$(printf '%s\n' "$HOOKCMDS" | grep -c '[^[:space:]]' || true)
+if [ "$declared" -eq 0 ]; then
+  FAIL=$((FAIL+1))
+  echo "  FAIL: hooks.json declares no command hooks — the scan's input has rotted" >&2
+else
+  assert_eq "$declared" "$found" "hooks.json: the command scan sees every declared command hook"
+fi
 while IFS= read -r hookcmd; do
+  [ -n "$hookcmd" ] || continue
   case "$hookcmd" in
     bash\ *) PASS=$((PASS+1)) ;;
     *) FAIL=$((FAIL+1)); echo "  FAIL: hooks.json command not spawned via bash: $hookcmd" >&2 ;;
   esac
-done < <(grep -o '"command": "[^"]*"' hooks/hooks.json | sed 's/"command": "//; s/"$//')
+done < <(printf '%s\n' "$HOOKCMDS")
 
 # --- prompt invariants the mechanism layer cannot enforce -------------------
 # The stop rules, the round budget and the failure-identity contract live only
@@ -170,7 +189,17 @@ assert_eq "" "$(printf '%s\n' "$CODE_VARS" | grep -c '^$' | grep -v '^0$')" "the
 
 # The layout block must name every tracked hook script. It named two of four.
 LAYOUT=$(sed -n '/^## Repository layout$/,/^## /p' README.md)
-for h in $(git ls-files 'hooks/*.sh'); do
+# Count first, like the bash-3.2 floor list two paragraphs down: a pathspec that
+# stops matching (a hooks/ rename, a move into a subdir) would otherwise delete
+# these assertions silently instead of failing.
+HOOK_SCRIPTS=$(git ls-files 'hooks/*.sh')
+hook_n=$(printf '%s\n' "$HOOK_SCRIPTS" | grep -c '[^[:space:]]' || true)
+if [ "$hook_n" -eq 0 ]; then
+  FAIL=$((FAIL+1)); echo "  FAIL: no tracked hooks/*.sh — the layout-block scan has no input" >&2
+else
+  PASS=$((PASS+1))
+fi
+for h in $HOOK_SCRIPTS; do
   case "$LAYOUT" in
     *"$(basename "$h")"*) PASS=$((PASS+1)) ;;
     *) FAIL=$((FAIL+1)); echo "  FAIL: README layout block does not name $h" >&2 ;;

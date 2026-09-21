@@ -18,7 +18,20 @@ assert_eq 0 $? "arm exits 0"
 assert_eq "1" "$([ -f .loop/active ] && echo 1)" "arm creates .loop/active"
 assert_eq "" "$([ -f .loop/gate-count ] && echo 1)" "arm clears stale gate-count"
 assert_eq "" "$([ -f .loop/gate-last ] && echo 1)" "arm clears the stale dedup marker with the counter"
-assert_eq "$(sha_of .loop/criteria.tsv)" "$(cut -d' ' -f1 < .loop/criteria.sha256)" "arm pins the correct sha256"
+# A host with NO SHA-256 tool makes both sides of this comparison empty —
+# `sha_of` (lib.sh) prints nothing, and arm-contract deliberately writes no
+# hash-lock there (asserted further down), so the `cut` yields nothing either.
+# Empty equalled empty and "arm pins the correct sha256" passed on a box where
+# nothing was pinned. Not fail-closed, because the lockless state has a
+# legitimate producer — arm-contract itself, by design, on a hashless box — so
+# the honest form is the announced skip this repo already uses at
+# test-stop-gate.sh:77-81.
+ARM_SHA=$(sha_of .loop/criteria.tsv)
+if [ -n "$ARM_SHA" ]; then
+  assert_eq "$ARM_SHA" "$(cut -d' ' -f1 < .loop/criteria.sha256)" "arm pins the correct sha256"
+else
+  echo "  SKIP: no SHA-256 tool — the hash-lock pin is not checkable here (1 assertion)" >&2
+fi
 
 # --- armed contract runs green through run-contract ---
 bash "$RUNNER"; assert_eq 0 $? "armed matching contract runs green"
@@ -387,7 +400,12 @@ mkdir -p customdir
 printf 'c1\tok\ttrue\n' > customdir/criteria.tsv
 LOOP_ENG_LOOP_DIR=customdir bash "$ARM" 2>/dev/null; assert_eq 0 $? "LOOP_ENG_LOOP_DIR: arm exits 0"
 assert_eq "1" "$([ -f customdir/active ] && echo 1)" "LOOP_ENG_LOOP_DIR: arm creates customdir/active"
-assert_eq "$(sha_of customdir/criteria.tsv)" "$(cut -d' ' -f1 < customdir/criteria.sha256)" "LOOP_ENG_LOOP_DIR: hash-lock pinned inside the custom dir"
+CUSTOM_SHA=$(sha_of customdir/criteria.tsv)   # same empty-equals-empty trap as above
+if [ -n "$CUSTOM_SHA" ]; then
+  assert_eq "$CUSTOM_SHA" "$(cut -d' ' -f1 < customdir/criteria.sha256)" "LOOP_ENG_LOOP_DIR: hash-lock pinned inside the custom dir"
+else
+  echo "  SKIP: no SHA-256 tool — the custom-dir hash-lock pin is not checkable here (1 assertion)" >&2
+fi
 assert_eq "" "$([ -f .loop/active ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loop/active NOT created"
 assert_eq "" "$([ -f .loop/criteria.sha256 ] && echo 1)" "LOOP_ENG_LOOP_DIR: default .loop/criteria.sha256 NOT created"
 rm -rf customdir
