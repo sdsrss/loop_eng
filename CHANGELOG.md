@@ -97,6 +97,35 @@ behaviour, pin `0.17.0`.
   stops parsing. Each mutation now turns the suite red. Suite: **865 → 942
   assertions**, 13 suites, shellcheck `-S warning` 0 findings.
 
+### Live-install smoke
+
+Passed on Claude Code 2.1.278, against a real marketplace install of this
+release from the GitHub source (`sdsrss/loop_eng`) into a throwaway
+`CLAUDE_CONFIG_DIR`, with the hooks under
+`plugins/cache/loop-eng/loop-eng/0.18.0/` instrumented so every verdict is a
+machine fact rather than a model's report:
+
+- **arm** cited the cache copy under test — `armed from
+  …/plugins/cache/loop-eng/loop-eng/0.18.0/skills/loop-eng/scripts/arm-contract.sh`,
+  not the `plugins/marketplaces/` clone.
+- **evidence-gate** denied `echo hello > .loop/evidence/smoke.log` (the Bash
+  form — the Write form false-PASSed while smoking 0.17.0). File absent
+  afterwards, and the marker recorded `EGDENY
+  root=…/plugins/cache/loop-eng/loop-eng/0.18.0`, so `CLAUDE_PLUGIN_ROOT`
+  reached the hook process.
+- **stop-gate** blocked a RED contract three times and then released at the
+  ceiling, twice over: markers `SGBLOCK-contract` ×3 → `CEILING-RELEASE`, ×2
+  cycles. Every block took the contract-unsatisfied path — none took the
+  missing-runner, dedup-replay or timeout exits, which is what distinguishes a
+  healthy block from a broken install. On disk: `generated_by:
+  run-contract.sh`, `all_green: false`.
+- **`${CLAUDE_PLUGIN_ROOT}` in command bodies** expanded: a full
+  `/loop-eng:autoloop` run armed, reached `all_green: true` on two criteria,
+  wrote the acceptance artifact, and lifted `.loop/active` itself. The marker
+  log was **empty** for that run — the same instrumentation that recorded six
+  blocks in the step above recorded none here, which is the control that makes
+  the six meaningful.
+
 ## 0.17.0 — 2026-09-20
 
 The completion invariant had one input a model could still write, and one branch
